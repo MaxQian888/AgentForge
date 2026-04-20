@@ -13,32 +13,32 @@ import (
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/react-go-quick-starter/server/internal/bridge"
-	"github.com/react-go-quick-starter/server/internal/config"
-	"github.com/react-go-quick-starter/server/internal/employee"
-	"github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	"github.com/react-go-quick-starter/server/internal/imcards"
-	"github.com/react-go-quick-starter/server/internal/knowledge"
-	"github.com/react-go-quick-starter/server/internal/knowledge/liveartifact"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
-	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	qianchuanads "github.com/react-go-quick-starter/server/plugins/qianchuan-ads"
-	"github.com/react-go-quick-starter/server/internal/role"
-	"github.com/react-go-quick-starter/server/internal/secrets"
-	"github.com/react-go-quick-starter/server/internal/service"
-	"github.com/react-go-quick-starter/server/internal/vcs"
-	ghimpl "github.com/react-go-quick-starter/server/internal/vcs/github"
-	"github.com/react-go-quick-starter/server/internal/vcs/gitea"
-	"github.com/react-go-quick-starter/server/internal/vcs/gitlab"
-	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
-	"github.com/react-go-quick-starter/server/internal/storage"
-	"github.com/react-go-quick-starter/server/internal/trigger"
-	"github.com/react-go-quick-starter/server/internal/version"
-	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
-	"github.com/react-go-quick-starter/server/internal/ws"
+	"github.com/agentforge/server/internal/bridge"
+	"github.com/agentforge/server/internal/config"
+	"github.com/agentforge/server/internal/employee"
+	"github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/handler"
+	"github.com/agentforge/server/internal/imcards"
+	"github.com/agentforge/server/internal/knowledge"
+	"github.com/agentforge/server/internal/knowledge/liveartifact"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
+	pluginruntime "github.com/agentforge/server/internal/plugin"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/role"
+	"github.com/agentforge/server/internal/secrets"
+	"github.com/agentforge/server/internal/service"
+	skillspkg "github.com/agentforge/server/internal/skills"
+	"github.com/agentforge/server/internal/storage"
+	"github.com/agentforge/server/internal/trigger"
+	"github.com/agentforge/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs/gitea"
+	ghimpl "github.com/agentforge/server/internal/vcs/github"
+	"github.com/agentforge/server/internal/vcs/gitlab"
+	"github.com/agentforge/server/internal/version"
+	"github.com/agentforge/server/internal/workflow/nodetypes"
+	"github.com/agentforge/server/internal/ws"
+	qianchuanads "github.com/agentforge/server/plugins/qianchuan-ads"
 )
 
 // wsHubAdapter bridges the eventbus.Publisher to the nodetypes.BroadcastHub
@@ -1258,13 +1258,13 @@ func RegisterRoutes(
 	employeeRunsH := handler.NewEmployeeRunsHandler(employeeRunsRepo)
 	protected.GET("/employees/:id/runs", employeeRunsH.List)
 
-		// Workflow templates
-		protected.GET("/workflow-templates", workflowH.ListTemplates)
-		protected.POST("/workflows/:id/publish-template", workflowH.PublishTemplate)
-		protected.POST("/workflow-templates/:id/duplicate", workflowH.DuplicateTemplate)
-		protected.POST("/workflow-templates/:id/clone", workflowH.CloneTemplate)
-		protected.POST("/workflow-templates/:id/execute", workflowH.ExecuteTemplate)
-		protected.DELETE("/workflow-templates/:id", workflowH.DeleteTemplate)
+	// Workflow templates
+	protected.GET("/workflow-templates", workflowH.ListTemplates)
+	protected.POST("/workflows/:id/publish-template", workflowH.PublishTemplate)
+	protected.POST("/workflow-templates/:id/duplicate", workflowH.DuplicateTemplate)
+	protected.POST("/workflow-templates/:id/clone", workflowH.CloneTemplate)
+	protected.POST("/workflow-templates/:id/execute", workflowH.ExecuteTemplate)
+	protected.DELETE("/workflow-templates/:id", workflowH.DeleteTemplate)
 
 	// Members (global)
 	protected.PUT("/members/:id", memberH.Update)

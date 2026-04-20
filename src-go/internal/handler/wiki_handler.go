@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/agentforge/server/internal/i18n"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/i18n"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type WikiHandler struct {

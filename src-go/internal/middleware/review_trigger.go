@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	appI18n "github.com/agentforge/server/internal/i18n"
+	"github.com/agentforge/server/internal/model"
 	"github.com/labstack/echo/v4"
-	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // ReviewTriggerAuthMiddleware accepts either a service token for GitHub workflows

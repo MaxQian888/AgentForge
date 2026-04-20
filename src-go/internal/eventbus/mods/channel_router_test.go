@@ -3,7 +3,8 @@ package mods
 import (
 	"context"
 	"testing"
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+
+	eb "github.com/agentforge/server/internal/eventbus"
 )
 
 func TestChannelRouter_TaskTarget_AddsChannels(t *testing.T) {

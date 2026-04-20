@@ -151,9 +151,9 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/repository"
-        "github.com/react-go-quick-starter/server/internal/repository/repotest"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/repository"
+        "github.com/agentforge/server/internal/repository/repotest"
     )
 
     func TestVCSWebhookEventsRepo_InsertDedup(t *testing.T) {
@@ -195,7 +195,7 @@
         "github.com/jackc/pgx/v5/pgconn"
         "github.com/jackc/pgx/v5/pgxpool"
 
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     var ErrVCSWebhookEventDuplicate = errors.New("vcs_webhook_event: duplicate (integration_id, event_id)")
@@ -252,7 +252,7 @@
         "testing"
 
         "github.com/labstack/echo/v4"
-        "github.com/react-go-quick-starter/server/internal/middleware"
+        "github.com/agentforge/server/internal/middleware"
     )
 
     func TestCaptureRawBody_StashesAndRestores(t *testing.T) {
@@ -333,8 +333,8 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/service"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/service"
     )
 
     type fakeReviewTrigger struct{ called bool; lastReq *model.TriggerReviewRequest }
@@ -393,7 +393,7 @@
 
         log "github.com/sirupsen/logrus"
 
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     var ErrPushHandlerNotImplemented = errors.New("vcs_webhook_router: push/synchronize handler is owned by Plan 2C")
@@ -514,10 +514,10 @@
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
 
-        "github.com/react-go-quick-starter/server/internal/handler"
-        "github.com/react-go-quick-starter/server/internal/middleware"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/repository"
+        "github.com/agentforge/server/internal/handler"
+        "github.com/agentforge/server/internal/middleware"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/repository"
     )
 
     type stubIntegrations struct{ integ *model.VCSIntegration; err error }
@@ -637,9 +637,9 @@
         "github.com/labstack/echo/v4"
         log "github.com/sirupsen/logrus"
 
-        "github.com/react-go-quick-starter/server/internal/middleware"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/repository"
+        "github.com/agentforge/server/internal/middleware"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/repository"
     )
 
     // Surfaces this handler depends on (all injected so tests can stub).
@@ -884,11 +884,11 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/eventbus"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/service"
-        "github.com/react-go-quick-starter/server/internal/vcs"
-        "github.com/react-go-quick-starter/server/internal/vcs/mock" // owned by Plan 2A
+        "github.com/agentforge/server/internal/eventbus"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/service"
+        "github.com/agentforge/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs/mock" // owned by Plan 2A
     )
 
     type stubReviews struct{ review *model.Review; findings []model.ReviewFinding }
@@ -984,9 +984,9 @@
         "github.com/google/uuid"
         log "github.com/sirupsen/logrus"
 
-        eb "github.com/react-go-quick-starter/server/internal/eventbus"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/vcs"
+        eb "github.com/agentforge/server/internal/eventbus"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/vcs"
     )
 
     const summaryBodyHardLimit = 50 * 1024 // 50KB safety cap; Trace A's "see full review at <url>" tail.
@@ -1289,9 +1289,9 @@
         "testing"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/repository/repotest"
-        "github.com/react-go-quick-starter/server/internal/service"
-        "github.com/react-go-quick-starter/server/internal/vcs/mock"
+        "github.com/agentforge/server/internal/repository/repotest"
+        "github.com/agentforge/server/internal/service"
+        "github.com/agentforge/server/internal/vcs/mock"
     )
 
     func TestTraceA_PROpened_EndToEnd(t *testing.T) {

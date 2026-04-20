@@ -18,8 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // builtInProjectTemplateRegistrar is the narrow contract used to upsert the
@@ -158,7 +158,7 @@ func starterAgileProjectTemplate() *model.ProjectTemplate {
 				DefinitionJSON: json.RawMessage(`{"nodes":[],"edges":[]}`),
 			},
 		},
-		TaskStatuses:           []model.ProjectTemplateTaskStatusSnapshot{},
+		TaskStatuses: []model.ProjectTemplateTaskStatusSnapshot{},
 		MemberRolePlaceholders: []model.ProjectTemplateMemberPlaceholder{
 			{Label: "Project Manager", SuggestedRole: model.ProjectRoleAdmin, Description: "Owns sprint planning and status."},
 			{Label: "Lead Engineer", SuggestedRole: model.ProjectRoleEditor, Description: "Owns the technical direction."},

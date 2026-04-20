@@ -11,18 +11,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/bridge"
+	"github.com/agentforge/server/internal/config"
+	"github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/server"
+	"github.com/agentforge/server/internal/service"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/bridge"
-	"github.com/react-go-quick-starter/server/internal/config"
-	"github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/server"
-	"github.com/react-go-quick-starter/server/internal/service"
-	"github.com/react-go-quick-starter/server/internal/ws"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -466,19 +466,19 @@ func TestRegisterRoutes_WikiRoutesPresent(t *testing.T) {
 
 	// Wiki routes have been replaced by unified /knowledge/assets routes.
 	expected := map[string]struct{}{
-		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets":                                {},
-		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets":                               {},
-		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id":                            {},
-		http.MethodPut + " /api/v1/projects/:pid/knowledge/assets/:id":                            {},
-		http.MethodDelete + " /api/v1/projects/:pid/knowledge/assets/:id":                         {},
-		http.MethodPatch + " /api/v1/projects/:pid/knowledge/assets/:id/move":                     {},
-		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id/versions":                   {},
-		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/versions":                  {},
-		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id/comments":                   {},
-		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/comments":                  {},
-		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/decompose-tasks":            {},
-		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/tree":                           {},
-		http.MethodGet + " /api/v1/projects/:pid/knowledge/search":                                {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets":                      {},
+		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets":                     {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id":                  {},
+		http.MethodPut + " /api/v1/projects/:pid/knowledge/assets/:id":                  {},
+		http.MethodDelete + " /api/v1/projects/:pid/knowledge/assets/:id":               {},
+		http.MethodPatch + " /api/v1/projects/:pid/knowledge/assets/:id/move":           {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id/versions":         {},
+		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/versions":        {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id/comments":         {},
+		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/comments":        {},
+		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/decompose-tasks": {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/tree":                 {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/search":                      {},
 	}
 
 	for _, route := range e.Routes() {
@@ -559,13 +559,13 @@ func TestRegisterRoutes_WorkflowTemplateRoutesPresent(t *testing.T) {
 	registerTestRoutes(e, cfg, authSvc, cache)
 
 	expected := map[string]struct{}{
-		http.MethodGet + " /api/v1/workflow-templates":                  {},
-		http.MethodPost + " /api/v1/workflows/:id/publish-template":     {},
-		http.MethodPost + " /api/v1/workflow-templates/:id/duplicate":   {},
-		http.MethodPost + " /api/v1/workflow-templates/:id/clone":       {},
-		http.MethodPost + " /api/v1/workflow-templates/:id/execute":     {},
-		http.MethodDelete + " /api/v1/workflow-templates/:id":           {},
-		http.MethodGet + " /api/v1/projects/:pid/workflow-reviews":      {},
+		http.MethodGet + " /api/v1/workflow-templates":                {},
+		http.MethodPost + " /api/v1/workflows/:id/publish-template":   {},
+		http.MethodPost + " /api/v1/workflow-templates/:id/duplicate": {},
+		http.MethodPost + " /api/v1/workflow-templates/:id/clone":     {},
+		http.MethodPost + " /api/v1/workflow-templates/:id/execute":   {},
+		http.MethodDelete + " /api/v1/workflow-templates/:id":         {},
+		http.MethodGet + " /api/v1/projects/:pid/workflow-reviews":    {},
 	}
 
 	for _, route := range e.Routes() {
@@ -587,15 +587,15 @@ func TestRegisterRoutes_MemoryRoutesPresent(t *testing.T) {
 	registerTestRoutes(e, cfg, authSvc, cache)
 
 	expected := map[string]struct{}{
-		http.MethodPost + " /api/v1/projects/:pid/memory":        {},
-		http.MethodGet + " /api/v1/projects/:pid/memory":         {},
-		http.MethodGet + " /api/v1/projects/:pid/memory/stats":   {},
-		http.MethodGet + " /api/v1/projects/:pid/memory/export":  {},
+		http.MethodPost + " /api/v1/projects/:pid/memory":             {},
+		http.MethodGet + " /api/v1/projects/:pid/memory":              {},
+		http.MethodGet + " /api/v1/projects/:pid/memory/stats":        {},
+		http.MethodGet + " /api/v1/projects/:pid/memory/export":       {},
 		http.MethodPost + " /api/v1/projects/:pid/memory/bulk-delete": {},
 		http.MethodPost + " /api/v1/projects/:pid/memory/cleanup":     {},
-		http.MethodGet + " /api/v1/projects/:pid/memory/:mid":    {},
-		http.MethodPatch + " /api/v1/projects/:pid/memory/:mid":  {},
-		http.MethodDelete + " /api/v1/projects/:pid/memory/:mid": {},
+		http.MethodGet + " /api/v1/projects/:pid/memory/:mid":         {},
+		http.MethodPatch + " /api/v1/projects/:pid/memory/:mid":       {},
+		http.MethodDelete + " /api/v1/projects/:pid/memory/:mid":      {},
 	}
 
 	for _, route := range e.Routes() {

@@ -25,8 +25,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 )
 
 // Sentinel errors returned by CRUDService. Handlers map these to the

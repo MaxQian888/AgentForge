@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // ScopeAssetProject is a sentinel the WS subscription router substitutes
@@ -51,7 +51,7 @@ func (p *CostSummaryProjector) RequiredRole() Role { return RoleEditor }
 // --- target_ref / view_opts shapes ---
 
 type costSummaryTargetRef struct {
-	Kind   string                 `json:"kind"`
+	Kind   string                  `json:"kind"`
 	Filter costSummaryTargetFilter `json:"filter"`
 }
 

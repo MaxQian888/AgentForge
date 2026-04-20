@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	eb "github.com/agentforge/server/internal/eventbus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
 )
 
 func TestValidate_Name(t *testing.T) {

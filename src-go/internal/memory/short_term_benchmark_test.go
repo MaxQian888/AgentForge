@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/memory"
+	"github.com/agentforge/server/internal/memory"
 )
 
 func BenchmarkShortTermMemoryStore(b *testing.B) {

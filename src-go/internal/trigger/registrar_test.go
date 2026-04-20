@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/employee"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/trigger"
+	"github.com/agentforge/server/internal/employee"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/trigger"
 )
 
 // ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ func TestRegistrar_SyncFromDefinition_PropagatesInputMappingAndIdempotency(t *te
 
 	nodes := []model.WorkflowNode{
 		makeNode("n1", model.NodeTypeTrigger, map[string]any{
-			"source": "schedule",
+			"source":   "schedule",
 			"schedule": map[string]any{"cron": "0 0 * * *"},
 			"input_mapping": map[string]any{
 				"task_id": "{{event.task_id}}",
@@ -472,8 +472,8 @@ type stubActingEmployeeGuard struct {
 	// key: employeeID. Rows belong to expectedProject; everything else is
 	// treated as cross-project. A zero-value expectedProject disables
 	// cross-project checks and only employee lookup succeeds/fails.
-	known          map[uuid.UUID]uuid.UUID // employeeID → projectID
-	archivedSet    map[uuid.UUID]struct{}
+	known       map[uuid.UUID]uuid.UUID // employeeID → projectID
+	archivedSet map[uuid.UUID]struct{}
 }
 
 func (s *stubActingEmployeeGuard) ValidateForProject(_ context.Context, employeeID uuid.UUID, projectID uuid.UUID) error {

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // Engine discriminators surfaced in the unified workflow-run view. These are
@@ -85,8 +85,8 @@ type UnifiedRunSummary struct {
 // handler layer parses URL parameters into this shape and the service layer
 // pushes each dimension to the engine-native repo before merging.
 type UnifiedRunListFilter struct {
-	Engine           string      // "" | "dag" | "plugin"
-	Statuses         []string    // canonical statuses; "" means no filter
+	Engine           string   // "" | "dag" | "plugin"
+	Statuses         []string // canonical statuses; "" means no filter
 	ActingEmployeeID *uuid.UUID
 	TriggeredByKind  string // "" | "trigger" | "manual" | "sub_workflow"
 	TriggerID        *uuid.UUID

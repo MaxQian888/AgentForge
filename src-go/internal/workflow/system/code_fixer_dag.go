@@ -5,8 +5,8 @@ package system
 import (
 	"encoding/json"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // TemplateCodeFixer is the stable name for the code_fixer DAG template.

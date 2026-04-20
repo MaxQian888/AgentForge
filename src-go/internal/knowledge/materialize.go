@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // MaterializeAsWiki converts an ingested_file asset into a wiki_page asset
@@ -82,8 +82,8 @@ func (s *KnowledgeAssetService) MaterializeAsWiki(
 	_ = s.assets.SoftDelete(ctx, assetID)
 
 	s.publishEvent(ctx, "knowledge.asset.created", newAsset.ProjectID.String(), map[string]any{
-		"assetId":         newAsset.ID.String(),
-		"kind":            string(model.KindWikiPage),
+		"assetId":          newAsset.ID.String(),
+		"kind":             string(model.KindWikiPage),
 		"materializedFrom": assetID.String(),
 	})
 

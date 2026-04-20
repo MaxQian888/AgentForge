@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/agentforge/server/internal/i18n"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/i18n"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type ReviewService interface {

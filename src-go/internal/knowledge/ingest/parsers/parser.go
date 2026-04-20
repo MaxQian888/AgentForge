@@ -6,7 +6,7 @@ package parsers
 import (
 	"io"
 
-	"github.com/react-go-quick-starter/server/internal/document"
+	"github.com/agentforge/server/internal/document"
 )
 
 // TextChunk re-exports document.TextChunk for consumers of this package.

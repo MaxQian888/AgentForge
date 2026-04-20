@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/plugins/qianchuan-ads/strategy"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/strategy"
 	"gorm.io/gorm"
 )
 

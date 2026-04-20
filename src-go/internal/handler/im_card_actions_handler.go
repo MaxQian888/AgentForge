@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/agentforge/server/internal/imcards"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/imcards"
 )
 
 type IMCardActionsHandler struct{ Router *imcards.Router }

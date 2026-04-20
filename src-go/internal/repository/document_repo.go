@@ -5,21 +5,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 	"gorm.io/gorm"
 )
 
 // documentRecord is the GORM persistence model for the documents table.
 type documentRecord struct {
-	ID         string `gorm:"column:id;primaryKey"`
-	ProjectID  string `gorm:"column:project_id"`
-	Name       string `gorm:"column:name"`
-	FileType   string `gorm:"column:file_type"`
-	FileSize   int64  `gorm:"column:file_size"`
-	StorageKey string `gorm:"column:storage_key"`
-	Status     string `gorm:"column:status"`
-	ChunkCount int    `gorm:"column:chunk_count"`
-	Error      string `gorm:"column:error"`
+	ID         string    `gorm:"column:id;primaryKey"`
+	ProjectID  string    `gorm:"column:project_id"`
+	Name       string    `gorm:"column:name"`
+	FileType   string    `gorm:"column:file_type"`
+	FileSize   int64     `gorm:"column:file_size"`
+	StorageKey string    `gorm:"column:storage_key"`
+	Status     string    `gorm:"column:status"`
+	ChunkCount int       `gorm:"column:chunk_count"`
+	Error      string    `gorm:"column:error"`
 	CreatedAt  time.Time `gorm:"column:created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at"`
 }

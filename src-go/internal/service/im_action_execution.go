@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	log "github.com/sirupsen/logrus"
 )
 

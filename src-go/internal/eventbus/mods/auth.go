@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+
+	eb "github.com/agentforge/server/internal/eventbus"
 )
 
 type Auth struct{}

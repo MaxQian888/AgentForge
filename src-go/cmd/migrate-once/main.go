@@ -5,11 +5,11 @@ import (
 	"log"
 	"os"
 
+	"github.com/agentforge/server/internal/config"
+	migrationsfs "github.com/agentforge/server/migrations"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	"github.com/react-go-quick-starter/server/internal/config"
-	migrationsfs "github.com/react-go-quick-starter/server/migrations"
 )
 
 func main() {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
 )
 
 // WorkflowRunEventEmitter publishes canonical workflow.run.* events alongside

@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/workflow/nodetypes"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 )
 
 // ── Fakes for the resume-path tests ─────────────────────────────────────
 
 type fakeExecRepo struct {
-	byID     map[uuid.UUID]*model.WorkflowExecution
-	updated  []string // log of status updates: "<execID>:<status>"
+	byID      map[uuid.UUID]*model.WorkflowExecution
+	updated   []string // log of status updates: "<execID>:<status>"
 	datastore map[uuid.UUID]json.RawMessage
 }
 

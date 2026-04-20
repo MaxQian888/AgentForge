@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	"github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/binding"
+	"github.com/agentforge/server/internal/adsplatform"
+	"github.com/agentforge/server/internal/eventbus"
+	qianchuanbinding "github.com/agentforge/server/plugins/qianchuan-ads/binding"
 )
 
 // systemActor is used for secret rotations performed by the background refresher.
@@ -49,7 +49,7 @@ type Refresher struct {
 	TickEvery   time.Duration
 	EarlyWindow time.Duration
 
-	failures   sync.Map // uuid.UUID -> int (consecutive transient failure counter)
+	failures sync.Map // uuid.UUID -> int (consecutive transient failure counter)
 }
 
 // Run blocks until ctx is cancelled, ticking every TickEvery.

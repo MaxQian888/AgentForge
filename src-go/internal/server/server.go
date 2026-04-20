@@ -4,14 +4,14 @@ package server
 import (
 	"time"
 
+	"github.com/agentforge/server/internal/config"
+	"github.com/agentforge/server/internal/handler"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	echolog "github.com/labstack/gommon/log"
-	"github.com/react-go-quick-starter/server/internal/config"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/repository"
 	log "github.com/sirupsen/logrus"
 )
 

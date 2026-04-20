@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/vcs"
+	eb "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/vcs"
 )
 
 const summaryBodyHardLimit = 50 * 1024 // 50KB safety cap

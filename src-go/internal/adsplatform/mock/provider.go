@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
+	"github.com/agentforge/server/internal/adsplatform"
 )
 
 // Call is one recorded Provider invocation.

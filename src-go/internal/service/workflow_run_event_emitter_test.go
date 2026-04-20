@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 type capturingEventPublisher struct {

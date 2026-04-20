@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 // VCSIntegrationRepo persists model.VCSIntegration rows in

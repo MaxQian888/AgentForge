@@ -5,7 +5,7 @@ const path = require("node:path");
 
 const { getRepoRoot } = require("./plugin-dev-targets.js");
 
-const DEFAULT_MODULE_PATH = "github.com/react-go-quick-starter/server";
+const DEFAULT_MODULE_PATH = "github.com/agentforge/server";
 
 function parseArgs(argv = process.argv.slice(2)) {
   const parsed = {};

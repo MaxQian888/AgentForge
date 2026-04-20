@@ -3,8 +3,8 @@ package handler
 import (
 	"net/http"
 
+	"github.com/agentforge/server/internal/service"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type BridgeHealthStatusReader interface {

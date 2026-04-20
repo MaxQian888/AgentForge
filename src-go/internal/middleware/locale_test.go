@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	appI18n "github.com/agentforge/server/internal/i18n"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
 	"github.com/labstack/echo/v4"
-	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 )
 
 func TestLocaleMiddleware_DefaultsToEnglishWhenHeaderMissing(t *testing.T) {

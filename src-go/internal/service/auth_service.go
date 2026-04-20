@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/config"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/config"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -269,8 +269,8 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, current
 
 // Sentinel errors
 var (
-	ErrEmailAlreadyExists        = errors.New("email already exists")
-	ErrInvalidCredentials        = errors.New("invalid email or password")
-	ErrInvalidToken              = errors.New("invalid or expired token")
-	ErrCurrentPasswordIncorrect  = errors.New("current password is incorrect")
+	ErrEmailAlreadyExists       = errors.New("email already exists")
+	ErrInvalidCredentials       = errors.New("invalid email or password")
+	ErrInvalidToken             = errors.New("invalid or expired token")
+	ErrCurrentPasswordIncorrect = errors.New("current password is incorrect")
 )

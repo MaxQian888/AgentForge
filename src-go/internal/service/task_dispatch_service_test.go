@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	rolepkg "github.com/agentforge/server/internal/role"
+	"github.com/agentforge/server/internal/service"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
-	"github.com/react-go-quick-starter/server/internal/service"
-	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 type mockDispatchTaskRepo struct {
@@ -129,22 +129,22 @@ func (m *mockDispatchQueueWriter) QueueAgentAdmission(_ context.Context, input s
 		return m.entry, nil
 	}
 	return &model.AgentPoolQueueEntry{
-		EntryID:   uuid.NewString(),
-		ProjectID: input.ProjectID.String(),
-		TaskID:    input.TaskID.String(),
-		MemberID:  input.MemberID.String(),
-		Status:    model.AgentPoolQueueStatusQueued,
-		Reason:    "agent pool is at capacity",
-		Runtime:   input.Runtime,
-		Provider:  input.Provider,
-		Model:     input.Model,
-		RoleID:    input.RoleID,
-		BudgetUSD: input.BudgetUSD,
+		EntryID:             uuid.NewString(),
+		ProjectID:           input.ProjectID.String(),
+		TaskID:              input.TaskID.String(),
+		MemberID:            input.MemberID.String(),
+		Status:              model.AgentPoolQueueStatusQueued,
+		Reason:              "agent pool is at capacity",
+		Runtime:             input.Runtime,
+		Provider:            input.Provider,
+		Model:               input.Model,
+		RoleID:              input.RoleID,
+		BudgetUSD:           input.BudgetUSD,
 		GuardrailType:       input.GuardrailType,
 		GuardrailScope:      input.GuardrailScope,
 		RecoveryDisposition: input.RecoveryDisposition,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
 	}, nil
 }
 
@@ -836,4 +836,3 @@ func TestTaskDispatchService_SpawnBlocksWhenTaskAlreadyHasPausedRunInPreflight(t
 		t.Fatalf("runtime spawn calls = %d, want 0", runtime.spawnCalls)
 	}
 }
-

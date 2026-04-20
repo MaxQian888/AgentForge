@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/agentforge/server/internal/workflow/nodetypes"
+	"github.com/agentforge/server/plugins/qianchuan-ads/strategy"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/strategy"
-	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 )
 
 // qianchuanStrategyRepo is the narrow seam the service consumes. Defined here
@@ -173,17 +173,17 @@ func (s *QianchuanStrategyService) List(ctx context.Context, projectID uuid.UUID
 // TestRunResult is the dry-run output: the actions a single tick would emit
 // for the given snapshot, plus any rules that fired.
 type TestRunResult struct {
-	FiredRules []string                  `json:"fired_rules"`
-	Actions    []TestRunResolvedAction   `json:"actions"`
+	FiredRules []string                `json:"fired_rules"`
+	Actions    []TestRunResolvedAction `json:"actions"`
 }
 
 // TestRunResolvedAction mirrors strategy.ParsedAction with the ad_id_expr
 // resolved against the snapshot for FE display.
 type TestRunResolvedAction struct {
-	Rule     string         `json:"rule"`
-	Type     string         `json:"type"`
-	AdID     string         `json:"ad_id,omitempty"`
-	Params   map[string]any `json:"params"`
+	Rule   string         `json:"rule"`
+	Type   string         `json:"type"`
+	AdID   string         `json:"ad_id,omitempty"`
+	Params map[string]any `json:"params"`
 }
 
 // TestRun evaluates each rule's condition against the supplied snapshot and

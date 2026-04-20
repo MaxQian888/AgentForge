@@ -3,7 +3,7 @@ package role
 import (
 	"strings"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 func BuildExecutionProfile(manifest *Manifest, opts ...ExecutionProfileOption) *ExecutionProfile {

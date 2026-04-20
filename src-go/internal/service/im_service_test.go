@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 func TestIMService_SendCompatibilityPayloadIncludesReplyTarget(t *testing.T) {

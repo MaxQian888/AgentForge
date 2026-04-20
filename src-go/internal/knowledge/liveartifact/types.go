@@ -12,8 +12,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // LiveArtifactKind discriminates a live-artifact block by the kind of
@@ -22,10 +22,10 @@ import (
 type LiveArtifactKind string
 
 const (
-	KindAgentRun     LiveArtifactKind = "agent_run"
-	KindCostSummary  LiveArtifactKind = "cost_summary"
-	KindReview       LiveArtifactKind = "review"
-	KindTaskGroup    LiveArtifactKind = "task_group"
+	KindAgentRun    LiveArtifactKind = "agent_run"
+	KindCostSummary LiveArtifactKind = "cost_summary"
+	KindReview      LiveArtifactKind = "review"
+	KindTaskGroup   LiveArtifactKind = "task_group"
 )
 
 // ProjectionStatus expresses whether a projection succeeded and, if not,

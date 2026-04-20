@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/agentforge/server/internal/knowledge"
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/knowledge"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // --- stub implementations ---
@@ -83,14 +83,16 @@ func (s *stubAssetRepo) Descendants(_ context.Context, id uuid.UUID) ([]uuid.UUI
 
 type stubVersionRepo struct{}
 
-func (s stubVersionRepo) Create(_ context.Context, v *model.AssetVersion) error  { return nil }
+func (s stubVersionRepo) Create(_ context.Context, v *model.AssetVersion) error { return nil }
 func (s stubVersionRepo) ListByAssetID(_ context.Context, id uuid.UUID) ([]*model.AssetVersion, error) {
 	return nil, nil
 }
 func (s stubVersionRepo) GetByID(_ context.Context, id uuid.UUID) (*model.AssetVersion, error) {
 	return nil, knowledge.ErrVersionNotFound
 }
-func (s stubVersionRepo) MaxVersionNumber(_ context.Context, id uuid.UUID) (int, error) { return 0, nil }
+func (s stubVersionRepo) MaxVersionNumber(_ context.Context, id uuid.UUID) (int, error) {
+	return 0, nil
+}
 
 type stubCommentRepo struct{}
 

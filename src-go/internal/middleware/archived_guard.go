@@ -3,7 +3,7 @@
 //
 // Layer ordering (intentional, asserted by routes_wiring_test):
 //
-//     JWT → Project → RBAC → ArchivedGuard → handler
+//	JWT → Project → RBAC → ArchivedGuard → handler
 //
 // RBAC answers "does this caller have the right role". ArchivedGuard answers
 // "is this project currently writable". Separating them keeps the role matrix
@@ -25,10 +25,10 @@ import (
 	"strings"
 	"time"
 
+	appI18n "github.com/agentforge/server/internal/i18n"
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // archivedReadOnlyWhitelist is the small, explicitly-enumerated set of
@@ -36,16 +36,16 @@ import (
 // allowed implicitly by the suffix check and is NOT listed here.
 //
 // Rationale for each entry:
-//   * project.unarchive : owner needs to flip the project back to active
-//   * project.delete    : owner needs to physically delete the archived project
-//   * audit.read        : covered by the suffix check below, but noted
-//   * settings.read     : covered by the suffix check
+//   - project.unarchive : owner needs to flip the project back to active
+//   - project.delete    : owner needs to physically delete the archived project
+//   - audit.read        : covered by the suffix check below, but noted
+//   - settings.read     : covered by the suffix check
 //
 // If you add a new write-class action that must work on archived projects,
 // it belongs here — NOT as a RBAC matrix tweak.
 var archivedReadOnlyWhitelist = map[ActionID]struct{}{
 	ActionProjectUnarchive: {},
-	ActionProjectDelete:      {},
+	ActionProjectDelete:    {},
 }
 
 // ActionProjectArchive / ActionProjectUnarchive are declared here to avoid a

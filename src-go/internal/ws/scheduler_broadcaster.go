@@ -3,7 +3,7 @@ package ws
 import (
 	"encoding/json"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 type SchedulerEventBroadcaster struct {

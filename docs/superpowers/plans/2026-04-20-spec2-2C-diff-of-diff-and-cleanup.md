@@ -49,7 +49,7 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     func TestReviewRecord_ParentReviewIDRoundTrip(t *testing.T) {
@@ -110,7 +110,7 @@
         "context"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     func TestBuildIncrementalPlan_ScopesPluginsWithoutFilePatternsToChangedFiles(t *testing.T) {

@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 	"gopkg.in/yaml.v3"
 )
 

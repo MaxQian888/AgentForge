@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 type imControlPlaneStub struct {

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/handler"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 type dispatchAttemptReaderStub struct {
@@ -158,13 +158,13 @@ func TestDispatchStatsHandler_GetSupportsTimeWindowAndPromotionMetrics(t *testin
 	}
 
 	type responseShape struct {
-		Outcomes                 map[string]int `json:"outcomes"`
-		BlockedReasons           map[string]int `json:"blockedReasons"`
-		QueueDepth               int            `json:"queueDepth"`
-		CancelledWithoutPromotion int           `json:"cancelledWithoutPromotion"`
-		TerminalPromotionFailures int           `json:"terminalPromotionFailures"`
-		PromotionSuccessRate     *float64       `json:"promotionSuccessRate"`
-		MedianWaitSeconds        *float64       `json:"medianWaitSeconds"`
+		Outcomes                  map[string]int `json:"outcomes"`
+		BlockedReasons            map[string]int `json:"blockedReasons"`
+		QueueDepth                int            `json:"queueDepth"`
+		CancelledWithoutPromotion int            `json:"cancelledWithoutPromotion"`
+		TerminalPromotionFailures int            `json:"terminalPromotionFailures"`
+		PromotionSuccessRate      *float64       `json:"promotionSuccessRate"`
+		MedianWaitSeconds         *float64       `json:"medianWaitSeconds"`
 	}
 
 	var response responseShape

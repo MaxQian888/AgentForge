@@ -3,7 +3,7 @@ package repository
 import (
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 func TestWorkflowTriggerRecord_CreatedViaAndDisplayMetadata(t *testing.T) {

@@ -3,8 +3,8 @@ package database_test
 import (
 	"testing"
 
+	"github.com/agentforge/server/pkg/database"
 	"github.com/glebarez/sqlite"
-	"github.com/react-go-quick-starter/server/pkg/database"
 	"gorm.io/gorm"
 )
 

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // --- fakes ---
@@ -103,8 +103,8 @@ func (a *fakeCustomFields) Import(_ context.Context, _ uuid.UUID, v []model.Proj
 }
 
 type fakeAutomations struct {
-	exported []model.ProjectTemplateAutomationSnapshot
-	imported []model.ProjectTemplateAutomationSnapshot
+	exported  []model.ProjectTemplateAutomationSnapshot
+	imported  []model.ProjectTemplateAutomationSnapshot
 	importErr error
 }
 

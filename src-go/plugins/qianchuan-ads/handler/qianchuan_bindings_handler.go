@@ -8,10 +8,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	"github.com/react-go-quick-starter/server/internal/i18n"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/binding"
+	"github.com/agentforge/server/internal/adsplatform"
+	"github.com/agentforge/server/internal/i18n"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	qianchuanbinding "github.com/agentforge/server/plugins/qianchuan-ads/binding"
 )
 
 // QianchuanBindingsService is the narrow contract the handler depends on.

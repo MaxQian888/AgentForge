@@ -8,10 +8,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/pkg/database"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/pkg/database"
 )
 
 // Note: TestMain is defined in user_repo_integration_test.go and runs
@@ -492,24 +492,24 @@ func TestWorkflowTriggerRepository_Integration_UpsertCanonicalizesJSONOrder(t *t
 	repo := repository.NewWorkflowTriggerRepository(db)
 
 	t1 := &model.WorkflowTrigger{
-		WorkflowID:    &workflowID,
-		ProjectID:     projectID,
-		Source:        model.TriggerSourceIM,
-		Config:        []byte(`{"b":1,"a":2}`),
-		InputMapping:  []byte(`{}`),
-		Enabled:       true,
+		WorkflowID:   &workflowID,
+		ProjectID:    projectID,
+		Source:       model.TriggerSourceIM,
+		Config:       []byte(`{"b":1,"a":2}`),
+		InputMapping: []byte(`{}`),
+		Enabled:      true,
 	}
 	if err := repo.Upsert(ctx, t1); err != nil {
 		t.Fatalf("Upsert 1: %v", err)
 	}
 
 	t2 := &model.WorkflowTrigger{
-		WorkflowID:    &workflowID,
-		ProjectID:     projectID,
-		Source:        model.TriggerSourceIM,
-		Config:        []byte(`{"a":2,"b":1}`), // same logical JSON, different byte order
-		InputMapping:  []byte(`{}`),
-		Enabled:       true,
+		WorkflowID:   &workflowID,
+		ProjectID:    projectID,
+		Source:       model.TriggerSourceIM,
+		Config:       []byte(`{"a":2,"b":1}`), // same logical JSON, different byte order
+		InputMapping: []byte(`{}`),
+		Enabled:      true,
 	}
 	if err := repo.Upsert(ctx, t2); err != nil {
 		t.Fatalf("Upsert 2: %v", err)

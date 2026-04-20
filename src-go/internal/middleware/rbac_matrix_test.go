@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // fakeMemberLookup is a hand-rolled stub keyed on (userID, projectID).
@@ -73,10 +73,10 @@ func TestMatrix_AllActionsExportedAreInMatrix(t *testing.T) {
 // task 2.2: at least one assertion per role × representative ActionID class.
 func TestAuthorize_RoleSemantics(t *testing.T) {
 	type tc struct {
-		name      string
+		name       string
 		callerRole string
-		action    ActionID
-		wantErr   error
+		action     ActionID
+		wantErr    error
 	}
 	cases := []tc{
 		// owner allowed everywhere

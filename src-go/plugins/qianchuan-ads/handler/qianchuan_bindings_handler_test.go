@@ -13,9 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	handler "github.com/react-go-quick-starter/server/plugins/qianchuan-ads/handler"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/binding"
+	"github.com/agentforge/server/internal/adsplatform"
+	qianchuanbinding "github.com/agentforge/server/plugins/qianchuan-ads/binding"
+	handler "github.com/agentforge/server/plugins/qianchuan-ads/handler"
 )
 
 // fakeBindingsSvc is an in-memory implementation of handler.QianchuanBindingsService

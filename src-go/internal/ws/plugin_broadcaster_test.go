@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 func TestPluginEventBroadcaster_EmitsLifecycleEvent(t *testing.T) {

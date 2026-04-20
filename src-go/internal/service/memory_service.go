@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // MemoryRepository defines persistence for agent memories.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+	eb "github.com/agentforge/server/internal/eventbus"
 	log "github.com/sirupsen/logrus"
 )
 

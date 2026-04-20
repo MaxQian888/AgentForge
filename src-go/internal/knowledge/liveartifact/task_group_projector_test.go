@@ -7,19 +7,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // stubTaskListReader serves canned List results and records the last
 // query it received. Results may be swapped mid-test by reassigning
 // tasks/total fields.
 type stubTaskListReader struct {
-	tasks    []*model.Task
-	total    int
-	err      error
-	lastQ    model.TaskListQuery
-	callCnt  int
+	tasks   []*model.Task
+	total   int
+	err     error
+	lastQ   model.TaskListQuery
+	callCnt int
 }
 
 func (s *stubTaskListReader) List(_ context.Context, _ uuid.UUID, q model.TaskListQuery) ([]*model.Task, int, error) {

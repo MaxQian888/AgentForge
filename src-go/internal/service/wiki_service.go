@@ -8,24 +8,24 @@ import (
 	"strings"
 	"time"
 
+	eventbus "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/ws"
+	"github.com/agentforge/server/pkg/database"
 	"github.com/google/uuid"
-	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/ws"
-	"github.com/react-go-quick-starter/server/pkg/database"
 	"gorm.io/gorm"
 )
 
 var (
-	ErrWikiSpaceNotFound   = errors.New("wiki space not found")
-	ErrWikiPageNotFound    = errors.New("wiki page not found")
-	ErrWikiPageConflict    = errors.New("wiki page conflict")
-	ErrWikiCircularMove    = errors.New("wiki circular move")
-	ErrWikiTemplateNotFound = errors.New("wiki template not found")
+	ErrWikiSpaceNotFound     = errors.New("wiki space not found")
+	ErrWikiPageNotFound      = errors.New("wiki page not found")
+	ErrWikiPageConflict      = errors.New("wiki page conflict")
+	ErrWikiCircularMove      = errors.New("wiki circular move")
+	ErrWikiTemplateNotFound  = errors.New("wiki template not found")
 	ErrWikiTemplateImmutable = errors.New("wiki template is immutable")
-	ErrPageVersionNotFound = errors.New("page version not found")
-	ErrPageCommentNotFound = errors.New("page comment not found")
+	ErrPageVersionNotFound   = errors.New("page version not found")
+	ErrPageCommentNotFound   = errors.New("page comment not found")
 )
 
 type wikiSpaceRepository interface {
@@ -75,7 +75,6 @@ type pageRecentAccessRepository interface {
 	Touch(ctx context.Context, pageID, userID uuid.UUID, accessedAt time.Time) error
 	ListByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*model.PageRecentAccess, error)
 }
-
 
 type wikiNotificationCreator interface {
 	Create(ctx context.Context, targetID uuid.UUID, ntype, title, body, data string) (*model.Notification, error)

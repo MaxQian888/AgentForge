@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/ws"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 type fakeBridgeProcessor struct {

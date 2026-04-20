@@ -14,10 +14,10 @@ import (
 	"github.com/labstack/echo/v4"
 	log "github.com/sirupsen/logrus"
 
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/service"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/service"
 )
 
 // --- Dependency interfaces for VCS webhook handler (all injected) ---
@@ -69,8 +69,10 @@ func NewVCSWebhookHandler(
 
 type repoRefPayload struct {
 	Repository struct {
-		Owner struct{ Login string `json:"login"` } `json:"owner"`
-		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+		Name string `json:"name"`
 	} `json:"repository"`
 }
 
@@ -175,11 +177,11 @@ func (h *VCSWebhookHandler) recordSignatureInvalid(ctx context.Context, integID,
 		return
 	}
 	_ = h.audit.RecordEvent(ctx, &model.AuditEvent{
-		ActionID:     "vcs.webhook_signature_invalid",
-		ResourceType: model.AuditResourceTypeVCSIntegration,
-		ResourceID:   integID,
+		ActionID:            "vcs.webhook_signature_invalid",
+		ResourceType:        model.AuditResourceTypeVCSIntegration,
+		ResourceID:          integID,
 		PayloadSnapshotJSON: mustJSON(map[string]any{"reason": reason}),
-		SystemInitiated: true,
+		SystemInitiated:     true,
 	})
 }
 
@@ -188,11 +190,11 @@ func (h *VCSWebhookHandler) recordReceived(ctx context.Context, integID, eventTy
 		return
 	}
 	_ = h.audit.RecordEvent(ctx, &model.AuditEvent{
-		ActionID:     "vcs.webhook_received",
-		ResourceType: model.AuditResourceTypeVCSIntegration,
-		ResourceID:   integID,
+		ActionID:            "vcs.webhook_received",
+		ResourceType:        model.AuditResourceTypeVCSIntegration,
+		ResourceID:          integID,
 		PayloadSnapshotJSON: mustJSON(map[string]any{"event_type": eventType, "delivery_id": deliveryID}),
-		SystemInitiated: true,
+		SystemInitiated:     true,
 	})
 }
 

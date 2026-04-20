@@ -140,9 +140,9 @@ function getLdflags(repoRoot) {
   return [
     "-s",
     "-w",
-    `-X github.com/react-go-quick-starter/server/internal/version.Version=${version}`,
-    `-X github.com/react-go-quick-starter/server/internal/version.Commit=${commit}`,
-    `-X github.com/react-go-quick-starter/server/internal/version.BuildDate=${buildDate}`,
+    `-X github.com/agentforge/server/internal/version.Version=${version}`,
+    `-X github.com/agentforge/server/internal/version.Commit=${commit}`,
+    `-X github.com/agentforge/server/internal/version.BuildDate=${buildDate}`,
   ].join(" ");
 }
 

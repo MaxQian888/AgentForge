@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/service"
+	"github.com/agentforge/server/internal/service"
 )
 
 func TestHTTPRemoteRegistryClientFetchCatalog(t *testing.T) {

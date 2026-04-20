@@ -10,7 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/react-go-quick-starter/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs"
 )
 
 // Call captures one provider invocation.

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 func TestSeedCodeFixer_RegistersDefinition(t *testing.T) {
@@ -47,14 +47,14 @@ func TestSeedCodeFixer_NodeTypesMatchSpec(t *testing.T) {
 
 	expectations := map[string]string{
 		"trigger":            model.NodeTypeTrigger,
-		"fetch_file":        model.NodeTypeHTTPCall,
-		"has_prebaked":      model.NodeTypeCondition,
-		"generate":          model.NodeTypeLLMAgent,
-		"validate":          model.NodeTypeFunction,
-		"decide":            model.NodeTypeCondition,
-		"execute":           model.NodeTypeHTTPCall,
+		"fetch_file":         model.NodeTypeHTTPCall,
+		"has_prebaked":       model.NodeTypeCondition,
+		"generate":           model.NodeTypeLLMAgent,
+		"validate":           model.NodeTypeFunction,
+		"decide":             model.NodeTypeCondition,
+		"execute":            model.NodeTypeHTTPCall,
 		"update_original_pr": model.NodeTypeHTTPCall,
-		"card":              model.NodeTypeIMSend,
+		"card":               model.NodeTypeIMSend,
 	}
 
 	for nodeID, wantType := range expectations {

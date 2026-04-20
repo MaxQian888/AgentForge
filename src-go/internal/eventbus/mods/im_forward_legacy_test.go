@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+	eb "github.com/agentforge/server/internal/eventbus"
 	"github.com/stretchr/testify/assert"
 )
 

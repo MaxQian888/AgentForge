@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 func TestValidateTransition(t *testing.T) {
@@ -93,7 +93,7 @@ func TestTaskToDTOWithOptionalFields(t *testing.T) {
 		AssigneeID:     &assigneeID,
 		AssigneeType:   "agent",
 		ReporterID:     &reporterID,
-			Labels:         []string{"backend", "tests", "execution:agent"},
+		Labels:         []string{"backend", "tests", "execution:agent"},
 		BudgetUsd:      12.5,
 		SpentUsd:       8.25,
 		AgentBranch:    "feat/tests",

@@ -4,11 +4,11 @@
 //
 // The service wraps the status flip + cascade side effects:
 //
-//   * Archive: flip status to 'archived'; best-effort cancel in-flight team runs,
+//   - Archive: flip status to 'archived'; best-effort cancel in-flight team runs,
 //     in-flight workflow executions; best-effort revoke pending invitations
 //     (when an invitation service is wired — currently unwired Wave 2 work).
-//   * Unarchive: flip back to 'active'. Does NOT auto-resume cancelled runs.
-//   * DeleteArchived: physical delete; rejects non-archived projects with a
+//   - Unarchive: flip back to 'active'. Does NOT auto-resume cancelled runs.
+//   - DeleteArchived: physical delete; rejects non-archived projects with a
 //     domain error so the handler can return 409 project_must_be_archived.
 //
 // Side-effects are intentionally best-effort: the design doc (§3) makes the
@@ -23,20 +23,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 	log "github.com/sirupsen/logrus"
 )
 
 // Sentinel errors returned by the project lifecycle service. Handlers map
 // these to HTTP status codes; internal callers can errors.Is against them.
 var (
-	ErrProjectNotFound          = errors.New("project lifecycle: project not found")
-	ErrProjectAlreadyArchived   = errors.New("project lifecycle: project already archived")
-	ErrProjectNotArchived       = errors.New("project lifecycle: project is not archived")
-	ErrProjectMustBeArchived    = errors.New("project lifecycle: project must be archived before delete")
-	ErrProjectArchivalIsNoop    = errors.New("project lifecycle: project is not in a state that can be archived")
+	ErrProjectNotFound        = errors.New("project lifecycle: project not found")
+	ErrProjectAlreadyArchived = errors.New("project lifecycle: project already archived")
+	ErrProjectNotArchived     = errors.New("project lifecycle: project is not archived")
+	ErrProjectMustBeArchived  = errors.New("project lifecycle: project must be archived before delete")
+	ErrProjectArchivalIsNoop  = errors.New("project lifecycle: project is not in a state that can be archived")
 )
 
 // ProjectLifecycleProjectRepo is the narrow repository contract the lifecycle

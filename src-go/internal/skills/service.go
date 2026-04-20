@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
+	rolepkg "github.com/agentforge/server/internal/role"
 	"gopkg.in/yaml.v3"
 )
 
@@ -83,22 +83,22 @@ type BlockedAction struct {
 }
 
 type InventoryItem struct {
-	ID                 string                  `json:"id"`
-	Family             Family                  `json:"family"`
-	VerificationProfile string                 `json:"verificationProfile,omitempty"`
-	CanonicalRoot      string                  `json:"canonicalRoot"`
-	SourceType         string                  `json:"sourceType"`
-	DocsRef            string                  `json:"docsRef,omitempty"`
-	Lock               *LockInfo               `json:"lock,omitempty"`
-	Bundle             BundleInfo              `json:"bundle"`
-	MirrorTargets      []string                `json:"mirrorTargets,omitempty"`
-	PreviewAvailable   bool                    `json:"previewAvailable"`
-	PreviewError       string                  `json:"previewError,omitempty"`
-	Health             HealthSummary           `json:"health"`
-	ConsumerSurfaces   []ConsumerSurface       `json:"consumerSurfaces,omitempty"`
-	SupportedActions   []string                `json:"supportedActions,omitempty"`
-	BlockedActions     []BlockedAction         `json:"blockedActions,omitempty"`
-	Preview            *rolepkg.SkillPackagePreview `json:"preview,omitempty"`
+	ID                  string                       `json:"id"`
+	Family              Family                       `json:"family"`
+	VerificationProfile string                       `json:"verificationProfile,omitempty"`
+	CanonicalRoot       string                       `json:"canonicalRoot"`
+	SourceType          string                       `json:"sourceType"`
+	DocsRef             string                       `json:"docsRef,omitempty"`
+	Lock                *LockInfo                    `json:"lock,omitempty"`
+	Bundle              BundleInfo                   `json:"bundle"`
+	MirrorTargets       []string                     `json:"mirrorTargets,omitempty"`
+	PreviewAvailable    bool                         `json:"previewAvailable"`
+	PreviewError        string                       `json:"previewError,omitempty"`
+	Health              HealthSummary                `json:"health"`
+	ConsumerSurfaces    []ConsumerSurface            `json:"consumerSurfaces,omitempty"`
+	SupportedActions    []string                     `json:"supportedActions,omitempty"`
+	BlockedActions      []BlockedAction              `json:"blockedActions,omitempty"`
+	Preview             *rolepkg.SkillPackagePreview `json:"preview,omitempty"`
 }
 
 type VerificationResult struct {

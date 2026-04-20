@@ -12,22 +12,22 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agentforge/server/internal/bridge"
+	"github.com/agentforge/server/internal/i18n"
+	"github.com/agentforge/server/internal/model"
+	rolepkg "github.com/agentforge/server/internal/role"
+	"github.com/agentforge/server/internal/service"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/bridge"
-	"github.com/react-go-quick-starter/server/internal/i18n"
-	"github.com/react-go-quick-starter/server/internal/model"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type RoleHandler struct {
-	store        *rolepkg.FileStore
-	bridgeClient roleAuthoringBridgeClient
+	store         *rolepkg.FileStore
+	bridgeClient  roleAuthoringBridgeClient
 	pluginCatalog roleDependencyPluginCatalog
 	memberCatalog roleReferenceMemberCatalog
 	queueCatalog  roleReferenceQueueCatalog
 	runCatalog    roleReferenceRunCatalog
-	skillsDir    string
+	skillsDir     string
 }
 
 func NewRoleHandler(rolesDir string) *RoleHandler {
@@ -309,9 +309,9 @@ func (h *RoleHandler) Preview(c echo.Context) error {
 	normalized = h.enrichRoleManifest(normalized, plugins)
 	effective = h.enrichRoleManifest(effective, plugins)
 	response := rolePreviewResponse{
-		NormalizedManifest: (*model.RoleManifest)(normalized),
-		EffectiveManifest:  (*model.RoleManifest)(effective),
-		ExecutionProfile:   executionProfile,
+		NormalizedManifest:   (*model.RoleManifest)(normalized),
+		EffectiveManifest:    (*model.RoleManifest)(effective),
+		ExecutionProfile:     executionProfile,
 		ReadinessDiagnostics: skillDiagnosticsToRuntimeDiagnostics(executionProfile.SkillDiagnostics),
 	}
 	response.ReadinessDiagnostics = append(response.ReadinessDiagnostics, rolePluginDependenciesToRuntimeDiagnostics(effective.PluginDependencies)...)

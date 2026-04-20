@@ -3,20 +3,20 @@ package service
 import (
 	"encoding/json"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/workflow/system"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/workflow/system"
 )
 
 // System template names — used as stable identifiers for upsert.
 const (
-	TemplatePlanCodeReview    = "plan-code-review"
-	TemplatePipeline          = "pipeline"
-	TemplateSwarm             = "swarm"
-	TemplateContentCreation   = "content-creation"
-	TemplateCustomerService   = "customer-service"
-	TemplateSystemCodeReview  = "system:code-review"
-	TemplateCodeFixer         = "code_fixer"
+	TemplatePlanCodeReview   = "plan-code-review"
+	TemplatePipeline         = "pipeline"
+	TemplateSwarm            = "swarm"
+	TemplateContentCreation  = "content-creation"
+	TemplateCustomerService  = "customer-service"
+	TemplateSystemCodeReview = "system:code-review"
+	TemplateCodeFixer        = "code_fixer"
 )
 
 // buildNodes / buildEdges are helpers to avoid repetitive json.Marshal calls.
@@ -42,12 +42,12 @@ func PlanCodeReviewTemplate() *model.WorkflowDefinition {
 		{ID: "trigger", Type: model.NodeTypeTrigger, Label: "Start", Position: model.WorkflowPos{X: 0, Y: 200}},
 		{ID: "planner", Type: model.NodeTypeLLMAgent, Label: "Planner", Position: model.WorkflowPos{X: 250, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Analyze the task and create a structured plan with subtasks.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Analyze the task and create a structured plan with subtasks.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 2.0,
-				"roleId":   "planner",
+				"roleId":    "planner",
 			})},
 		{ID: "fan_out", Type: model.NodeTypeFunction, Label: "Create subtasks", Position: model.WorkflowPos{X: 500, Y: 200},
 			Config: buildConfig(map[string]any{
@@ -56,22 +56,22 @@ func PlanCodeReviewTemplate() *model.WorkflowDefinition {
 		{ID: "split", Type: model.NodeTypeParallelSplit, Label: "Parallel", Position: model.WorkflowPos{X: 750, Y: 200}},
 		{ID: "coder", Type: model.NodeTypeLLMAgent, Label: "Coder", Position: model.WorkflowPos{X: 1000, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Implement the assigned subtask according to the plan.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Implement the assigned subtask according to the plan.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 5.0,
-				"roleId":   "coder",
+				"roleId":    "coder",
 			})},
 		{ID: "join", Type: model.NodeTypeParallelJoin, Label: "Join", Position: model.WorkflowPos{X: 1250, Y: 200}},
 		{ID: "reviewer", Type: model.NodeTypeLLMAgent, Label: "Reviewer", Position: model.WorkflowPos{X: 1500, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Review all code changes and provide feedback.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Review all code changes and provide feedback.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 2.0,
-				"roleId":   "reviewer",
+				"roleId":    "reviewer",
 			})},
 	}
 	edges := []model.WorkflowEdge{
@@ -108,30 +108,30 @@ func PipelineTemplate() *model.WorkflowDefinition {
 		{ID: "trigger", Type: model.NodeTypeTrigger, Label: "Start", Position: model.WorkflowPos{X: 0, Y: 200}},
 		{ID: "planner", Type: model.NodeTypeLLMAgent, Label: "Planner", Position: model.WorkflowPos{X: 250, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Analyze the task and create an ordered list of implementation steps.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Analyze the task and create an ordered list of implementation steps.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 2.0,
-				"roleId":   "planner",
+				"roleId":    "planner",
 			})},
 		{ID: "coder", Type: model.NodeTypeLLMAgent, Label: "Coder (sequential)", Position: model.WorkflowPos{X: 500, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Implement the next step based on the plan and previous work.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Implement the next step based on the plan and previous work.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 5.0,
-				"roleId":   "coder",
+				"roleId":    "coder",
 			})},
 		{ID: "reviewer", Type: model.NodeTypeLLMAgent, Label: "Reviewer", Position: model.WorkflowPos{X: 750, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Review all changes from the pipeline.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Review all changes from the pipeline.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 2.0,
-				"roleId":   "reviewer",
+				"roleId":    "reviewer",
 			})},
 	}
 	edges := []model.WorkflowEdge{
@@ -166,32 +166,32 @@ func SwarmTemplate() *model.WorkflowDefinition {
 		{ID: "trigger", Type: model.NodeTypeTrigger, Label: "Start", Position: model.WorkflowPos{X: 0, Y: 200}},
 		{ID: "planner", Type: model.NodeTypeLLMAgent, Label: "Planner", Position: model.WorkflowPos{X: 250, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Break down the task into independent subtasks for maximum parallelism.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Break down the task into independent subtasks for maximum parallelism.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 2.0,
-				"roleId":   "planner",
+				"roleId":    "planner",
 			})},
 		{ID: "split", Type: model.NodeTypeParallelSplit, Label: "Swarm", Position: model.WorkflowPos{X: 500, Y: 200}},
 		{ID: "coder", Type: model.NodeTypeLLMAgent, Label: "Coder (parallel)", Position: model.WorkflowPos{X: 750, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Implement the assigned subtask independently.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Implement the assigned subtask independently.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 5.0,
-				"roleId":   "coder",
+				"roleId":    "coder",
 			})},
 		{ID: "join", Type: model.NodeTypeParallelJoin, Label: "Join", Position: model.WorkflowPos{X: 1000, Y: 200}},
 		{ID: "reviewer", Type: model.NodeTypeLLMAgent, Label: "Reviewer", Position: model.WorkflowPos{X: 1250, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Review all parallel changes for consistency and correctness.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Review all parallel changes for consistency and correctness.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 2.0,
-				"roleId":   "reviewer",
+				"roleId":    "reviewer",
 			})},
 	}
 	edges := []model.WorkflowEdge{
@@ -227,34 +227,34 @@ func ContentCreationTemplate() *model.WorkflowDefinition {
 		{ID: "trigger", Type: model.NodeTypeTrigger, Label: "Start", Position: model.WorkflowPos{X: 0, Y: 200}},
 		{ID: "research", Type: model.NodeTypeLLMAgent, Label: "Topic Research", Position: model.WorkflowPos{X: 250, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Research the topic {{topic}} and produce key insights, data points, and angles.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Research the topic {{topic}} and produce key insights, data points, and angles.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 1.0,
 			})},
 		{ID: "outline", Type: model.NodeTypeLLMAgent, Label: "Outline", Position: model.WorkflowPos{X: 500, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Create a detailed outline based on research: {{research.output}}",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Create a detailed outline based on research: {{research.output}}",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 1.0,
 			})},
 		{ID: "writer", Type: model.NodeTypeLLMAgent, Label: "Writer", Position: model.WorkflowPos{X: 750, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Write the full content based on the outline: {{outline.output}}",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Write the full content based on the outline: {{outline.output}}",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 2.0,
 			})},
 		{ID: "editor", Type: model.NodeTypeLLMAgent, Label: "Editor", Position: model.WorkflowPos{X: 1000, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Edit and improve the draft: {{writer.output}}. Provide specific feedback.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Edit and improve the draft: {{writer.output}}. Provide specific feedback.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 1.0,
 			})},
 		{ID: "edit_loop", Type: model.NodeTypeLoop, Label: "Revision loop", Position: model.WorkflowPos{X: 1000, Y: 400},
@@ -265,10 +265,10 @@ func ContentCreationTemplate() *model.WorkflowDefinition {
 			})},
 		{ID: "seo", Type: model.NodeTypeLLMAgent, Label: "SEO Optimization", Position: model.WorkflowPos{X: 1250, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Optimize the final content for SEO: {{writer.output}}",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Optimize the final content for SEO: {{writer.output}}",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 1.0,
 			})},
 		{ID: "done", Type: model.NodeTypeNotification, Label: "Content Ready", Position: model.WorkflowPos{X: 1500, Y: 200},
@@ -311,10 +311,10 @@ func CustomerServiceTemplate() *model.WorkflowDefinition {
 		{ID: "trigger", Type: model.NodeTypeTrigger, Label: "Ticket received", Position: model.WorkflowPos{X: 0, Y: 200}},
 		{ID: "classify", Type: model.NodeTypeLLMAgent, Label: "Classify & Analyze", Position: model.WorkflowPos{X: 250, Y: 200},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Classify the customer inquiry. Determine urgency (score 0-1) and category. Input: {{trigger.output}}",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Classify the customer inquiry. Determine urgency (score 0-1) and category. Input: {{trigger.output}}",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 0.5,
 			})},
 		{ID: "urgent_check", Type: model.NodeTypeCondition, Label: "Urgent?", Position: model.WorkflowPos{X: 500, Y: 200},
@@ -327,10 +327,10 @@ func CustomerServiceTemplate() *model.WorkflowDefinition {
 			})},
 		{ID: "auto_reply", Type: model.NodeTypeLLMAgent, Label: "Draft auto-reply", Position: model.WorkflowPos{X: 750, Y: 300},
 			Config: buildConfig(map[string]any{
-				"prompt":   "Draft a helpful response for this {{classify.output.category}} inquiry.",
-				"runtime":  "{{runtime}}",
-				"provider": "{{provider}}",
-				"model":    "{{model}}",
+				"prompt":    "Draft a helpful response for this {{classify.output.category}} inquiry.",
+				"runtime":   "{{runtime}}",
+				"provider":  "{{provider}}",
+				"model":     "{{model}}",
 				"budgetUsd": 0.5,
 			})},
 		{ID: "done", Type: model.NodeTypeNotification, Label: "Resolved", Position: model.WorkflowPos{X: 1000, Y: 200},

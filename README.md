@@ -64,7 +64,7 @@ flowchart LR
 This codebase is in an active migration from an earlier starter foundation into AgentForge. That matters for anyone reading the repo:
 
 - Product docs and architecture docs already use the `AgentForge` identity
-- Some code/package/module names still retain starter-era names such as `react-quick-starter` or `react-go-quick-starter`
+- Some code/package/module names still retain starter-era names such as `react-quick-starter` or `agentforge`
 - The repo contains real implementation workspaces, but the product design is ahead of some runtime surfaces
 - If documentation sections disagree, treat [`docs/PRD.md`](./docs/PRD.md) as the latest product source of truth
 

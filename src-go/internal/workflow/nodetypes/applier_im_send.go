@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 // applyExecuteIMSend performs:

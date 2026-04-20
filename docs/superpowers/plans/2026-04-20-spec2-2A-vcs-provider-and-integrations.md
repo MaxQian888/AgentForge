@@ -135,7 +135,7 @@
     import (
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs"
     )
 
     func TestRepoRefStringIsStable(t *testing.T) {
@@ -248,7 +248,7 @@
         "errors"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs"
     )
 
     func TestErrorSentinelsAreDistinct(t *testing.T) {
@@ -350,7 +350,7 @@
         "errors"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs"
     )
 
     type stubProvider struct{ name string }
@@ -496,8 +496,8 @@
         "context"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
-        "github.com/react-go-quick-starter/server/internal/vcs/mock"
+        "github.com/agentforge/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs/mock"
     )
 
     func TestMockProvider_RecordsCalls(t *testing.T) {
@@ -549,7 +549,7 @@
         "sync"
         "sync/atomic"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs"
     )
 
     // Call captures one provider invocation.
@@ -720,8 +720,8 @@
         "strings"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
-        ghimpl "github.com/react-go-quick-starter/server/internal/vcs/github"
+        "github.com/agentforge/server/internal/vcs"
+        ghimpl "github.com/agentforge/server/internal/vcs/github"
     )
 
     func newServer(t *testing.T, h http.Handler) (*httptest.Server, *ghimpl.Client) {
@@ -847,7 +847,7 @@
 
         gogh "github.com/google/go-github/v60/github"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs"
     )
 
     // Client wraps go-github's *Client with vcs.Provider semantics.
@@ -1095,8 +1095,8 @@
         "errors"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
-        "github.com/react-go-quick-starter/server/internal/vcs/gitlab"
+        "github.com/agentforge/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs/gitlab"
     )
 
     func TestStubReturnsUnsupportedFromEveryMethod(t *testing.T) {
@@ -1126,7 +1126,7 @@
         "context"
         "errors"
 
-        "github.com/react-go-quick-starter/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs"
     )
 
     // Stub satisfies vcs.Provider. All methods return errors.ErrUnsupported.
@@ -1184,8 +1184,8 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/repository"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/repository"
     )
 
     func TestVCSIntegrationRepo_CreateGetUpdateDelete(t *testing.T) {
@@ -1303,7 +1303,7 @@
         "github.com/google/uuid"
         "gorm.io/gorm"
 
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     // VCSIntegrationRepo is the persistence seam for vcs_integrations.
@@ -1405,9 +1405,9 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/vcs"
-        "github.com/react-go-quick-starter/server/internal/vcs/mock"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs/mock"
     )
 
     type fakeRepo struct{ rows map[uuid.UUID]*model.VCSIntegration }
@@ -1540,7 +1540,7 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     // ErrSecretNotResolvable signals the (project, secret_ref) tuple did
@@ -1762,7 +1762,7 @@
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
 
-        "github.com/react-go-quick-starter/server/internal/handler"
+        "github.com/agentforge/server/internal/handler"
     )
 
     func TestVCSIntegrationsHandler_RejectsBadProvider(t *testing.T) {
@@ -1832,9 +1832,9 @@
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
 
-        appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/vcs"
+        appMiddleware "github.com/agentforge/server/internal/middleware"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/vcs"
     )
 
     // vcsIntegrationsService is the narrow surface the handler consumes.
@@ -2576,10 +2576,10 @@
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
 
-        "github.com/react-go-quick-starter/server/internal/handler"
-        "github.com/react-go-quick-starter/server/internal/repository"
-        "github.com/react-go-quick-starter/server/internal/vcs"
-        "github.com/react-go-quick-starter/server/internal/vcs/mock"
+        "github.com/agentforge/server/internal/handler"
+        "github.com/agentforge/server/internal/repository"
+        "github.com/agentforge/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs/mock"
     )
 
     func TestEndToEndCRUDWithMockProvider(t *testing.T) {

@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
-	"github.com/react-go-quick-starter/server/internal/service"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	rolepkg "github.com/agentforge/server/internal/role"
+	"github.com/agentforge/server/internal/service"
 )
 
 // workflowSingleWorkflowStepPluginRecord saves a minimal workflow plugin

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 func TestFindNodesBetween(t *testing.T) {

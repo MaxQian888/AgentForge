@@ -5,21 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // WorkflowTemplatePackage is the portable format for marketplace distribution.
 // This is serialized as workflow.json inside the artifact ZIP.
 type WorkflowTemplatePackage struct {
-	APIVersion   string                `json:"apiVersion"` // "agentforge/workflow/v1"
-	Kind         string                `json:"kind"`       // "WorkflowTemplate"
-	Name         string                `json:"name"`
-	Description  string                `json:"description"`
-	Version      int                   `json:"version"`
-	Nodes        []model.WorkflowNode  `json:"nodes"`
-	Edges        []model.WorkflowEdge  `json:"edges"`
-	TemplateVars map[string]any        `json:"templateVars,omitempty"`
+	APIVersion   string               `json:"apiVersion"` // "agentforge/workflow/v1"
+	Kind         string               `json:"kind"`       // "WorkflowTemplate"
+	Name         string               `json:"name"`
+	Description  string               `json:"description"`
+	Version      int                  `json:"version"`
+	Nodes        []model.WorkflowNode `json:"nodes"`
+	Edges        []model.WorkflowEdge `json:"edges"`
+	TemplateVars map[string]any       `json:"templateVars,omitempty"`
 }
 
 // ExportTemplate serializes a workflow definition to a portable package.

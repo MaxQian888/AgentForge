@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 type stubWorkflowTemplateRepo struct {
-	definitions      map[uuid.UUID]*model.WorkflowDefinition
-	listProjectArgs  struct {
+	definitions     map[uuid.UUID]*model.WorkflowDefinition
+	listProjectArgs struct {
 		projectID uuid.UUID
 		query     string
 		category  string
@@ -106,12 +106,12 @@ func TestWorkflowTemplateService_ListTemplatesUsesProjectScopedRepoCall(t *testi
 	repo := &stubWorkflowTemplateRepo{
 		definitions: map[uuid.UUID]*model.WorkflowDefinition{
 			uuid.New(): {
-				ID:       uuid.New(),
+				ID:        uuid.New(),
 				ProjectID: projectID,
-				Name:     "Project Template",
-				Status:   model.WorkflowDefStatusTemplate,
-				Category: model.WorkflowCategoryUser,
-				Version:  1,
+				Name:      "Project Template",
+				Status:    model.WorkflowDefStatusTemplate,
+				Category:  model.WorkflowCategoryUser,
+				Version:   1,
 			},
 		},
 	}

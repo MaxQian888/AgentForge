@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // ingestParser extracts text chunks from a binary stream.

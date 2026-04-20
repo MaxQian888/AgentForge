@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/handler"
+	"github.com/agentforge/server/internal/model"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 type reviewServiceMock struct {
@@ -392,4 +392,3 @@ func TestReviewHandlerCRUDAndWorkflowEndpoints(t *testing.T) {
 		t.Fatalf("MarkFalsePositive() captured = %q / %#v", svc.falsePositiveActor, svc.falsePositiveIDs)
 	}
 }
-

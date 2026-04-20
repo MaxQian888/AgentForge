@@ -5,11 +5,13 @@ import (
 	"testing"
 	"time"
 
+	qianchuanbinding "github.com/agentforge/server/plugins/qianchuan-ads/binding"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/binding"
 )
 
-type memRepo struct{ rows map[uuid.UUID]*qianchuanbinding.Record }
+type memRepo struct {
+	rows map[uuid.UUID]*qianchuanbinding.Record
+}
 
 func newMem() *memRepo { return &memRepo{rows: map[uuid.UUID]*qianchuanbinding.Record{}} }
 

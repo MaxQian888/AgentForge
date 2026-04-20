@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/trigger"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/trigger"
 )
 
 type fakeClock struct{ t time.Time }

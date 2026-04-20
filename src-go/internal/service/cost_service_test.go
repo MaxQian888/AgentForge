@@ -6,9 +6,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 type costServiceRunRepo struct {

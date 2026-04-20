@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/agentforge/server/internal/repository"
+	qcservice "github.com/agentforge/server/plugins/qianchuan-ads/service"
+	"github.com/agentforge/server/plugins/qianchuan-ads/strategy"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/strategy"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	qcservice "github.com/react-go-quick-starter/server/plugins/qianchuan-ads/service"
 )
 
 const validYAML = `

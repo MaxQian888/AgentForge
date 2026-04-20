@@ -3,8 +3,8 @@ package mods
 import (
 	"context"
 
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/eventbus/repository"
+	eb "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/eventbus/repository"
 )
 
 // repoWriter composes the two repositories into the eventWriter interface.

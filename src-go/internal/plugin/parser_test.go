@@ -3,8 +3,8 @@ package plugin_test
 import (
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/plugin"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/plugin"
 )
 
 func TestParse_ValidToolPluginManifest(t *testing.T) {

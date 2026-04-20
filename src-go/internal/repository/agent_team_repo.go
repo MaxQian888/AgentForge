@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"gorm.io/gorm"
 )
 
@@ -225,7 +225,7 @@ func (r *AgentTeamRepository) SetWorkflowExecutionID(ctx context.Context, id uui
 	}
 	if err := r.db.WithContext(ctx).Model(&agentTeamRecord{}).Where("id = ?", id).Updates(map[string]any{
 		"workflow_execution_id": execID,
-		"updated_at":           gorm.Expr("NOW()"),
+		"updated_at":            gorm.Expr("NOW()"),
 	}).Error; err != nil {
 		return fmt.Errorf("set workflow execution ID: %w", err)
 	}

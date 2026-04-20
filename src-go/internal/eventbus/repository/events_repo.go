@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+	eb "github.com/agentforge/server/internal/eventbus"
 	"gorm.io/gorm"
 )
 
@@ -19,15 +19,15 @@ func NewEventsRepository(db *gorm.DB) *EventsRepository {
 
 // eventRow maps to the events table.
 type eventRow struct {
-	ID         string `gorm:"column:id;primaryKey"`
-	Type       string `gorm:"column:type"`
-	Source     string `gorm:"column:source"`
-	Target     string `gorm:"column:target"`
-	Visibility string `gorm:"column:visibility"`
-	Payload    []byte `gorm:"column:payload;type:jsonb"`
-	Metadata   []byte `gorm:"column:metadata;type:jsonb"`
+	ID         string  `gorm:"column:id;primaryKey"`
+	Type       string  `gorm:"column:type"`
+	Source     string  `gorm:"column:source"`
+	Target     string  `gorm:"column:target"`
+	Visibility string  `gorm:"column:visibility"`
+	Payload    []byte  `gorm:"column:payload;type:jsonb"`
+	Metadata   []byte  `gorm:"column:metadata;type:jsonb"`
 	ProjectID  *string `gorm:"column:project_id"`
-	OccurredAt int64  `gorm:"column:occurred_at"`
+	OccurredAt int64   `gorm:"column:occurred_at"`
 }
 
 func (eventRow) TableName() string { return "events" }

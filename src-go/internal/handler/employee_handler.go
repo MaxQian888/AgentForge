@@ -6,13 +6,13 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/agentforge/server/internal/employee"
+	"github.com/agentforge/server/internal/i18n"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/employee"
-	"github.com/react-go-quick-starter/server/internal/i18n"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 type employeeService interface {
@@ -79,11 +79,11 @@ func (h *EmployeeHandler) List(c echo.Context) error {
 
 // createEmployeeRequest is the request body for POST /employees.
 type createEmployeeRequest struct {
-	Name         string               `json:"name"`
-	DisplayName  string               `json:"displayName,omitempty"`
-	RoleID       string               `json:"roleId"`
-	RuntimePrefs json.RawMessage      `json:"runtimePrefs,omitempty"`
-	Config       json.RawMessage      `json:"config,omitempty"`
+	Name         string                `json:"name"`
+	DisplayName  string                `json:"displayName,omitempty"`
+	RoleID       string                `json:"roleId"`
+	RuntimePrefs json.RawMessage       `json:"runtimePrefs,omitempty"`
+	Config       json.RawMessage       `json:"config,omitempty"`
 	Skills       []model.EmployeeSkill `json:"skills,omitempty"`
 }
 

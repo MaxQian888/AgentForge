@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 )
 
 func TestRegistry_ReconcileMaterializesBuiltInJobs(t *testing.T) {

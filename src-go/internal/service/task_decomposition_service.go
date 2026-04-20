@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 var (
@@ -39,15 +39,15 @@ type FewShotExample struct {
 }
 
 type BridgeDecomposeRequest struct {
-	TaskID         string                 `json:"task_id"`
-	Title          string                 `json:"title"`
-	Description    string                 `json:"description"`
-	Priority       string                 `json:"priority"`
-	Provider       string                 `json:"provider,omitempty"`
-	Model          string                 `json:"model,omitempty"`
-	CodeContext    *DecompositionContext   `json:"codeContext,omitempty"`
-	FewShotHistory []FewShotExample       `json:"fewShotHistory,omitempty"`
-	WaveMode       bool                   `json:"waveMode,omitempty"`
+	TaskID         string                `json:"task_id"`
+	Title          string                `json:"title"`
+	Description    string                `json:"description"`
+	Priority       string                `json:"priority"`
+	Provider       string                `json:"provider,omitempty"`
+	Model          string                `json:"model,omitempty"`
+	CodeContext    *DecompositionContext `json:"codeContext,omitempty"`
+	FewShotHistory []FewShotExample      `json:"fewShotHistory,omitempty"`
+	WaveMode       bool                  `json:"waveMode,omitempty"`
 }
 
 type BridgeDecomposeSubtask struct {

@@ -1,4 +1,4 @@
-module github.com/react-go-quick-starter/server
+module github.com/agentforge/server
 
 go 1.25.0
 

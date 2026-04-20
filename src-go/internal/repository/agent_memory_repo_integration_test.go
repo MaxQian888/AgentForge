@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/migrations"
+	"github.com/agentforge/server/pkg/database"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/migrations"
-	"github.com/react-go-quick-starter/server/pkg/database"
 )
 
 func TestAgentMemoryRepository_TimeRangeAndRetention_Postgres(t *testing.T) {

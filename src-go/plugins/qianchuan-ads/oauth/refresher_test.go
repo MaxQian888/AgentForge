@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	"github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/binding"
+	"github.com/agentforge/server/internal/adsplatform"
+	"github.com/agentforge/server/internal/eventbus"
+	qianchuanbinding "github.com/agentforge/server/plugins/qianchuan-ads/binding"
 )
 
 // --- mocks ---
@@ -58,7 +58,7 @@ func (m *mockBindingRepo) MarkAuthExpired(_ context.Context, id uuid.UUID) error
 }
 
 type mockSecrets struct {
-	tokens map[string]string
+	tokens    map[string]string
 	rotations []struct {
 		Name      string
 		Plaintext string

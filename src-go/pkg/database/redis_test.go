@@ -3,8 +3,8 @@ package database_test
 import (
 	"testing"
 
+	"github.com/agentforge/server/pkg/database"
 	"github.com/alicebob/miniredis/v2"
-	"github.com/react-go-quick-starter/server/pkg/database"
 )
 
 func TestNewRedis_InvalidURL(t *testing.T) {

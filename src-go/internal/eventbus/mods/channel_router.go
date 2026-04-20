@@ -2,7 +2,8 @@ package mods
 
 import (
 	"context"
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+
+	eb "github.com/agentforge/server/internal/eventbus"
 )
 
 type ChannelRouter struct{}

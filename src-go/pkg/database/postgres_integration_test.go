@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/pkg/database"
+	"github.com/agentforge/server/pkg/database"
 )
 
 func TestNewPostgres_Connect(t *testing.T) {

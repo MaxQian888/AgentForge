@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/role"
+	"github.com/agentforge/server/internal/role"
 )
 
 func TestFileStoreSaveAndListUseCanonicalLayout(t *testing.T) {

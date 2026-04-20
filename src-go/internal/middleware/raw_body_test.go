@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/middleware"
 )
 
 func TestCaptureRawBody_StashesAndRestores(t *testing.T) {

@@ -11,7 +11,7 @@
 package trigger
 
 import (
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 // DryRunResult is the structured outcome of a single dry-run invocation.

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 var defaultDeepReviewDimensions = []string{"logic", "security", "performance", "compliance"}

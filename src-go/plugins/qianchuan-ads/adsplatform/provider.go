@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
+	"github.com/agentforge/server/internal/adsplatform"
 )
 
 // Provider is the Qianchuan implementation of adsplatform.Provider.

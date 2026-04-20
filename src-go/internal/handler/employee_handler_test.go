@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/employee"
+	"github.com/agentforge/server/internal/handler"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/employee"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // employeeServiceMock satisfies the handler's private employeeService interface.
@@ -23,12 +23,12 @@ type employeeServiceMock struct {
 	employees map[uuid.UUID]*model.Employee
 
 	// error injection
-	createErr   error
-	listErr     error
-	updateErr   error
-	deleteErr   error
-	setStateErr error
-	addSkillErr error
+	createErr      error
+	listErr        error
+	updateErr      error
+	deleteErr      error
+	setStateErr    error
+	addSkillErr    error
 	removeSkillErr error
 
 	// captured call args

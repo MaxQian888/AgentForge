@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/automation"
+	"github.com/agentforge/server/internal/imcards"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/automation"
-	"github.com/react-go-quick-starter/server/internal/imcards"
 )
 
 // --- integration stubs ---

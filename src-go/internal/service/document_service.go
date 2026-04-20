@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/document"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/storage"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/document"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/storage"
 )
 
 // DocumentRepository defines persistence operations for documents.

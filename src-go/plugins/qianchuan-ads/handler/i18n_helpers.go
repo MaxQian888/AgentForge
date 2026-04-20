@@ -1,10 +1,10 @@
 package qchandler
 
 import (
+	appI18n "github.com/agentforge/server/internal/i18n"
+	"github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
 	"github.com/labstack/echo/v4"
-	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
-	"github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // localizedError mirrors the unexported helper of the same name in

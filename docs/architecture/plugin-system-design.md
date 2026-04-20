@@ -110,7 +110,7 @@
 
 ### 2.1 架构全景
 
-AgentForge 采用 **Tauri + Next.js + Go + TS** 四层架构（参考 react-go-quick-starter 模板）：
+AgentForge 采用 **Tauri + Next.js + Go + TS** 四层架构（参考 agentforge 模板）：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -1784,7 +1784,7 @@ func main() { sdk.Autorun(runtime) }
 
 ### 16.1.1 Tauri 层新增职责
 
-基于 react-go-quick-starter 的 Tauri 架构，AgentForge 桌面模式需要扩展：
+基于 agentforge 的 Tauri 架构，AgentForge 桌面模式需要扩展：
 
 ```rust
 // src-tauri/src/lib.rs 新增

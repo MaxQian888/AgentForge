@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // fakeLoopDefRepo is a stub LoopDefResolver returning a pre-baked definition.

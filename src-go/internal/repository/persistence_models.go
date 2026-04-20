@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 type userRecord struct {
@@ -792,24 +792,24 @@ func (r *taskProgressSnapshotRecord) toModel() *model.TaskProgressSnapshot {
 }
 
 type agentRunRecord struct {
-	ID              uuid.UUID  `gorm:"column:id;primaryKey"`
-	TaskID          uuid.UUID  `gorm:"column:task_id"`
-	MemberID        uuid.UUID  `gorm:"column:member_id"`
-	RoleID          string     `gorm:"column:role_id"`
-	Status          string     `gorm:"column:status"`
-	Runtime         string     `gorm:"column:runtime"`
-	Provider        string     `gorm:"column:provider"`
-	Model           string     `gorm:"column:model"`
-	InputTokens     int64      `gorm:"column:input_tokens"`
-	OutputTokens    int64      `gorm:"column:output_tokens"`
-	CacheReadTokens int64      `gorm:"column:cache_read_tokens"`
-	CostUsd         float64    `gorm:"column:cost_usd"`
-	TurnCount       int        `gorm:"column:turn_count"`
-	ErrorMessage    string     `gorm:"column:error_message"`
-	StartedAt       time.Time  `gorm:"column:started_at"`
-	CompletedAt     *time.Time `gorm:"column:completed_at"`
-	CreatedAt       time.Time  `gorm:"column:created_at"`
-	UpdatedAt       time.Time  `gorm:"column:updated_at"`
+	ID               uuid.UUID  `gorm:"column:id;primaryKey"`
+	TaskID           uuid.UUID  `gorm:"column:task_id"`
+	MemberID         uuid.UUID  `gorm:"column:member_id"`
+	RoleID           string     `gorm:"column:role_id"`
+	Status           string     `gorm:"column:status"`
+	Runtime          string     `gorm:"column:runtime"`
+	Provider         string     `gorm:"column:provider"`
+	Model            string     `gorm:"column:model"`
+	InputTokens      int64      `gorm:"column:input_tokens"`
+	OutputTokens     int64      `gorm:"column:output_tokens"`
+	CacheReadTokens  int64      `gorm:"column:cache_read_tokens"`
+	CostUsd          float64    `gorm:"column:cost_usd"`
+	TurnCount        int        `gorm:"column:turn_count"`
+	ErrorMessage     string     `gorm:"column:error_message"`
+	StartedAt        time.Time  `gorm:"column:started_at"`
+	CompletedAt      *time.Time `gorm:"column:completed_at"`
+	CreatedAt        time.Time  `gorm:"column:created_at"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at"`
 	TeamID           *uuid.UUID `gorm:"column:team_id"`
 	TeamRole         string     `gorm:"column:team_role"`
 	EmployeeID       *uuid.UUID `gorm:"column:employee_id"`
@@ -824,24 +824,24 @@ func newAgentRunRecord(run *model.AgentRun) *agentRunRecord {
 		return nil
 	}
 	return &agentRunRecord{
-		ID:              run.ID,
-		TaskID:          run.TaskID,
-		MemberID:        run.MemberID,
-		RoleID:          run.RoleID,
-		Status:          run.Status,
-		Runtime:         run.Runtime,
-		Provider:        run.Provider,
-		Model:           run.Model,
-		InputTokens:     run.InputTokens,
-		OutputTokens:    run.OutputTokens,
-		CacheReadTokens: run.CacheReadTokens,
-		CostUsd:         run.CostUsd,
-		TurnCount:       run.TurnCount,
-		ErrorMessage:    run.ErrorMessage,
-		StartedAt:       run.StartedAt,
-		CompletedAt:     cloneTimePointer(run.CompletedAt),
-		CreatedAt:       run.CreatedAt,
-		UpdatedAt:       run.UpdatedAt,
+		ID:               run.ID,
+		TaskID:           run.TaskID,
+		MemberID:         run.MemberID,
+		RoleID:           run.RoleID,
+		Status:           run.Status,
+		Runtime:          run.Runtime,
+		Provider:         run.Provider,
+		Model:            run.Model,
+		InputTokens:      run.InputTokens,
+		OutputTokens:     run.OutputTokens,
+		CacheReadTokens:  run.CacheReadTokens,
+		CostUsd:          run.CostUsd,
+		TurnCount:        run.TurnCount,
+		ErrorMessage:     run.ErrorMessage,
+		StartedAt:        run.StartedAt,
+		CompletedAt:      cloneTimePointer(run.CompletedAt),
+		CreatedAt:        run.CreatedAt,
+		UpdatedAt:        run.UpdatedAt,
 		TeamID:           run.TeamID,
 		TeamRole:         run.TeamRole,
 		EmployeeID:       run.EmployeeID,
@@ -855,24 +855,24 @@ func (r *agentRunRecord) toModel() *model.AgentRun {
 		return nil
 	}
 	return &model.AgentRun{
-		ID:              r.ID,
-		TaskID:          r.TaskID,
-		MemberID:        r.MemberID,
-		RoleID:          r.RoleID,
-		Status:          r.Status,
-		Runtime:         r.Runtime,
-		Provider:        r.Provider,
-		Model:           r.Model,
-		InputTokens:     r.InputTokens,
-		OutputTokens:    r.OutputTokens,
-		CacheReadTokens: r.CacheReadTokens,
-		CostUsd:         r.CostUsd,
-		TurnCount:       r.TurnCount,
-		ErrorMessage:    r.ErrorMessage,
-		StartedAt:       r.StartedAt,
-		CompletedAt:     cloneTimePointer(r.CompletedAt),
-		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
+		ID:               r.ID,
+		TaskID:           r.TaskID,
+		MemberID:         r.MemberID,
+		RoleID:           r.RoleID,
+		Status:           r.Status,
+		Runtime:          r.Runtime,
+		Provider:         r.Provider,
+		Model:            r.Model,
+		InputTokens:      r.InputTokens,
+		OutputTokens:     r.OutputTokens,
+		CacheReadTokens:  r.CacheReadTokens,
+		CostUsd:          r.CostUsd,
+		TurnCount:        r.TurnCount,
+		ErrorMessage:     r.ErrorMessage,
+		StartedAt:        r.StartedAt,
+		CompletedAt:      cloneTimePointer(r.CompletedAt),
+		CreatedAt:        r.CreatedAt,
+		UpdatedAt:        r.UpdatedAt,
 		TeamID:           r.TeamID,
 		TeamRole:         r.TeamRole,
 		EmployeeID:       r.EmployeeID,
@@ -915,21 +915,21 @@ func unmarshalAgentRunCostAccounting(raw rawJSON) *model.CostAccountingSnapshot 
 }
 
 type agentTeamRecord struct {
-	ID                    uuid.UUID  `gorm:"column:id;primaryKey"`
-	ProjectID             uuid.UUID  `gorm:"column:project_id"`
-	TaskID                uuid.UUID  `gorm:"column:task_id"`
-	Name                  string     `gorm:"column:name"`
-	Status                string     `gorm:"column:status"`
-	Strategy              string     `gorm:"column:strategy"`
-	PlannerRunID          *uuid.UUID `gorm:"column:planner_run_id"`
-	ReviewerRunID         *uuid.UUID `gorm:"column:reviewer_run_id"`
-	TotalBudgetUsd        float64    `gorm:"column:total_budget_usd"`
-	TotalSpentUsd         float64    `gorm:"column:total_spent_usd"`
-	Config                jsonText   `gorm:"column:config;type:jsonb"`
-	ErrorMessage          string     `gorm:"column:error_message"`
-	WorkflowExecutionID   *uuid.UUID `gorm:"column:workflow_execution_id"`
-	CreatedAt             time.Time  `gorm:"column:created_at"`
-	UpdatedAt             time.Time  `gorm:"column:updated_at"`
+	ID                  uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID           uuid.UUID  `gorm:"column:project_id"`
+	TaskID              uuid.UUID  `gorm:"column:task_id"`
+	Name                string     `gorm:"column:name"`
+	Status              string     `gorm:"column:status"`
+	Strategy            string     `gorm:"column:strategy"`
+	PlannerRunID        *uuid.UUID `gorm:"column:planner_run_id"`
+	ReviewerRunID       *uuid.UUID `gorm:"column:reviewer_run_id"`
+	TotalBudgetUsd      float64    `gorm:"column:total_budget_usd"`
+	TotalSpentUsd       float64    `gorm:"column:total_spent_usd"`
+	Config              jsonText   `gorm:"column:config;type:jsonb"`
+	ErrorMessage        string     `gorm:"column:error_message"`
+	WorkflowExecutionID *uuid.UUID `gorm:"column:workflow_execution_id"`
+	CreatedAt           time.Time  `gorm:"column:created_at"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at"`
 }
 
 func (agentTeamRecord) TableName() string { return "agent_teams" }
@@ -939,21 +939,21 @@ func newAgentTeamRecord(team *model.AgentTeam) *agentTeamRecord {
 		return nil
 	}
 	return &agentTeamRecord{
-		ID:                    team.ID,
-		ProjectID:             team.ProjectID,
-		TaskID:                team.TaskID,
-		Name:                  team.Name,
-		Status:                team.Status,
-		Strategy:              team.Strategy,
-		PlannerRunID:          team.PlannerRunID,
-		ReviewerRunID:         team.ReviewerRunID,
-		TotalBudgetUsd:        team.TotalBudgetUsd,
-		TotalSpentUsd:         team.TotalSpentUsd,
-		Config:                newJSONText(team.Config, "{}"),
-		ErrorMessage:          team.ErrorMessage,
-		WorkflowExecutionID:   team.WorkflowExecutionID,
-		CreatedAt:             team.CreatedAt,
-		UpdatedAt:             team.UpdatedAt,
+		ID:                  team.ID,
+		ProjectID:           team.ProjectID,
+		TaskID:              team.TaskID,
+		Name:                team.Name,
+		Status:              team.Status,
+		Strategy:            team.Strategy,
+		PlannerRunID:        team.PlannerRunID,
+		ReviewerRunID:       team.ReviewerRunID,
+		TotalBudgetUsd:      team.TotalBudgetUsd,
+		TotalSpentUsd:       team.TotalSpentUsd,
+		Config:              newJSONText(team.Config, "{}"),
+		ErrorMessage:        team.ErrorMessage,
+		WorkflowExecutionID: team.WorkflowExecutionID,
+		CreatedAt:           team.CreatedAt,
+		UpdatedAt:           team.UpdatedAt,
 	}
 }
 
@@ -962,21 +962,21 @@ func (r *agentTeamRecord) toModel() *model.AgentTeam {
 		return nil
 	}
 	return &model.AgentTeam{
-		ID:                    r.ID,
-		ProjectID:             r.ProjectID,
-		TaskID:                r.TaskID,
-		Name:                  r.Name,
-		Status:                r.Status,
-		Strategy:              r.Strategy,
-		PlannerRunID:          r.PlannerRunID,
-		ReviewerRunID:         r.ReviewerRunID,
-		TotalBudgetUsd:        r.TotalBudgetUsd,
-		TotalSpentUsd:         r.TotalSpentUsd,
-		Config:                r.Config.String("{}"),
-		ErrorMessage:          r.ErrorMessage,
-		WorkflowExecutionID:   r.WorkflowExecutionID,
-		CreatedAt:             r.CreatedAt,
-		UpdatedAt:             r.UpdatedAt,
+		ID:                  r.ID,
+		ProjectID:           r.ProjectID,
+		TaskID:              r.TaskID,
+		Name:                r.Name,
+		Status:              r.Status,
+		Strategy:            r.Strategy,
+		PlannerRunID:        r.PlannerRunID,
+		ReviewerRunID:       r.ReviewerRunID,
+		TotalBudgetUsd:      r.TotalBudgetUsd,
+		TotalSpentUsd:       r.TotalSpentUsd,
+		Config:              r.Config.String("{}"),
+		ErrorMessage:        r.ErrorMessage,
+		WorkflowExecutionID: r.WorkflowExecutionID,
+		CreatedAt:           r.CreatedAt,
+		UpdatedAt:           r.UpdatedAt,
 	}
 }
 
@@ -1219,24 +1219,24 @@ func (r *reviewRecord) toModel() (*model.Review, error) {
 }
 
 type agentPoolQueueEntryRecord struct {
-	EntryID    string    `gorm:"column:entry_id;primaryKey"`
-	ProjectID  string    `gorm:"column:project_id"`
-	TaskID     string    `gorm:"column:task_id"`
-	MemberID   string    `gorm:"column:member_id"`
-	Status     string    `gorm:"column:status"`
-	Reason     string    `gorm:"column:reason"`
-	Runtime    string    `gorm:"column:runtime"`
-	Provider   string    `gorm:"column:provider"`
-	Model      string    `gorm:"column:model"`
-	RoleID     *string   `gorm:"column:role_id"`
-	Priority   int       `gorm:"column:priority"`
-	BudgetUSD  float64   `gorm:"column:budget_usd"`
+	EntryID             string    `gorm:"column:entry_id;primaryKey"`
+	ProjectID           string    `gorm:"column:project_id"`
+	TaskID              string    `gorm:"column:task_id"`
+	MemberID            string    `gorm:"column:member_id"`
+	Status              string    `gorm:"column:status"`
+	Reason              string    `gorm:"column:reason"`
+	Runtime             string    `gorm:"column:runtime"`
+	Provider            string    `gorm:"column:provider"`
+	Model               string    `gorm:"column:model"`
+	RoleID              *string   `gorm:"column:role_id"`
+	Priority            int       `gorm:"column:priority"`
+	BudgetUSD           float64   `gorm:"column:budget_usd"`
 	GuardrailType       *string   `gorm:"column:guardrail_type"`
 	GuardrailScope      *string   `gorm:"column:guardrail_scope"`
 	RecoveryDisposition *string   `gorm:"column:recovery_disposition"`
-	AgentRunID *string   `gorm:"column:agent_run_id"`
-	CreatedAt  time.Time `gorm:"column:created_at"`
-	UpdatedAt  time.Time `gorm:"column:updated_at"`
+	AgentRunID          *string   `gorm:"column:agent_run_id"`
+	CreatedAt           time.Time `gorm:"column:created_at"`
+	UpdatedAt           time.Time `gorm:"column:updated_at"`
 }
 
 func (agentPoolQueueEntryRecord) TableName() string { return "agent_pool_queue_entries" }
@@ -1246,24 +1246,24 @@ func newAgentPoolQueueEntryRecord(entry *model.AgentPoolQueueEntry) *agentPoolQu
 		return nil
 	}
 	return &agentPoolQueueEntryRecord{
-		EntryID:    entry.EntryID,
-		ProjectID:  entry.ProjectID,
-		TaskID:     entry.TaskID,
-		MemberID:   entry.MemberID,
-		Status:     string(entry.Status),
-		Reason:     entry.Reason,
-		Runtime:    entry.Runtime,
-		Provider:   entry.Provider,
-		Model:      entry.Model,
-		RoleID:     cloneStringPointer(optionalStringPointer(entry.RoleID)),
-		Priority:   entry.Priority,
-		BudgetUSD:  entry.BudgetUSD,
+		EntryID:             entry.EntryID,
+		ProjectID:           entry.ProjectID,
+		TaskID:              entry.TaskID,
+		MemberID:            entry.MemberID,
+		Status:              string(entry.Status),
+		Reason:              entry.Reason,
+		Runtime:             entry.Runtime,
+		Provider:            entry.Provider,
+		Model:               entry.Model,
+		RoleID:              cloneStringPointer(optionalStringPointer(entry.RoleID)),
+		Priority:            entry.Priority,
+		BudgetUSD:           entry.BudgetUSD,
 		GuardrailType:       cloneStringPointer(optionalStringPointer(entry.GuardrailType)),
 		GuardrailScope:      cloneStringPointer(optionalStringPointer(entry.GuardrailScope)),
 		RecoveryDisposition: cloneStringPointer(optionalStringPointer(entry.RecoveryDisposition)),
-		AgentRunID: cloneStringPointer(entry.AgentRunID),
-		CreatedAt:  entry.CreatedAt,
-		UpdatedAt:  entry.UpdatedAt,
+		AgentRunID:          cloneStringPointer(entry.AgentRunID),
+		CreatedAt:           entry.CreatedAt,
+		UpdatedAt:           entry.UpdatedAt,
 	}
 }
 
@@ -1272,24 +1272,24 @@ func (r *agentPoolQueueEntryRecord) toModel() *model.AgentPoolQueueEntry {
 		return nil
 	}
 	return &model.AgentPoolQueueEntry{
-		EntryID:    r.EntryID,
-		ProjectID:  r.ProjectID,
-		TaskID:     r.TaskID,
-		MemberID:   r.MemberID,
-		Status:     model.AgentPoolQueueStatus(r.Status),
-		Reason:     r.Reason,
-		Runtime:    r.Runtime,
-		Provider:   r.Provider,
-		Model:      r.Model,
-		RoleID:     valueOrEmpty(r.RoleID),
-		Priority:   r.Priority,
-		BudgetUSD:  r.BudgetUSD,
+		EntryID:             r.EntryID,
+		ProjectID:           r.ProjectID,
+		TaskID:              r.TaskID,
+		MemberID:            r.MemberID,
+		Status:              model.AgentPoolQueueStatus(r.Status),
+		Reason:              r.Reason,
+		Runtime:             r.Runtime,
+		Provider:            r.Provider,
+		Model:               r.Model,
+		RoleID:              valueOrEmpty(r.RoleID),
+		Priority:            r.Priority,
+		BudgetUSD:           r.BudgetUSD,
 		GuardrailType:       valueOrEmpty(r.GuardrailType),
 		GuardrailScope:      valueOrEmpty(r.GuardrailScope),
 		RecoveryDisposition: valueOrEmpty(r.RecoveryDisposition),
-		AgentRunID: cloneStringPointer(r.AgentRunID),
-		CreatedAt:  r.CreatedAt,
-		UpdatedAt:  r.UpdatedAt,
+		AgentRunID:          cloneStringPointer(r.AgentRunID),
+		CreatedAt:           r.CreatedAt,
+		UpdatedAt:           r.UpdatedAt,
 	}
 }
 

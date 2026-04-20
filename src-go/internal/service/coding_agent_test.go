@@ -3,8 +3,8 @@ package service
 import (
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 func TestResolveProjectCodingAgentSelectionSupportsAdditionalBackends(t *testing.T) {
@@ -18,9 +18,9 @@ func TestResolveProjectCodingAgentSelectionSupportsAdditionalBackends(t *testing
 	}
 
 	tests := []struct {
-		name     string
-		runtime  string
-		provider string
+		name      string
+		runtime   string
+		provider  string
 		wantModel string
 	}{
 		{

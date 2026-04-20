@@ -1,10 +1,10 @@
 package handler
 
 import (
+	appI18n "github.com/agentforge/server/internal/i18n"
+	"github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
 	"github.com/labstack/echo/v4"
-	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
-	"github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 func localizedError(c echo.Context, code int, msgID string) error {

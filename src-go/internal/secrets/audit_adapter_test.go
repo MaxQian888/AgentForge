@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/secrets"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/secrets"
 )
 
 type capturedSink struct{ events []*model.AuditEvent }

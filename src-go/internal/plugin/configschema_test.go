@@ -3,8 +3,8 @@ package plugin_test
 import (
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/plugin"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/plugin"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -48,8 +48,8 @@ func TestValidateConfig_RejectsUnknownFieldWhenAdditionalFalse(t *testing.T) {
 		AdditionalProperties: boolPtr(false),
 	}
 	err := plugin.ValidateConfig(schema, map[string]any{
-		"apiKey":  "sk-123",
-		"secret":  "oops",
+		"apiKey": "sk-123",
+		"secret": "oops",
 	})
 	if err == nil {
 		t.Fatal("expected unknown-field error with additionalProperties: false")

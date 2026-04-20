@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 type fakeAuditSink struct {

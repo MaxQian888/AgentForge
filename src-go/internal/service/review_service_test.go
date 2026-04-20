@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	bridgeclient "github.com/agentforge/server/internal/bridge"
+	eventbus "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
-	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
-	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
-	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 type mockReviewRepo struct {
@@ -972,15 +972,15 @@ func TestReviewService_CompleteRoutesToPendingHumanWhenManualApprovalRequired(t 
 	}
 	reviewRepo := newMockReviewRepo()
 	reviewRepo.byID[reviewID] = &model.Review{
-		ID:       reviewID,
-		TaskID:   taskID,
-		Status:   model.ReviewStatusInProgress,
+		ID:        reviewID,
+		TaskID:    taskID,
+		Status:    model.ReviewStatusInProgress,
 		RiskLevel: model.ReviewRiskLevelLow,
 	}
 	projectRepo := &mockReviewProjectRepo{
 		projects: map[uuid.UUID]*model.Project{
 			projectID: {
-				ID: projectID,
+				ID:       projectID,
 				Settings: `{"review_policy":{"requiredLayers":["layer2"],"requireManualApproval":true,"minRiskLevelForBlock":""}}`,
 			},
 		},
@@ -1020,15 +1020,15 @@ func TestReviewService_CompleteRoutesToPendingHumanWhenRiskThresholdExceeded(t *
 	}
 	reviewRepo := newMockReviewRepo()
 	reviewRepo.byID[reviewID] = &model.Review{
-		ID:       reviewID,
-		TaskID:   taskID,
-		Status:   model.ReviewStatusInProgress,
+		ID:        reviewID,
+		TaskID:    taskID,
+		Status:    model.ReviewStatusInProgress,
 		RiskLevel: model.ReviewRiskLevelLow,
 	}
 	projectRepo := &mockReviewProjectRepo{
 		projects: map[uuid.UUID]*model.Project{
 			projectID: {
-				ID: projectID,
+				ID:       projectID,
 				Settings: `{"review_policy":{"requiredLayers":[],"requireManualApproval":false,"minRiskLevelForBlock":"high"}}`,
 			},
 		},
@@ -1068,15 +1068,15 @@ func TestReviewService_CompleteAutoResolvesWhenPolicyPasses(t *testing.T) {
 	}
 	reviewRepo := newMockReviewRepo()
 	reviewRepo.byID[reviewID] = &model.Review{
-		ID:       reviewID,
-		TaskID:   taskID,
-		Status:   model.ReviewStatusInProgress,
+		ID:        reviewID,
+		TaskID:    taskID,
+		Status:    model.ReviewStatusInProgress,
 		RiskLevel: model.ReviewRiskLevelLow,
 	}
 	projectRepo := &mockReviewProjectRepo{
 		projects: map[uuid.UUID]*model.Project{
 			projectID: {
-				ID: projectID,
+				ID:       projectID,
 				Settings: `{"review_policy":{"requiredLayers":[],"requireManualApproval":false,"minRiskLevelForBlock":"critical"}}`,
 			},
 		},
@@ -1119,9 +1119,9 @@ func TestReviewService_ApproveReviewPreservesEvidenceAndAppendsDecision(t *testi
 	}
 	reviewRepo := newMockReviewRepo()
 	reviewRepo.byID[reviewID] = &model.Review{
-		ID:       reviewID,
-		TaskID:   taskID,
-		Status:   model.ReviewStatusPendingHuman,
+		ID:        reviewID,
+		TaskID:    taskID,
+		Status:    model.ReviewStatusPendingHuman,
 		RiskLevel: model.ReviewRiskLevelHigh,
 		Findings: []model.ReviewFinding{
 			{ID: "finding-1", Category: "security", Severity: "high", Message: "token exposure"},
@@ -1175,9 +1175,9 @@ func TestReviewService_RequestChangesReviewPreservesEvidenceAndAppendsDecision(t
 	}
 	reviewRepo := newMockReviewRepo()
 	reviewRepo.byID[reviewID] = &model.Review{
-		ID:       reviewID,
-		TaskID:   taskID,
-		Status:   model.ReviewStatusPendingHuman,
+		ID:        reviewID,
+		TaskID:    taskID,
+		Status:    model.ReviewStatusPendingHuman,
 		RiskLevel: model.ReviewRiskLevelHigh,
 		Findings: []model.ReviewFinding{
 			{ID: "finding-1", Category: "security", Severity: "high", Message: "token exposure"},
@@ -1231,9 +1231,9 @@ func TestReviewService_RejectReviewPreservesEvidenceAndAppendsDecision(t *testin
 	}
 	reviewRepo := newMockReviewRepo()
 	reviewRepo.byID[reviewID] = &model.Review{
-		ID:       reviewID,
-		TaskID:   taskID,
-		Status:   model.ReviewStatusPendingHuman,
+		ID:        reviewID,
+		TaskID:    taskID,
+		Status:    model.ReviewStatusPendingHuman,
 		RiskLevel: model.ReviewRiskLevelCritical,
 		Findings: []model.ReviewFinding{
 			{ID: "finding-1", Category: "security", Severity: "critical", Message: "critical vulnerability"},
@@ -1284,9 +1284,9 @@ func TestReviewService_MarkFalsePositiveDismissesMatchedFinding(t *testing.T) {
 	}
 	reviewRepo := newMockReviewRepo()
 	reviewRepo.byID[reviewID] = &model.Review{
-		ID:       reviewID,
-		TaskID:   taskID,
-		Status:   model.ReviewStatusCompleted,
+		ID:        reviewID,
+		TaskID:    taskID,
+		Status:    model.ReviewStatusCompleted,
 		RiskLevel: model.ReviewRiskLevelMedium,
 		Findings: []model.ReviewFinding{
 			{ID: "finding-1", Category: "security", Severity: "medium", Message: "allowed endpoint"},

@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/service"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 const testSecret = "test-secret-at-least-32-characters-long"

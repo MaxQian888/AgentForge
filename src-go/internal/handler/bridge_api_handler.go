@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
+	bridge "github.com/agentforge/server/internal/bridge"
+	"github.com/agentforge/server/internal/model"
+	pluginparser "github.com/agentforge/server/internal/plugin"
 	"github.com/labstack/echo/v4"
-	bridge "github.com/react-go-quick-starter/server/internal/bridge"
-	"github.com/react-go-quick-starter/server/internal/model"
-	pluginparser "github.com/react-go-quick-starter/server/internal/plugin"
 )
 
 type BridgeRuntimeCatalogHandler struct {

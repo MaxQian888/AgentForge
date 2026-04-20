@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/ws"
 	"gorm.io/gorm"
 )
 

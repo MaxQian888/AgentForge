@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // --- Fakes ---------------------------------------------------------------
@@ -228,10 +228,10 @@ func (r *fakeInvitationRepo) MarkExpired(_ context.Context, now time.Time, limit
 }
 
 type fakeMemberRepo struct {
-	mu          sync.Mutex
-	byUserProj  map[string]*model.Member
-	imIdent     map[string]bool
-	created     []*model.Member
+	mu         sync.Mutex
+	byUserProj map[string]*model.Member
+	imIdent    map[string]bool
+	created    []*model.Member
 }
 
 func newFakeMemberRepo() *fakeMemberRepo {

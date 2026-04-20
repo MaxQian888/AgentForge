@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // Sentinel errors surface the domain-level failure modes the handler maps
@@ -109,7 +109,7 @@ type InvitationService struct {
 
 // InvitationServiceConfig captures construction-time options.
 type InvitationServiceConfig struct {
-	AcceptURLBase string   // used to build the plaintext accept URL returned on create
+	AcceptURLBase string // used to build the plaintext accept URL returned on create
 	Now           func() time.Time
 }
 

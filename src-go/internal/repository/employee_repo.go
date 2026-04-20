@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

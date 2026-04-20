@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"gorm.io/gorm"
 )
 
@@ -27,21 +27,21 @@ func NewAuditEventRepository(db *gorm.DB) *AuditEventRepository {
 }
 
 type auditEventRecord struct {
-	ID                       uuid.UUID  `gorm:"column:id;primaryKey"`
-	ProjectID                uuid.UUID  `gorm:"column:project_id"`
-	OccurredAt               time.Time  `gorm:"column:occurred_at"`
-	ActorUserID              *uuid.UUID `gorm:"column:actor_user_id"`
-	ActorProjectRoleAtTime   string     `gorm:"column:actor_project_role_at_time"`
-	ActionID                 string     `gorm:"column:action_id"`
-	ResourceType             string     `gorm:"column:resource_type"`
-	ResourceID               string     `gorm:"column:resource_id"`
-	PayloadSnapshotJSON      jsonText   `gorm:"column:payload_snapshot_json;type:jsonb"`
-	SystemInitiated          bool       `gorm:"column:system_initiated"`
-	ConfiguredByUserID       *uuid.UUID `gorm:"column:configured_by_user_id"`
-	RequestID                string     `gorm:"column:request_id"`
-	IP                       string     `gorm:"column:ip"`
-	UserAgent                string     `gorm:"column:user_agent"`
-	CreatedAt                time.Time  `gorm:"column:created_at"`
+	ID                     uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID              uuid.UUID  `gorm:"column:project_id"`
+	OccurredAt             time.Time  `gorm:"column:occurred_at"`
+	ActorUserID            *uuid.UUID `gorm:"column:actor_user_id"`
+	ActorProjectRoleAtTime string     `gorm:"column:actor_project_role_at_time"`
+	ActionID               string     `gorm:"column:action_id"`
+	ResourceType           string     `gorm:"column:resource_type"`
+	ResourceID             string     `gorm:"column:resource_id"`
+	PayloadSnapshotJSON    jsonText   `gorm:"column:payload_snapshot_json;type:jsonb"`
+	SystemInitiated        bool       `gorm:"column:system_initiated"`
+	ConfiguredByUserID     *uuid.UUID `gorm:"column:configured_by_user_id"`
+	RequestID              string     `gorm:"column:request_id"`
+	IP                     string     `gorm:"column:ip"`
+	UserAgent              string     `gorm:"column:user_agent"`
+	CreatedAt              time.Time  `gorm:"column:created_at"`
 }
 
 func (auditEventRecord) TableName() string { return "project_audit_events" }

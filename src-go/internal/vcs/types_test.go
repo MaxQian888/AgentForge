@@ -3,7 +3,7 @@ package vcs_test
 import (
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs"
 )
 
 func TestRepoRefStringIsStable(t *testing.T) {

@@ -25,10 +25,10 @@ skills:
     sourceType: repo-authored
     docsRef: docs/role-yaml.md
 
-  - id: deploying-and-running-react-go-quick-starter
+  - id: deploying-and-running-agentforge
     family: repo-assistant
     verificationProfile: repo-assistant
-    canonicalRoot: .agents/skills/deploying-and-running-react-go-quick-starter
+    canonicalRoot: .agents/skills/deploying-and-running-agentforge
     sourceType: repo-authored
   - id: echo-go-backend
     family: repo-assistant

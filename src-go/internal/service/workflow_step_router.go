@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // Target-kind discriminator values accepted on the trigger payload (or step

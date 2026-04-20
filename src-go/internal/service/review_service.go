@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	bridgeclient "github.com/agentforge/server/internal/bridge"
+	eventbus "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
-	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
-	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -59,23 +59,23 @@ type ReviewBridgeClient interface {
 }
 
 type ReviewService struct {
-	reviews             ReviewRepository
-	tasks               ReviewTaskRepository
-	projects            ReviewProjectRepository
-	notifications       ReviewNotificationCreator
-	hub                 *ws.Hub
-	bus                 eventbus.Publisher
-	bridge              ReviewBridgeClient
-	planner             *ReviewExecutionPlanner
-	progress            *TaskProgressService
-	imProgress          IMBoundProgressNotifier
-	aggregation         *ReviewAggregationService
-	automation          AutomationEventEvaluator
-	links               entityLinkRepository
-	pages               wikiPageRepository
-	versions            pageVersionRepository
-	workflowLauncher    ReviewWorkflowLauncher
-	workflowLaunchFlag  func() bool
+	reviews            ReviewRepository
+	tasks              ReviewTaskRepository
+	projects           ReviewProjectRepository
+	notifications      ReviewNotificationCreator
+	hub                *ws.Hub
+	bus                eventbus.Publisher
+	bridge             ReviewBridgeClient
+	planner            *ReviewExecutionPlanner
+	progress           *TaskProgressService
+	imProgress         IMBoundProgressNotifier
+	aggregation        *ReviewAggregationService
+	automation         AutomationEventEvaluator
+	links              entityLinkRepository
+	pages              wikiPageRepository
+	versions           pageVersionRepository
+	workflowLauncher   ReviewWorkflowLauncher
+	workflowLaunchFlag func() bool
 }
 
 func reviewLogFields(review *model.Review, task *model.Task) log.Fields {
@@ -755,7 +755,6 @@ func (s *ReviewService) RequestHumanApproval(ctx context.Context, reviewID uuid.
 
 	return nil
 }
-
 
 var _ interface {
 	Trigger(context.Context, *model.TriggerReviewRequest) (*model.Review, error)

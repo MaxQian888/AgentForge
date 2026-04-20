@@ -12,8 +12,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // ErrUnknownAuditActionID indicates the caller passed an ActionID not
@@ -53,9 +53,9 @@ type AuditEventReader interface {
 
 // AuditService is the seam handlers and the eventbus consumer use.
 type AuditService struct {
-	sink            AuditEventSink
-	reader          AuditEventReader
-	validateAction  ActionIDValidator
+	sink           AuditEventSink
+	reader         AuditEventReader
+	validateAction ActionIDValidator
 }
 
 // NewAuditService constructs the service. validate is called for every

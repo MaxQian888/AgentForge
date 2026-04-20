@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/middleware"
 )
 
 func TestReviewTriggerAuthMiddleware_ServiceToken(t *testing.T) {

@@ -3,7 +3,7 @@ package memory_test
 import (
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/memory"
+	"github.com/agentforge/server/internal/memory"
 )
 
 func tokenEstimator(text string) int {

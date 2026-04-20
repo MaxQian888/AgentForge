@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	memorypkg "github.com/react-go-quick-starter/server/internal/memory"
+	memorypkg "github.com/agentforge/server/internal/memory"
 )
 
 const defaultHistoryLimit = 256

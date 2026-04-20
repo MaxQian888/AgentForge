@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // agentRunReader is the minimal dependency the agent-run projector needs.

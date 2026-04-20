@@ -1181,7 +1181,7 @@ import (
     "context"
     "testing"
 
-    "github.com/react-go-quick-starter/server/internal/eventbus"
+    "github.com/agentforge/server/internal/eventbus"
     "github.com/stretchr/testify/assert"
     "github.com/stretchr/testify/require"
 )
@@ -1221,7 +1221,7 @@ import (
     "context"
     "fmt"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
 )
 
 type Validate struct{}
@@ -1262,7 +1262,7 @@ import (
     "context"
     "testing"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/stretchr/testify/assert"
 )
 
@@ -1299,7 +1299,7 @@ import (
     "fmt"
     "strings"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
 )
 
 type Auth struct{}
@@ -1359,7 +1359,7 @@ import (
     "context"
     "testing"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/stretchr/testify/assert"
     "github.com/stretchr/testify/require"
 )
@@ -1389,7 +1389,7 @@ import (
     "context"
     "testing"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/stretchr/testify/assert"
     "github.com/stretchr/testify/require"
 )
@@ -1433,7 +1433,7 @@ package mods
 import (
     "context"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
 )
 
 type Enrich struct{}
@@ -1461,7 +1461,7 @@ package mods
 import (
     "context"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
 )
 
 type ChannelRouter struct{}
@@ -1525,7 +1525,7 @@ import (
     "context"
     "testing"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     dto "github.com/prometheus/client_model/go"
     "github.com/stretchr/testify/require"
 )
@@ -1556,7 +1556,7 @@ package mods
 import (
     "context"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/prometheus/client_golang/prometheus"
 )
 
@@ -1724,8 +1724,8 @@ import (
     "encoding/json"
     "testing"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
-    "github.com/react-go-quick-starter/server/internal/eventbus/repository"
+    eb "github.com/agentforge/server/internal/eventbus"
+    "github.com/agentforge/server/internal/eventbus/repository"
     // use the same test-DB helper as existing repo tests
     "github.com/stretchr/testify/assert"
     "github.com/stretchr/testify/require"
@@ -1759,7 +1759,7 @@ import (
     "encoding/json"
     "fmt"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/jmoiron/sqlx"
 )
 
@@ -1838,7 +1838,7 @@ import (
     "context"
     "encoding/json"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/jmoiron/sqlx"
 )
 
@@ -1894,7 +1894,7 @@ import (
     "errors"
     "testing"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/stretchr/testify/assert"
 )
 
@@ -1946,7 +1946,7 @@ import (
     "context"
     "time"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     log "github.com/sirupsen/logrus"
 )
 
@@ -2001,8 +2001,8 @@ package mods
 import (
     "context"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
-    "github.com/react-go-quick-starter/server/internal/eventbus/repository"
+    eb "github.com/agentforge/server/internal/eventbus"
+    "github.com/agentforge/server/internal/eventbus/repository"
 )
 
 type repoWriter struct {
@@ -2168,7 +2168,7 @@ import (
     "encoding/json"
     "testing"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/stretchr/testify/assert"
 )
 
@@ -2235,7 +2235,7 @@ import (
     "context"
     "encoding/json"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     log "github.com/sirupsen/logrus"
 )
 
@@ -2319,7 +2319,7 @@ import (
     "context"
     "encoding/json"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     log "github.com/sirupsen/logrus"
 )
 
@@ -2371,7 +2371,7 @@ import (
     "encoding/json"
     "testing"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
     "github.com/stretchr/testify/assert"
 )
 
@@ -2449,9 +2449,9 @@ Locate where `hub := ws.NewHub()` is created; right after, wire the bus:
 
 ```go
 import (
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
-    ebrepo "github.com/react-go-quick-starter/server/internal/eventbus/repository"
-    "github.com/react-go-quick-starter/server/internal/eventbus/mods"
+    eb "github.com/agentforge/server/internal/eventbus"
+    ebrepo "github.com/agentforge/server/internal/eventbus/repository"
+    "github.com/agentforge/server/internal/eventbus/mods"
 )
 
 // ...
@@ -2547,7 +2547,7 @@ package service_test
 
 import (
     "context"
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
+    eb "github.com/agentforge/server/internal/eventbus"
 )
 
 type FakeBus struct { Events []*eb.Event }
@@ -2806,9 +2806,9 @@ import (
     "testing"
     "time"
 
-    eb "github.com/react-go-quick-starter/server/internal/eventbus"
-    "github.com/react-go-quick-starter/server/internal/eventbus/mods"
-    "github.com/react-go-quick-starter/server/internal/eventbus/repository"
+    eb "github.com/agentforge/server/internal/eventbus"
+    "github.com/agentforge/server/internal/eventbus/mods"
+    "github.com/agentforge/server/internal/eventbus/repository"
     "github.com/stretchr/testify/require"
 )
 

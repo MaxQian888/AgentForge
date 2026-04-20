@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
+	"github.com/agentforge/server/internal/adsplatform"
 )
 
 type stubProvider struct{ name string }

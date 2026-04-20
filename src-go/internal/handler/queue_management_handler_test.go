@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/handler"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type mockQueueManagementService struct {
@@ -47,16 +47,16 @@ func TestQueueManagementHandler_ListReturnsEntries(t *testing.T) {
 	e := newAgentTestEcho()
 	projectID := uuid.New()
 	entry := &model.AgentPoolQueueEntry{
-		EntryID:   uuid.NewString(),
-		ProjectID: projectID.String(),
-		TaskID:    uuid.NewString(),
-		MemberID:  uuid.NewString(),
-		Status:    model.AgentPoolQueueStatusQueued,
+		EntryID:             uuid.NewString(),
+		ProjectID:           projectID.String(),
+		TaskID:              uuid.NewString(),
+		MemberID:            uuid.NewString(),
+		Status:              model.AgentPoolQueueStatusQueued,
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
 	}
 	mockService := &mockQueueManagementService{listEntries: []*model.AgentPoolQueueEntry{entry}}
 	h := handler.NewQueueManagementHandler(mockService)
@@ -128,15 +128,15 @@ func TestQueueManagementHandler_CancelReturnsUpdatedEntry(t *testing.T) {
 	entryID := uuid.NewString()
 	h := handler.NewQueueManagementHandler(&mockQueueManagementService{
 		cancelEntry: &model.AgentPoolQueueEntry{
-			EntryID:   entryID,
-			ProjectID: projectID.String(),
-			TaskID:    uuid.NewString(),
-			MemberID:  uuid.NewString(),
-			Status:    model.AgentPoolQueueStatusCancelled,
-			Reason:    "manual_cancel",
+			EntryID:             entryID,
+			ProjectID:           projectID.String(),
+			TaskID:              uuid.NewString(),
+			MemberID:            uuid.NewString(),
+			Status:              model.AgentPoolQueueStatusCancelled,
+			Reason:              "manual_cancel",
 			RecoveryDisposition: model.QueueRecoveryDispositionCancelled,
-			CreatedAt: time.Now().UTC().Add(-time.Minute),
-			UpdatedAt: time.Now().UTC(),
+			CreatedAt:           time.Now().UTC().Add(-time.Minute),
+			UpdatedAt:           time.Now().UTC(),
 		},
 	})
 

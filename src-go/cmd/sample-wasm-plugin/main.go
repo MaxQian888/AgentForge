@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	pluginsdk "github.com/react-go-quick-starter/server/plugin-sdk-go"
+	pluginsdk "github.com/agentforge/server/plugin-sdk-go"
 )
 
 type samplePlugin struct{}

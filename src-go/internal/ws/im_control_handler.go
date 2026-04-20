@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/model"
 	log "github.com/sirupsen/logrus"
 )
 

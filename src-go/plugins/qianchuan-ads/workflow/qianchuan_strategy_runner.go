@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	nodetypes "github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
+	nodetypes "github.com/agentforge/server/internal/workflow/nodetypes"
 )
 
 // QianchuanStrategyRunnerHandler implements the "qianchuan_strategy_runner"

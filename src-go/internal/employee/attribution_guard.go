@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // Attribution-guard errors are returned by AttributionGuard methods so callers

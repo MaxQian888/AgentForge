@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/handler"
+	"github.com/agentforge/server/internal/service"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	"github.com/react-go-quick-starter/server/internal/service"
 	"golang.org/x/net/websocket"
 )
 

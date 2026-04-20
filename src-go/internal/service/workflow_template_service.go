@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	log "github.com/sirupsen/logrus"
 )
 
 var (
-	ErrWorkflowTemplateNotFound = errors.New("workflow template not found")
+	ErrWorkflowTemplateNotFound  = errors.New("workflow template not found")
 	ErrWorkflowTemplateImmutable = errors.New("workflow template is immutable")
 )
 
@@ -31,8 +31,8 @@ type WorkflowTemplateRepo interface {
 
 // WorkflowTemplateService manages workflow templates: listing, cloning, seeding.
 type WorkflowTemplateService struct {
-	repo    WorkflowTemplateRepo
-	dagSvc  *DAGWorkflowService
+	repo   WorkflowTemplateRepo
+	dagSvc *DAGWorkflowService
 }
 
 func NewWorkflowTemplateService(repo WorkflowTemplateRepo, dagSvc *DAGWorkflowService) *WorkflowTemplateService {

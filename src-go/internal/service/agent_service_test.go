@@ -13,18 +13,18 @@ import (
 	"testing"
 	"time"
 
+	bridgeclient "github.com/agentforge/server/internal/bridge"
+	eventbus "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/pool"
+	"github.com/agentforge/server/internal/repository"
+	rolepkg "github.com/agentforge/server/internal/role"
+	"github.com/agentforge/server/internal/service"
+	"github.com/agentforge/server/internal/worktree"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
-	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/pool"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
-	"github.com/react-go-quick-starter/server/internal/service"
-	"github.com/react-go-quick-starter/server/internal/worktree"
-	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 type mockAgentRunRepo struct {

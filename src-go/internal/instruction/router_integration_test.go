@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/instruction"
+	"github.com/agentforge/server/internal/instruction"
 )
 
 func TestInstructionRouter_ProcessNextRoutesAcrossTargets(t *testing.T) {

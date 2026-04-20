@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // scopeAssetProject is a WS-router sentinel: the router substitutes it
@@ -74,10 +74,10 @@ type taskGroupViewOpts struct {
 }
 
 const (
-	defaultPageSize        = 50
-	maxPageSize            = 50
-	defaultTaskGroupSort   = "updated_at_desc"
-	taskGroupTTL           = 30 * time.Second
+	defaultPageSize         = 50
+	maxPageSize             = 50
+	defaultTaskGroupSort    = "updated_at_desc"
+	taskGroupTTL            = 30 * time.Second
 	savedViewUnsupportedMsg = "saved views not yet supported"
 )
 

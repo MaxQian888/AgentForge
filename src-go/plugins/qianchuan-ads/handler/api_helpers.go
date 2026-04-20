@@ -1,9 +1,9 @@
 package qchandler
 
 import (
+	appMiddleware "github.com/agentforge/server/internal/middleware"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 )
 
 // claimsUserID mirrors the unexported helper of the same name in

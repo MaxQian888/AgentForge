@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/employee"
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/employee"
+	"github.com/agentforge/server/internal/model"
 )
 
 // ListRepository is the read side of workflow_triggers that Router needs.

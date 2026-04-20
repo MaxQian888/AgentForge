@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 // dispatcherReplyTarget is the wire shape the trigger handler writes into
@@ -58,12 +58,12 @@ func decodeReplyTarget(raw any) *dispatcherReplyTarget {
 // IM Bridge `card` field. We only need to emit valid JSON; the bridge owns
 // rendering.
 type providerNeutralCard struct {
-	Title   string                 `json:"title"`
-	Status  string                 `json:"status,omitempty"`
-	Summary string                 `json:"summary,omitempty"`
-	Fields  []map[string]string    `json:"fields,omitempty"`
+	Title   string                  `json:"title"`
+	Status  string                  `json:"status,omitempty"`
+	Summary string                  `json:"summary,omitempty"`
+	Fields  []map[string]string     `json:"fields,omitempty"`
 	Actions []providerNeutralAction `json:"actions,omitempty"`
-	Footer  string                 `json:"footer,omitempty"`
+	Footer  string                  `json:"footer,omitempty"`
 }
 
 type providerNeutralAction struct {

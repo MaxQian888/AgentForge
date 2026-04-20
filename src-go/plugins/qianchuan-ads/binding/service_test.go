@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/agentforge/server/internal/adsplatform"
+	mockprov "github.com/agentforge/server/internal/adsplatform/mock"
+	qianchuanbinding "github.com/agentforge/server/plugins/qianchuan-ads/binding"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	mockprov "github.com/react-go-quick-starter/server/internal/adsplatform/mock"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/binding"
 )
 
 type fakeSecrets struct {

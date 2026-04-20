@@ -1,5 +1,5 @@
 ---
-name: deploying-and-running-react-go-quick-starter
+name: deploying-and-running-agentforge
 description: Use when Codex needs to run, package, or deploy this repository's Next.js 16 frontend, Go sidecar, Tauri desktop shell, Docker-backed local services, or GitHub Actions release flow, especially when choosing between web mode, backend mode, desktop mode, static export delivery, or release artifacts.
 ---
 

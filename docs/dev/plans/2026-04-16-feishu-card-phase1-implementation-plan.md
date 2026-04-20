@@ -1108,7 +1108,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 func TestIMReactionEventRepository_RecordRoundTrip(t *testing.T) {
@@ -1188,7 +1188,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 	"gorm.io/gorm"
 )
 
@@ -2159,7 +2159,7 @@ func TestExecuteOverflow_InvalidSelectedOption(t *testing.T) {
 }
 ```
 
-Use the same imports (`github.com/react-go-quick-starter/server/internal/core` or whatever the bridge package alias is — the backend should not import the bridge; use an inline `parseActionRef` helper if needed, or copy the logic from `src-im-bridge/core/action_reference.go` into a backend utility).
+Use the same imports (`github.com/agentforge/server/internal/core` or whatever the bridge package alias is — the backend should not import the bridge; use an inline `parseActionRef` helper if needed, or copy the logic from `src-im-bridge/core/action_reference.go` into a backend utility).
 
 **Note:** The backend cannot import the bridge package. Create a small helper in `im_action_execution.go` or a sibling file to parse `act:<verb>:<entity>?k=v&...`.
 

@@ -64,7 +64,7 @@ flowchart LR
 这个仓库正从早期 starter 基础迁移到 AgentForge，这一点非常重要：
 
 - 产品文档和架构文档已经统一使用 `AgentForge`
-- 一些代码、包名、模块名仍保留 `react-quick-starter` 或 `react-go-quick-starter` 这类历史命名
+- 一些代码、包名、模块名仍保留 `react-quick-starter` 或 `agentforge` 这类历史命名
 - 仓库里已经有真实实现工作区，但产品设计推进速度快于部分运行面
 - 如果不同文档之间有冲突，请优先以 [`docs/PRD.md`](./docs/PRD.md) 为准
 

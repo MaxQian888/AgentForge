@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 var canonicalIMProviderCatalog = []model.IMProviderCatalogEntry{

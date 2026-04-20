@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/pool"
+	"github.com/agentforge/server/internal/pool"
 )
 
 func TestPoolAcquireReleaseLifecycle(t *testing.T) {

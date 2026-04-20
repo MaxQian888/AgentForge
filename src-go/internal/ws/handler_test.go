@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/ws"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 const wsTestSecret = "test-secret-at-least-32-characters-long"

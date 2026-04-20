@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
+	bridgeclient "github.com/agentforge/server/internal/bridge"
 	log "github.com/sirupsen/logrus"
 )
 

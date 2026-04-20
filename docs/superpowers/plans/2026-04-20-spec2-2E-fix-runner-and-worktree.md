@@ -88,8 +88,8 @@
         "testing"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/fixrunner"
-        "github.com/react-go-quick-starter/server/pkg/database"
+        "github.com/agentforge/server/internal/fixrunner"
+        "github.com/agentforge/server/pkg/database"
     )
 
     func TestLock_AcquireAndRelease(t *testing.T) {
@@ -247,7 +247,7 @@
         "path/filepath"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/worktree"
+        "github.com/agentforge/server/internal/worktree"
     )
 
     func gitInit(t *testing.T, dir string) string {
@@ -349,9 +349,9 @@
         "context"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/fixrunner"
-        "github.com/react-go-quick-starter/server/internal/vcs"
-        "github.com/react-go-quick-starter/server/internal/vcs/mock"
+        "github.com/agentforge/server/internal/fixrunner"
+        "github.com/agentforge/server/internal/vcs"
+        "github.com/agentforge/server/internal/vcs/mock"
     )
 
     func TestService_DryRun_Success(t *testing.T) {
@@ -427,11 +427,11 @@
         "time"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/audit"
-        "github.com/react-go-quick-starter/server/internal/eventbus"
-        "github.com/react-go-quick-starter/server/internal/secrets"
-        "github.com/react-go-quick-starter/server/internal/vcs"
-        "github.com/react-go-quick-starter/server/internal/worktree"
+        "github.com/agentforge/server/internal/audit"
+        "github.com/agentforge/server/internal/eventbus"
+        "github.com/agentforge/server/internal/secrets"
+        "github.com/agentforge/server/internal/vcs"
+        "github.com/agentforge/server/internal/worktree"
     )
 
     type Service struct {
@@ -675,7 +675,7 @@
         "net/http/httptest"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/handler"
+        "github.com/agentforge/server/internal/handler"
     )
 
     func TestFixRunnerHandler_RejectsMissingToken(t *testing.T) {
@@ -708,7 +708,7 @@
         "net/http"
 
         "github.com/labstack/echo/v4"
-        "github.com/react-go-quick-starter/server/internal/fixrunner"
+        "github.com/agentforge/server/internal/fixrunner"
     )
 
     type FixRunnerHandler struct {
@@ -922,7 +922,7 @@
         "context"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/fixrunner"
+        "github.com/agentforge/server/internal/fixrunner"
     )
 
     func TestIntegration_ExecuteEndToEnd(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	bridgeclient "github.com/agentforge/server/internal/bridge"
 	"github.com/google/uuid"
-	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
 )
 
 type spawnVerificationBridge struct {

@@ -13,8 +13,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // QianchuanStrategyLoopName is the canonical name for the strategy loop.
@@ -24,16 +24,16 @@ const QianchuanStrategyLoopName = "system:qianchuan_strategy_loop"
 func QianchuanStrategyLoopNodes() []model.WorkflowNode {
 	return []model.WorkflowNode{
 		{
-			ID:   "trigger",
-			Type: "trigger",
-			Label: "Schedule Trigger",
+			ID:       "trigger",
+			Type:     "trigger",
+			Label:    "Schedule Trigger",
 			Position: model.WorkflowPos{X: 0, Y: 0},
-			Config: mustJSON(map[string]any{"source": "schedule"}),
+			Config:   mustJSON(map[string]any{"source": "schedule"}),
 		},
 		{
-			ID:   "fetch_metrics",
-			Type: "qianchuan_metrics_fetcher",
-			Label: "Fetch Metrics",
+			ID:       "fetch_metrics",
+			Type:     "qianchuan_metrics_fetcher",
+			Label:    "Fetch Metrics",
 			Position: model.WorkflowPos{X: 200, Y: 0},
 			Config: mustJSON(map[string]any{
 				"binding_id_template": "{{$context.binding_id}}",
@@ -41,9 +41,9 @@ func QianchuanStrategyLoopNodes() []model.WorkflowNode {
 			}),
 		},
 		{
-			ID:   "run_strategy",
-			Type: "qianchuan_strategy_runner",
-			Label: "Run Strategy",
+			ID:       "run_strategy",
+			Type:     "qianchuan_strategy_runner",
+			Label:    "Run Strategy",
 			Position: model.WorkflowPos{X: 400, Y: 0},
 			Config: mustJSON(map[string]any{
 				"strategy_id_template": "{{$context.strategy_id}}",
@@ -52,18 +52,18 @@ func QianchuanStrategyLoopNodes() []model.WorkflowNode {
 			}),
 		},
 		{
-			ID:   "has_actions",
-			Type: "condition",
-			Label: "Has Actions?",
+			ID:       "has_actions",
+			Type:     "condition",
+			Label:    "Has Actions?",
 			Position: model.WorkflowPos{X: 600, Y: 0},
 			Config: mustJSON(map[string]any{
 				"expression": "len($dataStore.run_strategy.actions) > 0",
 			}),
 		},
 		{
-			ID:   "actions_loop",
-			Type: "loop",
-			Label: "Actions Loop",
+			ID:       "actions_loop",
+			Type:     "loop",
+			Label:    "Actions Loop",
 			Position: model.WorkflowPos{X: 800, Y: -50},
 			Config: mustJSON(map[string]any{
 				"target_node":    "execute_action",
@@ -72,9 +72,9 @@ func QianchuanStrategyLoopNodes() []model.WorkflowNode {
 			}),
 		},
 		{
-			ID:   "execute_action",
-			Type: "qianchuan_action_executor",
-			Label: "Execute Action",
+			ID:       "execute_action",
+			Type:     "qianchuan_action_executor",
+			Label:    "Execute Action",
 			Position: model.WorkflowPos{X: 1000, Y: -50},
 			Config: mustJSON(map[string]any{
 				"action_log_id_template": "{{$dataStore.run_strategy.actions[$dataStore.actions_loop._iter].action_log_id}}",
@@ -82,9 +82,9 @@ func QianchuanStrategyLoopNodes() []model.WorkflowNode {
 			}),
 		},
 		{
-			ID:   "summary_card",
-			Type: "im_send",
-			Label: "Summary Card",
+			ID:       "summary_card",
+			Type:     "im_send",
+			Label:    "Summary Card",
 			Position: model.WorkflowPos{X: 1200, Y: 0},
 			Config: mustJSON(map[string]any{
 				"target": "reply_to_trigger",

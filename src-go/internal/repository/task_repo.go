@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/pkg/database"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/pkg/database"
 	"gorm.io/gorm"
 )
 

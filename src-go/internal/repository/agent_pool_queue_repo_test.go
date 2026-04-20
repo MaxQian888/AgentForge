@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"gorm.io/gorm"
 )
 
@@ -20,15 +20,15 @@ func TestAgentPoolQueueRepository_InMemoryLifecycle(t *testing.T) {
 	memberID := uuid.New()
 
 	entry, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
-		ProjectID: projectID,
-		TaskID:    taskID,
-		MemberID:  memberID,
-		Runtime:   "codex",
-		Provider:  "openai",
-		Model:     "gpt-5-codex",
-		RoleID:    "planner-agent",
-		BudgetUSD: 5,
-		Reason:    "agent pool is at capacity",
+		ProjectID:           projectID,
+		TaskID:              taskID,
+		MemberID:            memberID,
+		Runtime:             "codex",
+		Provider:            "openai",
+		Model:               "gpt-5-codex",
+		RoleID:              "planner-agent",
+		BudgetUSD:           5,
+		Reason:              "agent pool is at capacity",
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,
@@ -80,15 +80,15 @@ func TestAgentPoolQueueRepository_PersistsThroughDatabase(t *testing.T) {
 	memberID := uuid.New()
 
 	entry, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
-		ProjectID: projectID,
-		TaskID:    taskID,
-		MemberID:  memberID,
-		Runtime:   "claude_code",
-		Provider:  "anthropic",
-		Model:     "claude-sonnet-4-5",
-		RoleID:    "coding-agent",
-		BudgetUSD: 8,
-		Reason:    "agent pool is at capacity",
+		ProjectID:           projectID,
+		TaskID:              taskID,
+		MemberID:            memberID,
+		Runtime:             "claude_code",
+		Provider:            "anthropic",
+		Model:               "claude-sonnet-4-5",
+		RoleID:              "coding-agent",
+		BudgetUSD:           8,
+		Reason:              "agent pool is at capacity",
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "bridge",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,
@@ -135,14 +135,14 @@ func TestAgentPoolQueueRepository_ReserveNextQueuedByProjectPrefersHigherPriorit
 	projectID := uuid.New()
 
 	lowEntry, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
-		ProjectID: projectID,
-		TaskID:    uuid.New(),
-		MemberID:  uuid.New(),
-		Runtime:   "codex",
-		Provider:  "openai",
-		Model:     "gpt-5-codex",
-		Priority:  model.PriorityLow,
-		Reason:    "agent pool is at capacity",
+		ProjectID:           projectID,
+		TaskID:              uuid.New(),
+		MemberID:            uuid.New(),
+		Runtime:             "codex",
+		Provider:            "openai",
+		Model:               "gpt-5-codex",
+		Priority:            model.PriorityLow,
+		Reason:              "agent pool is at capacity",
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,
@@ -152,14 +152,14 @@ func TestAgentPoolQueueRepository_ReserveNextQueuedByProjectPrefersHigherPriorit
 	}
 
 	highEntry, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
-		ProjectID: projectID,
-		TaskID:    uuid.New(),
-		MemberID:  uuid.New(),
-		Runtime:   "codex",
-		Provider:  "openai",
-		Model:     "gpt-5-codex",
-		Priority:  model.PriorityHigh,
-		Reason:    "agent pool is at capacity",
+		ProjectID:           projectID,
+		TaskID:              uuid.New(),
+		MemberID:            uuid.New(),
+		Runtime:             "codex",
+		Provider:            "openai",
+		Model:               "gpt-5-codex",
+		Priority:            model.PriorityHigh,
+		Reason:              "agent pool is at capacity",
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,
@@ -192,14 +192,14 @@ func TestAgentPoolQueueRepository_ListQueuedByProjectUsesPriorityThenFIFO(t *tes
 	base := time.Now().UTC().Add(-time.Minute)
 
 	critical, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
-		ProjectID: projectID,
-		TaskID:    uuid.New(),
-		MemberID:  uuid.New(),
-		Runtime:   "codex",
-		Provider:  "openai",
-		Model:     "gpt-5-codex",
-		Priority:  model.PriorityCritical,
-		Reason:    "agent pool is at capacity",
+		ProjectID:           projectID,
+		TaskID:              uuid.New(),
+		MemberID:            uuid.New(),
+		Runtime:             "codex",
+		Provider:            "openai",
+		Model:               "gpt-5-codex",
+		Priority:            model.PriorityCritical,
+		Reason:              "agent pool is at capacity",
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,
@@ -208,14 +208,14 @@ func TestAgentPoolQueueRepository_ListQueuedByProjectUsesPriorityThenFIFO(t *tes
 		t.Fatalf("QueueAgentAdmission() critical error = %v", err)
 	}
 	normalFirst, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
-		ProjectID: projectID,
-		TaskID:    uuid.New(),
-		MemberID:  uuid.New(),
-		Runtime:   "codex",
-		Provider:  "openai",
-		Model:     "gpt-5-codex",
-		Priority:  model.PriorityNormal,
-		Reason:    "agent pool is at capacity",
+		ProjectID:           projectID,
+		TaskID:              uuid.New(),
+		MemberID:            uuid.New(),
+		Runtime:             "codex",
+		Provider:            "openai",
+		Model:               "gpt-5-codex",
+		Priority:            model.PriorityNormal,
+		Reason:              "agent pool is at capacity",
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,
@@ -224,14 +224,14 @@ func TestAgentPoolQueueRepository_ListQueuedByProjectUsesPriorityThenFIFO(t *tes
 		t.Fatalf("QueueAgentAdmission() normalFirst error = %v", err)
 	}
 	normalSecond, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
-		ProjectID: projectID,
-		TaskID:    uuid.New(),
-		MemberID:  uuid.New(),
-		Runtime:   "codex",
-		Provider:  "openai",
-		Model:     "gpt-5-codex",
-		Priority:  model.PriorityNormal,
-		Reason:    "agent pool is at capacity",
+		ProjectID:           projectID,
+		TaskID:              uuid.New(),
+		MemberID:            uuid.New(),
+		Runtime:             "codex",
+		Provider:            "openai",
+		Model:               "gpt-5-codex",
+		Priority:            model.PriorityNormal,
+		Reason:              "agent pool is at capacity",
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,
@@ -264,13 +264,13 @@ func TestAgentPoolQueueRepository_DefaultPriorityIsLow(t *testing.T) {
 	repo := NewAgentPoolQueueRepository()
 
 	entry, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
-		ProjectID: uuid.New(),
-		TaskID:    uuid.New(),
-		MemberID:  uuid.New(),
-		Runtime:   "codex",
-		Provider:  "openai",
-		Model:     "gpt-5-codex",
-		Reason:    "agent pool is at capacity",
+		ProjectID:           uuid.New(),
+		TaskID:              uuid.New(),
+		MemberID:            uuid.New(),
+		Runtime:             "codex",
+		Provider:            "openai",
+		Model:               "gpt-5-codex",
+		Reason:              "agent pool is at capacity",
 		GuardrailType:       model.DispatchGuardrailTypePool,
 		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionPending,

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	nodetypes "github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
+	"github.com/agentforge/server/internal/model"
+	nodetypes "github.com/agentforge/server/internal/workflow/nodetypes"
 )
 
 func TestQianchuanStrategyRunner_EmitsEffect_WithResolvedFields(t *testing.T) {

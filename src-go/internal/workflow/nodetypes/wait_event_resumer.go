@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // ErrWaitEventNotWaiting is returned when Resume is called against an

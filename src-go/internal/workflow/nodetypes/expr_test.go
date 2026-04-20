@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 func TestResolveTemplateVars(t *testing.T) {
@@ -255,9 +255,9 @@ func TestEvaluateCondition_NilRepoIsSafe(t *testing.T) {
 
 func TestCompareValues(t *testing.T) {
 	tests := []struct {
-		name           string
+		name            string
 		left, op, right string
-		want           bool
+		want            bool
 	}{
 		{"numeric ==", "5", "==", "5", true},
 		{"numeric != true", "5", "!=", "6", true},

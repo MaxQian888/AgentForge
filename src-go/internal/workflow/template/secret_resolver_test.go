@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/workflow/template"
+	"github.com/agentforge/server/internal/workflow/template"
 )
 
 type fakeResolver struct {

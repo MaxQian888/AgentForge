@@ -15,10 +15,10 @@ import (
 
 	"github.com/google/uuid"
 
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
-	"github.com/react-go-quick-starter/server/internal/ws"
+	eb "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
+	"github.com/agentforge/server/internal/ws"
 )
 
 // TestIntegration_DispatcherEndToEnd boots a mock IM Bridge server,

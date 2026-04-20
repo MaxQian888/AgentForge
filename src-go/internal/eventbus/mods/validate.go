@@ -3,7 +3,8 @@ package mods
 import (
 	"context"
 	"fmt"
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+
+	eb "github.com/agentforge/server/internal/eventbus"
 )
 
 type Validate struct{}

@@ -7,19 +7,19 @@ import (
 	"fmt"
 	"strings"
 
+	eventbus "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
-	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
 )
 
 var (
-	ErrTeamNotFound         = errors.New("team not found")
-	ErrTeamAlreadyActive    = errors.New("team already active for this task")
-	ErrTeamNotActive        = errors.New("team is not active")
-	ErrTeamTaskNotFound     = errors.New("team task not found")
-	ErrProjectArchivedTeam  = errors.New("team start: project is archived")
+	ErrTeamNotFound        = errors.New("team not found")
+	ErrTeamAlreadyActive   = errors.New("team already active for this task")
+	ErrTeamNotActive       = errors.New("team is not active")
+	ErrTeamTaskNotFound    = errors.New("team task not found")
+	ErrProjectArchivedTeam = errors.New("team start: project is archived")
 )
 
 // TeamRunRepository defines persistence for agent teams.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // fakeConditionTaskRepo is a stub ConditionTaskResolver used to verify that

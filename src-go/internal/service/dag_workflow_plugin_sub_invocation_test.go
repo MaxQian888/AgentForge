@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/workflow/nodetypes"
 )
 
 // stubPluginEngine drives the PluginSubWorkflowEngine-shaped seam without
@@ -64,12 +64,12 @@ func (s *stubPluginEngine) Start(ctx context.Context, target string, seed map[st
 // the child's outputs materialized into its dataStore.
 //
 // Wiring mirrors routes.go at the granularity that matters for this flow:
-// - real NodeTypeRegistry with the real sub_workflow handler
-// - real EffectApplier with a real SubWorkflowEngineRegistry + LinkRepoAdapter
-// - real DAGWorkflowService driving node dispatch + parent resume
-// - real PluginSubWorkflowTerminalBridge flowing plugin-run terminal events
-//   back into the DAG service
-// - stub plugin engine (no actual plugin runtime) to keep the test hermetic
+//   - real NodeTypeRegistry with the real sub_workflow handler
+//   - real EffectApplier with a real SubWorkflowEngineRegistry + LinkRepoAdapter
+//   - real DAGWorkflowService driving node dispatch + parent resume
+//   - real PluginSubWorkflowTerminalBridge flowing plugin-run terminal events
+//     back into the DAG service
+//   - stub plugin engine (no actual plugin runtime) to keep the test hermetic
 func TestDAGSubWorkflow_PluginChild_FullLoop(t *testing.T) {
 	ctx := context.Background()
 

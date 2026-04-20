@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs"
 )
 
 func TestErrorSentinelsAreDistinct(t *testing.T) {

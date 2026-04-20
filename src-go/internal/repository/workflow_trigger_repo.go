@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"gorm.io/gorm"
 )
 
@@ -195,13 +195,13 @@ func upsertTriggerTx(ctx context.Context, tx *gorm.DB, t *model.WorkflowTrigger,
 		// Row exists — update mutable fields.
 		now := time.Now().UTC()
 		updates := map[string]any{
-			"input_mapping":             newJSONText(rawMessageToString(t.InputMapping), "{}"),
-			"idempotency_key_template":  t.IdempotencyKeyTemplate,
-			"dedupe_window_seconds":     t.DedupeWindowSeconds,
-			"enabled":                   t.Enabled,
-			"disabled_reason":           t.DisabledReason,
-			"acting_employee_id":        t.ActingEmployeeID,
-			"updated_at":                now,
+			"input_mapping":            newJSONText(rawMessageToString(t.InputMapping), "{}"),
+			"idempotency_key_template": t.IdempotencyKeyTemplate,
+			"dedupe_window_seconds":    t.DedupeWindowSeconds,
+			"enabled":                  t.Enabled,
+			"disabled_reason":          t.DisabledReason,
+			"acting_employee_id":       t.ActingEmployeeID,
+			"updated_at":               now,
 		}
 		if updErr := tx.WithContext(ctx).
 			Model(&workflowTriggerRecord{}).
@@ -434,16 +434,16 @@ func (r *WorkflowTriggerRepository) Update(ctx context.Context, t *model.Workflo
 	}
 	now := time.Now().UTC()
 	updates := map[string]any{
-		"config":                    newJSONText(rawMessageToString(t.Config), "{}"),
-		"input_mapping":             newJSONText(rawMessageToString(t.InputMapping), "{}"),
-		"idempotency_key_template":  t.IdempotencyKeyTemplate,
-		"dedupe_window_seconds":     t.DedupeWindowSeconds,
-		"enabled":                   t.Enabled,
-		"disabled_reason":           t.DisabledReason,
-		"display_name":              t.DisplayName,
-		"description":               t.Description,
-		"acting_employee_id":        t.ActingEmployeeID,
-		"updated_at":                now,
+		"config":                   newJSONText(rawMessageToString(t.Config), "{}"),
+		"input_mapping":            newJSONText(rawMessageToString(t.InputMapping), "{}"),
+		"idempotency_key_template": t.IdempotencyKeyTemplate,
+		"dedupe_window_seconds":    t.DedupeWindowSeconds,
+		"enabled":                  t.Enabled,
+		"disabled_reason":          t.DisabledReason,
+		"display_name":             t.DisplayName,
+		"description":              t.Description,
+		"acting_employee_id":       t.ActingEmployeeID,
+		"updated_at":               now,
 	}
 	res := r.db.WithContext(ctx).
 		Model(&workflowTriggerRecord{}).

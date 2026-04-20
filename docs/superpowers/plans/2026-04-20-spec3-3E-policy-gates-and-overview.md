@@ -96,7 +96,7 @@
 
     import (
         "time"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     type GateDecision struct {

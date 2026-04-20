@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/agentforge/server/internal/knowledge"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/knowledge"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 // spyIndexPipeline records EnqueueContentChanged calls so we can assert

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/trigger"
 	"github.com/alicebob/miniredis/v2"
-	"github.com/react-go-quick-starter/server/internal/trigger"
 	"github.com/redis/go-redis/v9"
 )
 

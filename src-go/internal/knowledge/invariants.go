@@ -5,21 +5,21 @@ package knowledge
 import (
 	"errors"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 var (
 	// ErrInvariantViolation is the base sentinel for all kind-specific invariant failures.
 	ErrInvariantViolation = errors.New("knowledge asset invariant violation")
 
-	ErrAssetNotFound      = errors.New("knowledge asset not found")
-	ErrAssetConflict      = errors.New("knowledge asset version conflict")
-	ErrAssetForbidden     = errors.New("knowledge asset operation forbidden")
-	ErrCommentNotFound    = errors.New("asset comment not found")
-	ErrVersionNotFound    = errors.New("asset version not found")
-	ErrCircularMove       = errors.New("cannot move asset into its own descendant")
-	ErrUnsupportedKind    = errors.New("unsupported knowledge asset kind")
-	ErrIngestNotReady     = errors.New("asset ingest not complete")
+	ErrAssetNotFound   = errors.New("knowledge asset not found")
+	ErrAssetConflict   = errors.New("knowledge asset version conflict")
+	ErrAssetForbidden  = errors.New("knowledge asset operation forbidden")
+	ErrCommentNotFound = errors.New("asset comment not found")
+	ErrVersionNotFound = errors.New("asset version not found")
+	ErrCircularMove    = errors.New("cannot move asset into its own descendant")
+	ErrUnsupportedKind = errors.New("unsupported knowledge asset kind")
+	ErrIngestNotReady  = errors.New("asset ingest not complete")
 )
 
 // ValidateKnowledgeAsset enforces repository invariants in Go (not SQL triggers).

@@ -3,7 +3,7 @@ package cost_test
 import (
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/cost"
+	"github.com/agentforge/server/internal/cost"
 )
 
 func TestTrackerRecordAccumulatesAndThresholds(t *testing.T) {

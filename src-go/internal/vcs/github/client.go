@@ -16,7 +16,7 @@ import (
 
 	gogh "github.com/google/go-github/v60/github"
 
-	"github.com/react-go-quick-starter/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs"
 )
 
 // Client wraps go-github's *Client with vcs.Provider semantics.

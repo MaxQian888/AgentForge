@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/instruction"
-	"github.com/react-go-quick-starter/server/internal/memory"
+	"github.com/agentforge/server/internal/instruction"
+	"github.com/agentforge/server/internal/memory"
 )
 
 func TestInstructionRouter_ExecuteRoutesByTarget(t *testing.T) {

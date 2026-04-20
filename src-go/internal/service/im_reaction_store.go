@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 // imReactionStoreAdapter bridges service.IMReactionStore to the repository

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/vcs"
-	"github.com/react-go-quick-starter/server/internal/vcs/gitlab"
+	"github.com/agentforge/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs/gitlab"
 )
 
 func TestStubReturnsUnsupportedFromEveryMethod(t *testing.T) {

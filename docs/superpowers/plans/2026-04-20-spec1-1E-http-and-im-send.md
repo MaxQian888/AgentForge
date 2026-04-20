@@ -81,7 +81,7 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     type fakeExecLookup struct {
@@ -197,7 +197,7 @@
         "fmt"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     // ErrWaitEventNotWaiting is returned when Resume is called against an
@@ -407,7 +407,7 @@
         "time"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/testutil"
+        "github.com/agentforge/server/internal/testutil"
     )
 
     func TestCorrelationsRepo_CreateLookupConsume(t *testing.T) {
@@ -893,7 +893,7 @@
 
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
-        "github.com/react-go-quick-starter/server/internal/imcards"
+        "github.com/agentforge/server/internal/imcards"
     )
 
     type IMCardActionsHandler struct{ Router *imcards.Router }
@@ -988,7 +988,7 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     func TestHTTPCallHandler_EmitsExecuteEffect(t *testing.T) {
@@ -1221,7 +1221,7 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     type stubSecretResolver struct {
@@ -1417,7 +1417,7 @@
         "time"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     // applyExecuteHTTPCall resolves {{secrets.X}} templates in the payload's
@@ -1596,7 +1596,7 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     func TestIMSendHandler_EmitsEffect(t *testing.T) {
@@ -1731,7 +1731,7 @@
         "time"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     type stubDispatcher struct{ sentCards []json.RawMessage; replyTarget map[string]any }
@@ -1839,7 +1839,7 @@
         "fmt"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     // applyExecuteIMSend performs:
@@ -2714,11 +2714,11 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/imcards"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/repository"
-        "github.com/react-go-quick-starter/server/internal/testutil"
-        "github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
+        "github.com/agentforge/server/internal/imcards"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/repository"
+        "github.com/agentforge/server/internal/testutil"
+        "github.com/agentforge/server/internal/workflow/nodetypes"
     )
 
     // TestTraceB exercises the full chain documented in spec §9 Trace B:

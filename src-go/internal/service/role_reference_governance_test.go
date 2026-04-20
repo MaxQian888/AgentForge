@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	rolepkg "github.com/agentforge/server/internal/role"
+	"github.com/agentforge/server/internal/service"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type roleReferencePluginCatalogStub struct {

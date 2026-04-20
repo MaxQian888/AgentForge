@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
+	skillspkg "github.com/agentforge/server/internal/skills"
 	"github.com/labstack/echo/v4"
-	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 )
 
 type skillsService interface {

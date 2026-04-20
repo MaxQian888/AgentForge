@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/agentforge/server/internal/handler"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/handler"
 )
 
 func TestHealth_Returns200WithStatus(t *testing.T) {

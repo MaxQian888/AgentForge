@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	eventbus "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
-	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
 )
 

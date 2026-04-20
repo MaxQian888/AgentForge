@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/secrets"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/secrets"
 )
 
 // memRepo is the in-memory test double used here AND by service_test.go.

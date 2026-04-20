@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	pluginparser "github.com/agentforge/server/internal/plugin"
+	"github.com/agentforge/server/internal/repository"
+	rolepkg "github.com/agentforge/server/internal/role"
+	"github.com/agentforge/server/pkg/database"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	pluginparser "github.com/react-go-quick-starter/server/internal/plugin"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
-	"github.com/react-go-quick-starter/server/pkg/database"
 	"gorm.io/gorm"
 )
 

@@ -12,10 +12,10 @@ import (
 	"github.com/labstack/echo/v4"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/oauth"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/binding"
-	"github.com/react-go-quick-starter/server/internal/secrets"
+	"github.com/agentforge/server/internal/adsplatform"
+	"github.com/agentforge/server/internal/secrets"
+	qianchuanbinding "github.com/agentforge/server/plugins/qianchuan-ads/binding"
+	qianchuan "github.com/agentforge/server/plugins/qianchuan-ads/oauth"
 )
 
 //go:embed templates/qianchuan_oauth_error.html
@@ -41,12 +41,12 @@ type QianchuanOAuthAuditEmitter interface {
 
 // QianchuanOAuthHandler manages the OAuth bind flow endpoints.
 type QianchuanOAuthHandler struct {
-	States      *qianchuan.OAuthStateRepo
-	Registry    *adsplatform.Registry
-	Secrets     QianchuanOAuthSecretsService
-	Bindings    QianchuanOAuthBindingService
-	Audit       QianchuanOAuthAuditEmitter
-	PublicBase  string // backend public URL for callbacks
+	States       *qianchuan.OAuthStateRepo
+	Registry     *adsplatform.Registry
+	Secrets      QianchuanOAuthSecretsService
+	Bindings     QianchuanOAuthBindingService
+	Audit        QianchuanOAuthAuditEmitter
+	PublicBase   string // backend public URL for callbacks
 	FEPublicBase string // frontend URL for redirect after callback
 }
 

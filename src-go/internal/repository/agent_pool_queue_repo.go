@@ -8,22 +8,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"gorm.io/gorm"
 )
 
 type QueueAgentAdmissionRecord struct {
-	ProjectID uuid.UUID
-	TaskID    uuid.UUID
-	MemberID  uuid.UUID
-	Runtime   string
-	Provider  string
-	Model     string
-	RoleID    string
-	Priority  int
-	BudgetUSD float64
-	Reason    string
+	ProjectID           uuid.UUID
+	TaskID              uuid.UUID
+	MemberID            uuid.UUID
+	Runtime             string
+	Provider            string
+	Model               string
+	RoleID              string
+	Priority            int
+	BudgetUSD           float64
+	Reason              string
 	GuardrailType       string
 	GuardrailScope      string
 	RecoveryDisposition string
@@ -52,23 +52,23 @@ func (r *AgentPoolQueueRepository) QueueAgentAdmission(ctx context.Context, inpu
 		recoveryDisposition = model.QueueRecoveryDispositionPending
 	}
 	entry := &model.AgentPoolQueueEntry{
-		EntryID:   uuid.NewString(),
-		ProjectID: input.ProjectID.String(),
-		TaskID:    input.TaskID.String(),
-		MemberID:  input.MemberID.String(),
-		Status:    model.AgentPoolQueueStatusQueued,
-		Reason:    input.Reason,
-		Runtime:   input.Runtime,
-		Provider:  input.Provider,
-		Model:     input.Model,
-		RoleID:    input.RoleID,
-		Priority:  input.Priority,
-		BudgetUSD: input.BudgetUSD,
+		EntryID:             uuid.NewString(),
+		ProjectID:           input.ProjectID.String(),
+		TaskID:              input.TaskID.String(),
+		MemberID:            input.MemberID.String(),
+		Status:              model.AgentPoolQueueStatusQueued,
+		Reason:              input.Reason,
+		Runtime:             input.Runtime,
+		Provider:            input.Provider,
+		Model:               input.Model,
+		RoleID:              input.RoleID,
+		Priority:            input.Priority,
+		BudgetUSD:           input.BudgetUSD,
 		GuardrailType:       input.GuardrailType,
 		GuardrailScope:      input.GuardrailScope,
 		RecoveryDisposition: recoveryDisposition,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
 	}
 
 	if r.db == nil {
@@ -242,12 +242,12 @@ func (r *AgentPoolQueueRepository) CompleteQueuedEntry(ctx context.Context, entr
 	}
 
 	updates := map[string]any{
-		"status":     status,
-		"reason":     reason,
-		"guardrail_type":        nullableStringUpdate(guardrailType),
-		"guardrail_scope":       nullableStringUpdate(guardrailScope),
-		"recovery_disposition":  nullableStringUpdate(recoveryDisposition),
-		"updated_at": time.Now().UTC(),
+		"status":               status,
+		"reason":               reason,
+		"guardrail_type":       nullableStringUpdate(guardrailType),
+		"guardrail_scope":      nullableStringUpdate(guardrailScope),
+		"recovery_disposition": nullableStringUpdate(recoveryDisposition),
+		"updated_at":           time.Now().UTC(),
 	}
 	if runID != nil {
 		updates["agent_run_id"] = runID.String()

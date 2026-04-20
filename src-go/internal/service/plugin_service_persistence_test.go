@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/service"
 	"github.com/glebarez/sqlite"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/service"
 	"gorm.io/gorm"
 )
 

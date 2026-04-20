@@ -15,11 +15,11 @@ import (
 	"sort"
 	"sync"
 
+	appI18n "github.com/agentforge/server/internal/i18n"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // ActionID identifies a project-scoped action whose execution is gated by
@@ -109,7 +109,7 @@ const (
 	ActionSprintWrite      ActionID = "sprint.write"
 
 	// Agent control surfaces (project-scoped; non-gated agent CRUD lives elsewhere).
-	ActionAgentSpawn  ActionID = "agent.spawn"
+	ActionAgentSpawn   ActionID = "agent.spawn"
 	ActionAgentControl ActionID = "agent.control"
 
 	// Audit log (gates the audit-log query API; see add-project-audit-log spec).

@@ -1,9 +1,9 @@
 package middleware
 
 import (
+	appI18n "github.com/agentforge/server/internal/i18n"
 	"github.com/labstack/echo/v4"
 	goI18n "github.com/nicksnyder/go-i18n/v2/i18n"
-	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
 )
 
 const LocalizerKey = "localizer"

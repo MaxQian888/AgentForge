@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/agentforge/server/internal/knowledge"
+	"github.com/agentforge/server/internal/knowledge/liveartifact"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/knowledge"
-	"github.com/react-go-quick-starter/server/internal/knowledge/liveartifact"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // knowledgeAssetHandlerService is the interface the handler requires.

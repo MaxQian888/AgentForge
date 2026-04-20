@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/robfig/cron/v3"
 )
 
@@ -63,14 +63,14 @@ func (r *Registry) reconcileEntry(ctx context.Context, entry CatalogEntry, now t
 	}
 
 	job := &model.ScheduledJob{
-		JobKey:         entry.JobKey,
-		Name:           entry.Name,
-		Scope:          entry.Scope,
-		Schedule:       entry.Schedule,
-		Enabled:        entry.Enabled,
-		ExecutionMode:  entry.ExecutionMode,
-		OverlapPolicy:  entry.OverlapPolicy,
-		Config:         defaultJSON(entry.Config),
+		JobKey:        entry.JobKey,
+		Name:          entry.Name,
+		Scope:         entry.Scope,
+		Schedule:      entry.Schedule,
+		Enabled:       entry.Enabled,
+		ExecutionMode: entry.ExecutionMode,
+		OverlapPolicy: entry.OverlapPolicy,
+		Config:        defaultJSON(entry.Config),
 	}
 
 	if existing != nil {

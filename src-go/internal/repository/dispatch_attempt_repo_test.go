@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"gorm.io/gorm"
 )
 
@@ -22,23 +22,23 @@ func TestDispatchAttemptRepository_PersistsRichAttemptMetadata(t *testing.T) {
 	createdAt := time.Now().UTC().Truncate(time.Second)
 
 	attempt := &model.DispatchAttempt{
-		ID:             uuid.New(),
-		ProjectID:      projectID,
-		TaskID:         taskID,
-		MemberID:       &memberID,
-		Outcome:        model.DispatchStatusQueued,
-		TriggerSource:  "manual",
-		Reason:         "agent pool is at capacity",
-		Runtime:        "codex",
-		Provider:       "openai",
-		Model:          "gpt-5-codex",
-		RoleID:         "reviewer",
-		QueueEntryID:   "entry-123",
-		QueuePriority:  &priority,
-		GuardrailType:  model.DispatchGuardrailTypePool,
-		GuardrailScope: "project",
+		ID:                  uuid.New(),
+		ProjectID:           projectID,
+		TaskID:              taskID,
+		MemberID:            &memberID,
+		Outcome:             model.DispatchStatusQueued,
+		TriggerSource:       "manual",
+		Reason:              "agent pool is at capacity",
+		Runtime:             "codex",
+		Provider:            "openai",
+		Model:               "gpt-5-codex",
+		RoleID:              "reviewer",
+		QueueEntryID:        "entry-123",
+		QueuePriority:       &priority,
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
 		RecoveryDisposition: model.QueueRecoveryDispositionRecoverable,
-		CreatedAt:      createdAt,
+		CreatedAt:           createdAt,
 	}
 
 	if err := repo.Create(ctx, attempt); err != nil {

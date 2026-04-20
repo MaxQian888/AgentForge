@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -27,11 +27,11 @@ const (
 )
 
 var (
-	ErrIMBridgeNotFound           = errors.New("im bridge instance not found")
-	ErrIMBridgeUnavailable        = errors.New("im bridge instance unavailable")
-	ErrIMDeliveryRejected         = errors.New("im delivery rejected")
-	ErrIMActionBindingEmpty       = errors.New("im action binding requires at least one entity id")
-	ErrIMTenantProviderMismatch   = errors.New("im tenant not served by the targeted bridge/provider")
+	ErrIMBridgeNotFound         = errors.New("im bridge instance not found")
+	ErrIMBridgeUnavailable      = errors.New("im bridge instance unavailable")
+	ErrIMDeliveryRejected       = errors.New("im delivery rejected")
+	ErrIMActionBindingEmpty     = errors.New("im action binding requires at least one entity id")
+	ErrIMTenantProviderMismatch = errors.New("im tenant not served by the targeted bridge/provider")
 )
 
 type IMControlPlaneConfig struct {

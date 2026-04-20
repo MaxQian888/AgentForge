@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/vcs"
-	"github.com/react-go-quick-starter/server/internal/vcs/mock"
+	"github.com/agentforge/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs/mock"
 )
 
 func TestMockProvider_RecordsCalls(t *testing.T) {

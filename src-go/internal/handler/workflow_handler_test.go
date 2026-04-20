@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/handler"
+	appMiddleware "github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
+	"github.com/agentforge/server/internal/trigger"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
-	"github.com/react-go-quick-starter/server/internal/trigger"
 )
 
 type fakeWorkflowRepo struct {
@@ -51,10 +51,10 @@ func (f *fakeWorkflowRepo) Upsert(_ context.Context, projectID uuid.UUID, transi
 }
 
 type fakeWorkflowTemplateService struct {
-	templates         []*model.WorkflowDefinition
-	publishedTemplate *model.WorkflowDefinition
+	templates          []*model.WorkflowDefinition
+	publishedTemplate  *model.WorkflowDefinition
 	duplicatedTemplate *model.WorkflowDefinition
-	deletedTemplateID uuid.UUID
+	deletedTemplateID  uuid.UUID
 }
 
 func (f *fakeWorkflowTemplateService) ListTemplates(_ context.Context, projectID uuid.UUID, query string, category string, source string) ([]*model.WorkflowDefinition, error) {
@@ -199,8 +199,8 @@ func TestWorkflowHandler_Put_RepoError(t *testing.T) {
 // --- DAG def repo stub used by trigger-sync tests ---
 
 type fakeDAGDefRepo struct {
-	created  *model.WorkflowDefinition
-	updated  *model.WorkflowDefinition
+	created   *model.WorkflowDefinition
+	updated   *model.WorkflowDefinition
 	createErr error
 	updateErr error
 	getByIDFn func(id uuid.UUID) (*model.WorkflowDefinition, error)
@@ -389,7 +389,7 @@ func TestUpdateDefinition_TriggersSyncWhenNodesChange(t *testing.T) {
 // fakeParentLinkReader implements subWorkflowLinkReader (package-local) via
 // two closure fields. Enough for the two scenarios covered below.
 type fakeParentLinkReader struct {
-	byChild func(engineKind string, childRunID uuid.UUID) (*model.WorkflowRunParentLink, error)
+	byChild  func(engineKind string, childRunID uuid.UUID) (*model.WorkflowRunParentLink, error)
 	byParent func(parentExecutionID uuid.UUID) ([]*model.WorkflowRunParentLink, error)
 }
 
@@ -693,14 +693,14 @@ func TestWorkflowHandler_TemplateManagementEndpoints(t *testing.T) {
 // --- DAG service fake used by execution event tests ---
 
 type fakeDAGService struct {
-	startExecErr         error
-	advanceExecErr       error
-	cancelExecErr        error
-	resolveReviewErr     error
-	handleEventErr       error
-	handleEventNodeID    string
-	handleEventPayload   json.RawMessage
-	handleEventExecID    uuid.UUID
+	startExecErr       error
+	advanceExecErr     error
+	cancelExecErr      error
+	resolveReviewErr   error
+	handleEventErr     error
+	handleEventNodeID  string
+	handleEventPayload json.RawMessage
+	handleEventExecID  uuid.UUID
 }
 
 func (f *fakeDAGService) StartExecution(_ context.Context, workflowID uuid.UUID, taskID *uuid.UUID, opts service.StartOptions) (*model.WorkflowExecution, error) {

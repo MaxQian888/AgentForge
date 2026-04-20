@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/secrets"
-	"github.com/react-go-quick-starter/server/migrations"
-	"github.com/react-go-quick-starter/server/pkg/database"
+	"github.com/agentforge/server/internal/secrets"
+	"github.com/agentforge/server/migrations"
+	"github.com/agentforge/server/pkg/database"
 )
 
 // TestMain runs migrations once before all integration tests in this package.

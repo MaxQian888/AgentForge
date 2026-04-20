@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	rolepkg "github.com/agentforge/server/internal/role"
+	"github.com/agentforge/server/internal/service"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/model"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
-	"github.com/react-go-quick-starter/server/internal/service"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
@@ -50,14 +50,14 @@ type MarketplaceProjectTemplateInstaller interface {
 
 // MarketplaceHandler handles marketplace install integration endpoints on the src-go backend.
 type MarketplaceHandler struct {
-	pluginSvc             *service.PluginService
-	marketURL             string
-	httpClient            *http.Client
-	pluginsDir            string
-	rolesDir              string
-	imBridgePluginDir     string
-	workflowTemplateRepo  MarketplaceWorkflowTemplateRepo
-	projectTemplateInst   MarketplaceProjectTemplateInstaller
+	pluginSvc            *service.PluginService
+	marketURL            string
+	httpClient           *http.Client
+	pluginsDir           string
+	rolesDir             string
+	imBridgePluginDir    string
+	workflowTemplateRepo MarketplaceWorkflowTemplateRepo
+	projectTemplateInst  MarketplaceProjectTemplateInstaller
 }
 
 // WithWorkflowTemplateRepo wires the workflow template repository for marketplace installs.
@@ -425,11 +425,11 @@ type marketplaceItemMetadata struct {
 // backend can parse `extra_metadata.im_commands` without depending on the
 // marketplace module.
 type pluginIMCommandSpec struct {
-	Slash       string                `yaml:"slash" json:"slash"`
-	Description string                `yaml:"description,omitempty" json:"description,omitempty"`
-	ActionClass string                `yaml:"action_class,omitempty" json:"actionClass,omitempty"`
-	Subcommands []pluginIMSubcommand  `yaml:"subcommands,omitempty" json:"subcommands,omitempty"`
-	Invoke      *pluginIMInvokeSpec   `yaml:"invoke,omitempty" json:"invoke,omitempty"`
+	Slash       string               `yaml:"slash" json:"slash"`
+	Description string               `yaml:"description,omitempty" json:"description,omitempty"`
+	ActionClass string               `yaml:"action_class,omitempty" json:"actionClass,omitempty"`
+	Subcommands []pluginIMSubcommand `yaml:"subcommands,omitempty" json:"subcommands,omitempty"`
+	Invoke      *pluginIMInvokeSpec  `yaml:"invoke,omitempty" json:"invoke,omitempty"`
 }
 
 type pluginIMSubcommand struct {

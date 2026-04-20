@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
+	nodetypes "github.com/agentforge/server/internal/workflow/nodetypes"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	nodetypes "github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 )
 
 // EffectHooks implements nodetypes.QianchuanEffectHooks by composing

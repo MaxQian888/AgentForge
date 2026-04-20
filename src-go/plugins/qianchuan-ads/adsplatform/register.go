@@ -3,7 +3,7 @@ package qianchuan
 import (
 	"os"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
+	"github.com/agentforge/server/internal/adsplatform"
 )
 
 // Register installs Qianchuan into reg using env-driven config:

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 // --- mock document repository ---

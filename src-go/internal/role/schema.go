@@ -1,7 +1,7 @@
 // Package role provides YAML role manifest parsing and a preset registry.
 package role
 
-import "github.com/react-go-quick-starter/server/internal/model"
+import "github.com/agentforge/server/internal/model"
 
 // Manifest is an alias for model.RoleManifest for convenience.
 type Manifest = model.RoleManifest

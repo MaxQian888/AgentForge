@@ -113,7 +113,7 @@
         "bytes"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/secrets"
+        "github.com/agentforge/server/internal/secrets"
     )
 
     const testKey = "0123456789abcdef0123456789abcdef" // 32 raw bytes
@@ -291,7 +291,7 @@
         "time"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/secrets"
+        "github.com/agentforge/server/internal/secrets"
     )
 
     // memRepo is the in-memory test double used here AND by service_test.go.
@@ -556,7 +556,7 @@
         "github.com/google/uuid"
         log "github.com/sirupsen/logrus"
 
-        "github.com/react-go-quick-starter/server/internal/secrets"
+        "github.com/agentforge/server/internal/secrets"
     )
 
     type recordedAudit struct {
@@ -855,8 +855,8 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/secrets"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/secrets"
     )
 
     type capturedSink struct{ events []*model.AuditEvent }
@@ -902,7 +902,7 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     // AuditEventEmitter is the narrow contract auditServiceAdapter needs.
@@ -956,7 +956,7 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/workflow/template"
+        "github.com/agentforge/server/internal/workflow/template"
     )
 
     type fakeResolver struct {
@@ -1054,7 +1054,7 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
+        "github.com/agentforge/server/internal/workflow/nodetypes"
     )
 
     // FieldKind is the structural identifier the caller passes when invoking
@@ -1212,9 +1212,9 @@
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
 
-        "github.com/react-go-quick-starter/server/internal/handler"
-        appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-        "github.com/react-go-quick-starter/server/internal/secrets"
+        "github.com/agentforge/server/internal/handler"
+        appMiddleware "github.com/agentforge/server/internal/middleware"
+        "github.com/agentforge/server/internal/secrets"
     )
 
     type fakeSvc struct{ stored map[string]string }
@@ -1307,8 +1307,8 @@
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
 
-        appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-        "github.com/react-go-quick-starter/server/internal/secrets"
+        appMiddleware "github.com/agentforge/server/internal/middleware"
+        "github.com/agentforge/server/internal/secrets"
     )
 
     // secretsService is the narrow contract SecretsHandler needs. echo.Context
@@ -1543,7 +1543,7 @@
     secretsH := handler.NewSecretsHandler(&handler.EchoServiceAdapter{S: secretsSvc})
     secretsH.Register(projectGroup)
     ```
-  - Update imports at the top of the file to include `"os"`, `"github.com/react-go-quick-starter/server/internal/secrets"`, and (only if missing) `"github.com/react-go-quick-starter/server/internal/handler"`.
+  - Update imports at the top of the file to include `"os"`, `"github.com/agentforge/server/internal/secrets"`, and (only if missing) `"github.com/agentforge/server/internal/handler"`.
 
 - [x] Step 8.2 — verify wiring compiles + secrets routes are mounted
   - Run `rtk go build ./...` from `src-go/` — must succeed.
@@ -1568,8 +1568,8 @@
 
         "github.com/google/uuid"
 
-        "github.com/react-go-quick-starter/server/internal/secrets"
-        "github.com/react-go-quick-starter/server/internal/repository"
+        "github.com/agentforge/server/internal/secrets"
+        "github.com/agentforge/server/internal/repository"
     )
 
     // TestMain in the repository package's user_repo_integration_test.go owns

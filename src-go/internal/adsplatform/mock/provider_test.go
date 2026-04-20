@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	mockprov "github.com/react-go-quick-starter/server/internal/adsplatform/mock"
+	"github.com/agentforge/server/internal/adsplatform"
+	mockprov "github.com/agentforge/server/internal/adsplatform/mock"
 )
 
 func TestProvider_RecordsCalls(t *testing.T) {

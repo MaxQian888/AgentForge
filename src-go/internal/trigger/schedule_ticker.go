@@ -9,7 +9,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 // ScheduleLister is the minimum repo dependency the ticker needs.
@@ -52,11 +52,11 @@ type BindingStatusChecker interface {
 // most one firing is evaluated per trigger per minute. Idempotency on the
 // Router itself protects against brief double-dispatch at restart.
 type ScheduleTicker struct {
-	lister          ScheduleLister
-	dispatcher      ScheduleDispatcher
-	clock           Clock
-	parser          cron.Parser
-	bindingChecker  BindingStatusChecker
+	lister         ScheduleLister
+	dispatcher     ScheduleDispatcher
+	clock          Clock
+	parser         cron.Parser
+	bindingChecker BindingStatusChecker
 
 	mu       sync.Mutex
 	lastFire map[string]time.Time // trigger_id → last minute we successfully dispatched

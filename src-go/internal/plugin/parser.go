@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 	"gopkg.in/yaml.v3"
 )
 

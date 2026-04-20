@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/react-go-quick-starter/server/internal/secrets"
+	"github.com/agentforge/server/internal/secrets"
 )
 
 type recordedAudit struct {

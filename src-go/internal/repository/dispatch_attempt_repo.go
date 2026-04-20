@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"gorm.io/gorm"
 )
 
@@ -19,23 +19,23 @@ func NewDispatchAttemptRepository(db *gorm.DB) *DispatchAttemptRepository {
 }
 
 type dispatchAttemptRecord struct {
-	ID             uuid.UUID  `gorm:"column:id;type:uuid;primaryKey"`
-	ProjectID      uuid.UUID  `gorm:"column:project_id;type:uuid;not null"`
-	TaskID         uuid.UUID  `gorm:"column:task_id;type:uuid;not null"`
-	MemberID       *uuid.UUID `gorm:"column:member_id;type:uuid"`
-	Outcome        string     `gorm:"column:outcome;type:varchar(20);not null"`
-	TriggerSource  string     `gorm:"column:trigger_source;type:varchar(40);not null"`
-	Reason         string     `gorm:"column:reason;type:text"`
-	Runtime        *string    `gorm:"column:runtime;type:varchar(40)"`
-	Provider       *string    `gorm:"column:provider;type:varchar(40)"`
-	Model          *string    `gorm:"column:model;type:varchar(120)"`
-	RoleID         *string    `gorm:"column:role_id;type:varchar(120)"`
-	QueueEntryID   *string    `gorm:"column:queue_entry_id;type:varchar(64)"`
-	QueuePriority  *int       `gorm:"column:queue_priority"`
-	GuardrailType  string     `gorm:"column:guardrail_type;type:varchar(40)"`
-	GuardrailScope string     `gorm:"column:guardrail_scope;type:varchar(40)"`
-	RecoveryDisposition *string `gorm:"column:recovery_disposition;type:varchar(40)"`
-	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
+	ID                  uuid.UUID  `gorm:"column:id;type:uuid;primaryKey"`
+	ProjectID           uuid.UUID  `gorm:"column:project_id;type:uuid;not null"`
+	TaskID              uuid.UUID  `gorm:"column:task_id;type:uuid;not null"`
+	MemberID            *uuid.UUID `gorm:"column:member_id;type:uuid"`
+	Outcome             string     `gorm:"column:outcome;type:varchar(20);not null"`
+	TriggerSource       string     `gorm:"column:trigger_source;type:varchar(40);not null"`
+	Reason              string     `gorm:"column:reason;type:text"`
+	Runtime             *string    `gorm:"column:runtime;type:varchar(40)"`
+	Provider            *string    `gorm:"column:provider;type:varchar(40)"`
+	Model               *string    `gorm:"column:model;type:varchar(120)"`
+	RoleID              *string    `gorm:"column:role_id;type:varchar(120)"`
+	QueueEntryID        *string    `gorm:"column:queue_entry_id;type:varchar(64)"`
+	QueuePriority       *int       `gorm:"column:queue_priority"`
+	GuardrailType       string     `gorm:"column:guardrail_type;type:varchar(40)"`
+	GuardrailScope      string     `gorm:"column:guardrail_scope;type:varchar(40)"`
+	RecoveryDisposition *string    `gorm:"column:recovery_disposition;type:varchar(40)"`
+	CreatedAt           time.Time  `gorm:"column:created_at;not null"`
 }
 
 func (dispatchAttemptRecord) TableName() string { return "dispatch_attempts" }
@@ -45,23 +45,23 @@ func newDispatchAttemptRecord(attempt *model.DispatchAttempt) *dispatchAttemptRe
 		return nil
 	}
 	return &dispatchAttemptRecord{
-		ID:             attempt.ID,
-		ProjectID:      attempt.ProjectID,
-		TaskID:         attempt.TaskID,
-		MemberID:       attempt.MemberID,
-		Outcome:        attempt.Outcome,
-		TriggerSource:  attempt.TriggerSource,
-		Reason:         attempt.Reason,
-		Runtime:        cloneStringPointer(optionalStringPointer(attempt.Runtime)),
-		Provider:       cloneStringPointer(optionalStringPointer(attempt.Provider)),
-		Model:          cloneStringPointer(optionalStringPointer(attempt.Model)),
-		RoleID:         cloneStringPointer(optionalStringPointer(attempt.RoleID)),
-		QueueEntryID:   cloneStringPointer(optionalStringPointer(attempt.QueueEntryID)),
-		QueuePriority:  cloneIntPointer(attempt.QueuePriority),
-		GuardrailType:  attempt.GuardrailType,
-		GuardrailScope: attempt.GuardrailScope,
+		ID:                  attempt.ID,
+		ProjectID:           attempt.ProjectID,
+		TaskID:              attempt.TaskID,
+		MemberID:            attempt.MemberID,
+		Outcome:             attempt.Outcome,
+		TriggerSource:       attempt.TriggerSource,
+		Reason:              attempt.Reason,
+		Runtime:             cloneStringPointer(optionalStringPointer(attempt.Runtime)),
+		Provider:            cloneStringPointer(optionalStringPointer(attempt.Provider)),
+		Model:               cloneStringPointer(optionalStringPointer(attempt.Model)),
+		RoleID:              cloneStringPointer(optionalStringPointer(attempt.RoleID)),
+		QueueEntryID:        cloneStringPointer(optionalStringPointer(attempt.QueueEntryID)),
+		QueuePriority:       cloneIntPointer(attempt.QueuePriority),
+		GuardrailType:       attempt.GuardrailType,
+		GuardrailScope:      attempt.GuardrailScope,
 		RecoveryDisposition: cloneStringPointer(optionalStringPointer(attempt.RecoveryDisposition)),
-		CreatedAt:      attempt.CreatedAt,
+		CreatedAt:           attempt.CreatedAt,
 	}
 }
 
@@ -70,23 +70,23 @@ func (r *dispatchAttemptRecord) toModel() *model.DispatchAttempt {
 		return nil
 	}
 	return &model.DispatchAttempt{
-		ID:             r.ID,
-		ProjectID:      r.ProjectID,
-		TaskID:         r.TaskID,
-		MemberID:       r.MemberID,
-		Outcome:        r.Outcome,
-		TriggerSource:  r.TriggerSource,
-		Reason:         r.Reason,
-		Runtime:        valueOrEmpty(r.Runtime),
-		Provider:       valueOrEmpty(r.Provider),
-		Model:          valueOrEmpty(r.Model),
-		RoleID:         valueOrEmpty(r.RoleID),
-		QueueEntryID:   valueOrEmpty(r.QueueEntryID),
-		QueuePriority:  cloneIntPointer(r.QueuePriority),
-		GuardrailType:  r.GuardrailType,
-		GuardrailScope: r.GuardrailScope,
+		ID:                  r.ID,
+		ProjectID:           r.ProjectID,
+		TaskID:              r.TaskID,
+		MemberID:            r.MemberID,
+		Outcome:             r.Outcome,
+		TriggerSource:       r.TriggerSource,
+		Reason:              r.Reason,
+		Runtime:             valueOrEmpty(r.Runtime),
+		Provider:            valueOrEmpty(r.Provider),
+		Model:               valueOrEmpty(r.Model),
+		RoleID:              valueOrEmpty(r.RoleID),
+		QueueEntryID:        valueOrEmpty(r.QueueEntryID),
+		QueuePriority:       cloneIntPointer(r.QueuePriority),
+		GuardrailType:       r.GuardrailType,
+		GuardrailScope:      r.GuardrailScope,
 		RecoveryDisposition: valueOrEmpty(r.RecoveryDisposition),
-		CreatedAt:      r.CreatedAt,
+		CreatedAt:           r.CreatedAt,
 	}
 }
 

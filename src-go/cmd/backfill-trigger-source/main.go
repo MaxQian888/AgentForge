@@ -22,8 +22,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/config"
-	"github.com/react-go-quick-starter/server/pkg/database"
+	"github.com/agentforge/server/internal/config"
+	"github.com/agentforge/server/pkg/database"
 )
 
 func main() {

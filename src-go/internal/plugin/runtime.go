@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	pluginsdk "github.com/react-go-quick-starter/server/plugin-sdk-go"
+	"github.com/agentforge/server/internal/model"
+	pluginsdk "github.com/agentforge/server/plugin-sdk-go"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"

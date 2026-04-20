@@ -195,8 +195,8 @@
         "errors"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/repository"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/repository"
     )
 
     var (
@@ -400,8 +400,8 @@
         "log"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/config"
-        "github.com/react-go-quick-starter/server/internal/repository"
+        "github.com/agentforge/server/internal/config"
+        "github.com/agentforge/server/internal/repository"
     )
 
     func main() {

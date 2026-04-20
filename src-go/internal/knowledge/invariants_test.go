@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/agentforge/server/internal/knowledge"
+	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/knowledge"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 func ptr[T any](v T) *T { return &v }

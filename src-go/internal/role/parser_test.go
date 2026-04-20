@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/role"
+	"github.com/agentforge/server/internal/role"
 )
 
 const validRoleManifest = `

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 
+	eventbus "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/ws"
+	"github.com/agentforge/server/pkg/database"
 	"github.com/google/uuid"
-	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/ws"
-	"github.com/react-go-quick-starter/server/pkg/database"
 	"gorm.io/gorm"
 )
 

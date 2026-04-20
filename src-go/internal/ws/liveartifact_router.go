@@ -8,7 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/react-go-quick-starter/server/internal/knowledge/liveartifact"
+	"github.com/agentforge/server/internal/knowledge/liveartifact"
 )
 
 // Defaults for coalescing and per-block rate cap. Spec §9.5.

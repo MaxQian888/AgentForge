@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+	eb "github.com/agentforge/server/internal/eventbus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -35,8 +35,8 @@ func (m *IMForwardLegacy) Intercepts() []string {
 	return []string{"task.*", "review.*", "agent.*", "notification"}
 }
 
-func (m *IMForwardLegacy) Priority() int  { return 80 }
-func (m *IMForwardLegacy) Mode() eb.Mode  { return eb.ModeObserve }
+func (m *IMForwardLegacy) Priority() int { return 80 }
+func (m *IMForwardLegacy) Mode() eb.Mode { return eb.ModeObserve }
 
 func (m *IMForwardLegacy) Observe(ctx context.Context, e *eb.Event, pc *eb.PipelineCtx) {
 	if m == nil || m.router == nil || e == nil {

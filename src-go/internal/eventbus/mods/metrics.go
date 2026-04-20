@@ -2,7 +2,8 @@ package mods
 
 import (
 	"context"
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+
+	eb "github.com/agentforge/server/internal/eventbus"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -25,10 +26,10 @@ func NewMetrics() *Metrics {
 }
 
 func (m *Metrics) Collector() prometheus.Collector { return m.counter }
-func (m *Metrics) Name() string                     { return "core.metrics" }
-func (m *Metrics) Intercepts() []string             { return []string{"*"} }
-func (m *Metrics) Priority() int                    { return 90 }
-func (m *Metrics) Mode() eb.Mode                    { return eb.ModeObserve }
+func (m *Metrics) Name() string                    { return "core.metrics" }
+func (m *Metrics) Intercepts() []string            { return []string{"*"} }
+func (m *Metrics) Priority() int                   { return 90 }
+func (m *Metrics) Mode() eb.Mode                   { return eb.ModeObserve }
 func (m *Metrics) Observe(ctx context.Context, e *eb.Event, pc *eb.PipelineCtx) {
 	m.counter.WithLabelValues(e.Type).Inc()
 }

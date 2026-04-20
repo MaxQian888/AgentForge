@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/worktree"
+	"github.com/agentforge/server/internal/worktree"
 )
 
 func TestManager_PrepareCreatesAndReusesCanonicalWorkspace(t *testing.T) {

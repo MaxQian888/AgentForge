@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/handler"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	"github.com/react-go-quick-starter/server/internal/repository"
 	"gorm.io/gorm"
 )
 

@@ -3,7 +3,8 @@ package mods
 import (
 	"context"
 	"testing"
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+
+	eb "github.com/agentforge/server/internal/eventbus"
 )
 
 func TestEnrich_MetaSpanID_AddedWhenMissing(t *testing.T) {

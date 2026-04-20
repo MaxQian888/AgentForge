@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
+	"github.com/agentforge/server/internal/model"
+	rolepkg "github.com/agentforge/server/internal/role"
 	"gopkg.in/yaml.v3"
 )
 
@@ -30,29 +30,29 @@ type builtInSkillBundleEntry struct {
 }
 
 type marketplaceBuiltInSkillItem struct {
-	ID            string                   `json:"id"`
-	Type          string                   `json:"type"`
-	Slug          string                   `json:"slug"`
-	Name          string                   `json:"name"`
-	AuthorID      string                   `json:"author_id"`
-	AuthorName    string                   `json:"author_name"`
-	Description   string                   `json:"description"`
-	Category      string                   `json:"category"`
-	Tags          []string                 `json:"tags"`
-	RepositoryURL string                   `json:"repository_url,omitempty"`
-	License       string                   `json:"license"`
-	ExtraMetadata map[string]any           `json:"extra_metadata"`
-	DownloadCount int64                    `json:"download_count"`
-	AvgRating     float64                  `json:"avg_rating"`
-	RatingCount   int                      `json:"rating_count"`
-	IsVerified    bool                     `json:"is_verified"`
-	IsFeatured    bool                     `json:"is_featured"`
-	CreatedAt     string                   `json:"created_at"`
-	UpdatedAt     string                   `json:"updated_at"`
-	SourceType    string                   `json:"sourceType"`
-	LocalPath     string                   `json:"localPath"`
+	ID            string                       `json:"id"`
+	Type          string                       `json:"type"`
+	Slug          string                       `json:"slug"`
+	Name          string                       `json:"name"`
+	AuthorID      string                       `json:"author_id"`
+	AuthorName    string                       `json:"author_name"`
+	Description   string                       `json:"description"`
+	Category      string                       `json:"category"`
+	Tags          []string                     `json:"tags"`
+	RepositoryURL string                       `json:"repository_url,omitempty"`
+	License       string                       `json:"license"`
+	ExtraMetadata map[string]any               `json:"extra_metadata"`
+	DownloadCount int64                        `json:"download_count"`
+	AvgRating     float64                      `json:"avg_rating"`
+	RatingCount   int                          `json:"rating_count"`
+	IsVerified    bool                         `json:"is_verified"`
+	IsFeatured    bool                         `json:"is_featured"`
+	CreatedAt     string                       `json:"created_at"`
+	UpdatedAt     string                       `json:"updated_at"`
+	SourceType    string                       `json:"sourceType"`
+	LocalPath     string                       `json:"localPath"`
 	SkillPreview  *rolepkg.SkillPackagePreview `json:"skillPreview,omitempty"`
-	PreviewError  string                   `json:"previewError,omitempty"`
+	PreviewError  string                       `json:"previewError,omitempty"`
 }
 
 func loadBuiltInSkillBundle(skillsRoot string) ([]builtInSkillBundleEntry, error) {

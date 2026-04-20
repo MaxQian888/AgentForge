@@ -38,7 +38,7 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     func TestWorkflowExecutionRecord_SystemMetadataRoundTrip(t *testing.T) {
@@ -151,7 +151,7 @@
     import (
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/model"
+        "github.com/agentforge/server/internal/model"
     )
 
     func TestWorkflowTriggerRecord_CreatedViaAndDisplayMetadata(t *testing.T) {
@@ -501,7 +501,7 @@
 
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
-        "github.com/react-go-quick-starter/server/internal/repository"
+        "github.com/agentforge/server/internal/repository"
     )
 
     type fakeEmployeeRunsRepo struct {
@@ -588,8 +588,8 @@
 
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
-        "github.com/react-go-quick-starter/server/internal/i18n"
-        "github.com/react-go-quick-starter/server/internal/repository"
+        "github.com/agentforge/server/internal/i18n"
+        "github.com/agentforge/server/internal/repository"
     )
 
     // employeeRunsRepo is the narrow read-side contract that EmployeeRunsHandler

@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/model"
+	eb "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/model"
 )
 
 // ExecutionLoader is the repository surface the dispatcher needs.
@@ -70,10 +70,12 @@ func (d *OutboundDispatcher) SetRetryDelays(d1, d2, d3 time.Duration) {
 
 // --- eventbus.Mod interface ---
 
-func (d *OutboundDispatcher) Name() string         { return "service.outbound-dispatcher" }
-func (d *OutboundDispatcher) Intercepts() []string { return []string{eb.EventWorkflowExecutionCompleted} }
-func (d *OutboundDispatcher) Priority() int        { return 80 }
-func (d *OutboundDispatcher) Mode() eb.Mode        { return eb.ModeObserve }
+func (d *OutboundDispatcher) Name() string { return "service.outbound-dispatcher" }
+func (d *OutboundDispatcher) Intercepts() []string {
+	return []string{eb.EventWorkflowExecutionCompleted}
+}
+func (d *OutboundDispatcher) Priority() int { return 80 }
+func (d *OutboundDispatcher) Mode() eb.Mode { return eb.ModeObserve }
 
 type completedPayload struct {
 	ExecutionID string `json:"executionId"`

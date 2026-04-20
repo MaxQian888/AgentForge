@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/role"
+	"github.com/agentforge/server/internal/role"
 )
 
 func TestRegistryLoadDirSkipsInvalidFilesAndSupportsLookup(t *testing.T) {

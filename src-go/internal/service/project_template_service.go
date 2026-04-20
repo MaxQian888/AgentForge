@@ -23,21 +23,21 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // ProjectTemplateService builds and applies project-configuration snapshots.
 type ProjectTemplateService struct {
-	templates       ProjectTemplateStore
-	projects        ProjectTemplateProjectReader
-	customFields    ProjectTemplateCustomFieldAdapter
-	savedViews     ProjectTemplateSavedViewAdapter
-	dashboards     ProjectTemplateDashboardAdapter
-	automations    ProjectTemplateAutomationAdapter
-	workflows      ProjectTemplateWorkflowAdapter
-	taskStatuses   ProjectTemplateTaskStatusAdapter
+	templates    ProjectTemplateStore
+	projects     ProjectTemplateProjectReader
+	customFields ProjectTemplateCustomFieldAdapter
+	savedViews   ProjectTemplateSavedViewAdapter
+	dashboards   ProjectTemplateDashboardAdapter
+	automations  ProjectTemplateAutomationAdapter
+	workflows    ProjectTemplateWorkflowAdapter
+	taskStatuses ProjectTemplateTaskStatusAdapter
 }
 
 // ProjectTemplateStore is the narrow CRUD contract the service needs from
@@ -132,7 +132,7 @@ func (s *ProjectTemplateService) WithTaskStatusAdapter(a ProjectTemplateTaskStat
 
 // Errors.
 var (
-	ErrProjectTemplateSnapshotInvalid = errors.New("project template: snapshot invalid")
+	ErrProjectTemplateSnapshotInvalid  = errors.New("project template: snapshot invalid")
 	ErrProjectTemplateSnapshotTooLarge = errors.New("project template: snapshot exceeds size limit")
 	ErrProjectTemplateUnknownSource    = errors.New("project template: unknown source")
 	ErrProjectTemplateNotFound         = errors.New("project template: not found")
@@ -476,14 +476,14 @@ func stripAutomationIdentity(a model.ProjectTemplateAutomationSnapshot) model.Pr
 }
 
 var automationIdentityKeys = map[string]struct{}{
-	"configuredByUserID":   {},
+	"configuredByUserID":    {},
 	"configured_by_user_id": {},
-	"actorUserId":          {},
-	"actor_user_id":        {},
-	"createdBy":            {},
-	"created_by":           {},
-	"ownerId":              {},
-	"owner_id":             {},
+	"actorUserId":           {},
+	"actor_user_id":         {},
+	"createdBy":             {},
+	"created_by":            {},
+	"ownerId":               {},
+	"owner_id":              {},
 }
 
 func stripIdentityKeys(raw json.RawMessage) json.RawMessage {

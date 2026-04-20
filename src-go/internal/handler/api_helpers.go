@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
+	appMiddleware "github.com/agentforge/server/internal/middleware"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 )
 
 func claimsUserID(c echo.Context) (*uuid.UUID, error) {

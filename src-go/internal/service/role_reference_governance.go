@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
+	"github.com/agentforge/server/internal/model"
+	rolepkg "github.com/agentforge/server/internal/role"
 )
 
 var ErrRoleBindingNotFound = errors.New("role binding not found")

@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/server/internal/middleware"
+	"github.com/agentforge/server/internal/repository"
+	service "github.com/agentforge/server/internal/service"
+	handler "github.com/agentforge/server/plugins/qianchuan-ads/handler"
+	qcservice "github.com/agentforge/server/plugins/qianchuan-ads/service"
+	"github.com/agentforge/server/plugins/qianchuan-ads/strategy"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	handler "github.com/react-go-quick-starter/server/plugins/qianchuan-ads/handler"
-	"github.com/react-go-quick-starter/server/internal/middleware"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/strategy"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	service "github.com/react-go-quick-starter/server/internal/service"
-	qcservice "github.com/react-go-quick-starter/server/plugins/qianchuan-ads/service"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 )

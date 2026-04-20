@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type mockBudgetSprintReader struct {

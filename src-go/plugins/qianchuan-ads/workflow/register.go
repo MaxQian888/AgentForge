@@ -3,7 +3,7 @@ package qcworkflow
 import (
 	"fmt"
 
-	nodetypes "github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
+	nodetypes "github.com/agentforge/server/internal/workflow/nodetypes"
 )
 
 // Handlers returns the qianchuan node-type handlers in the canonical

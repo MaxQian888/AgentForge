@@ -1,6 +1,6 @@
 package nodetypes
 
-import "github.com/react-go-quick-starter/server/internal/model"
+import "github.com/agentforge/server/internal/model"
 
 // FindNodesBetween returns node IDs reachable from fromID on paths that lead
 // toward toID (exclusive of toID). Used by loop handlers to determine which

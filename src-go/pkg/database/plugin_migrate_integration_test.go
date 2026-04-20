@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/migrations"
-	"github.com/react-go-quick-starter/server/pkg/database"
+	"github.com/agentforge/server/migrations"
+	"github.com/agentforge/server/pkg/database"
 )
 
 func TestRunMigrations_PluginControlPlaneTablesPresent(t *testing.T) {

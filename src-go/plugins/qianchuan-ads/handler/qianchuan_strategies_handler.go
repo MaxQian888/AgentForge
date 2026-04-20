@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/agentforge/server/internal/repository"
+	qcservice "github.com/agentforge/server/plugins/qianchuan-ads/service"
+	"github.com/agentforge/server/plugins/qianchuan-ads/strategy"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/strategy"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	qcservice "github.com/react-go-quick-starter/server/plugins/qianchuan-ads/service"
 )
 
 // QianchuanStrategyService is the narrow seam this handler consumes; tests

@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/react-go-quick-starter/server/internal/employee"
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/employee"
+	"github.com/agentforge/server/internal/model"
 )
 
 // TriggerRepository is the subset of *repository.WorkflowTriggerRepository
@@ -44,16 +44,16 @@ type PluginTargetResolver interface {
 // both the sync response and downstream observability consumers can
 // discriminate retriable from permanent failures.
 const (
-	DisabledReasonDAGWorkflowMissing       = "dag_workflow_not_found"
-	DisabledReasonDAGWorkflowInactive      = "dag_workflow_inactive"
-	DisabledReasonPluginMissing            = "plugin_not_found"
-	DisabledReasonPluginDisabled           = "plugin_disabled"
-	DisabledReasonPluginNotWorkflow        = "plugin_not_workflow_kind"
-	DisabledReasonPluginNotExecutable      = "plugin_process_not_executable"
-	DisabledReasonPluginMissingID          = "plugin_target_missing_plugin_id"
-	DisabledReasonActingEmployeeMissing    = "acting_employee_not_found"
-	DisabledReasonActingEmployeeCross      = "acting_employee_cross_project"
-	DisabledReasonActingEmployeeArchived   = "acting_employee_archived"
+	DisabledReasonDAGWorkflowMissing     = "dag_workflow_not_found"
+	DisabledReasonDAGWorkflowInactive    = "dag_workflow_inactive"
+	DisabledReasonPluginMissing          = "plugin_not_found"
+	DisabledReasonPluginDisabled         = "plugin_disabled"
+	DisabledReasonPluginNotWorkflow      = "plugin_not_workflow_kind"
+	DisabledReasonPluginNotExecutable    = "plugin_process_not_executable"
+	DisabledReasonPluginMissingID        = "plugin_target_missing_plugin_id"
+	DisabledReasonActingEmployeeMissing  = "acting_employee_not_found"
+	DisabledReasonActingEmployeeCross    = "acting_employee_cross_project"
+	DisabledReasonActingEmployeeArchived = "acting_employee_archived"
 )
 
 // SyncOutcome reports the result of materializing one trigger node.
@@ -98,10 +98,10 @@ type ActingEmployeeValidator interface {
 // persists unresolvable targets with enabled=false + disabled_reason.
 // Unwired resolvers skip validation (backwards-compatible default).
 type Registrar struct {
-	repo              TriggerRepository
-	dagResolver       DAGDefinitionResolver
-	pluginResolver    PluginTargetResolver
-	attributionGuard  ActingEmployeeValidator
+	repo             TriggerRepository
+	dagResolver      DAGDefinitionResolver
+	pluginResolver   PluginTargetResolver
+	attributionGuard ActingEmployeeValidator
 }
 
 // NewRegistrar returns a new Registrar backed by repo.

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/secrets"
+	"github.com/agentforge/server/internal/secrets"
 )
 
 const testKey = "0123456789abcdef0123456789abcdef" // 32 raw bytes

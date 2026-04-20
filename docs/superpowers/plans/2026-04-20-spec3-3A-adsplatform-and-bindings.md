@@ -130,7 +130,7 @@
         "testing"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform"
     )
 
     type stubProvider struct{ name string }
@@ -400,8 +400,8 @@
         "context"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
-        mockprov "github.com/react-go-quick-starter/server/internal/adsplatform/mock"
+        "github.com/agentforge/server/internal/adsplatform"
+        mockprov "github.com/agentforge/server/internal/adsplatform/mock"
     )
 
     func TestProvider_RecordsCalls(t *testing.T) {
@@ -449,7 +449,7 @@
         "sync"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform"
     )
 
     // Call is one recorded Provider invocation.
@@ -611,8 +611,8 @@
         "net/http/httptest"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
-        "github.com/react-go-quick-starter/server/internal/adsplatform/qianchuan"
+        "github.com/agentforge/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform/qianchuan"
     )
 
     func TestClient_AccessTokenHeaderInjected(t *testing.T) {
@@ -713,7 +713,7 @@
         "strings"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform"
     )
 
     const (
@@ -925,8 +925,8 @@
         "strings"
         "testing"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
-        "github.com/react-go-quick-starter/server/internal/adsplatform/qianchuan"
+        "github.com/agentforge/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform/qianchuan"
     )
 
     func newJSONStub(t *testing.T, route string, payload map[string]any) *httptest.Server {
@@ -1012,7 +1012,7 @@
         "fmt"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform"
     )
 
     // Provider is the Qianchuan implementation of adsplatform.Provider.
@@ -1174,7 +1174,7 @@
         "fmt"
         "time"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform"
     )
 
     // mapTokens reads {data: {access_token, refresh_token, expires_in, refresh_token_expires_in}}.
@@ -1311,7 +1311,7 @@
     import (
         "os"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform"
     )
 
     // Register installs Qianchuan into reg using env-driven config:
@@ -1347,7 +1347,7 @@
         "time"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/qianchuanbinding"
+        "github.com/agentforge/server/internal/qianchuanbinding"
     )
 
     type memRepo struct{ rows map[uuid.UUID]*qianchuanbinding.Record }
@@ -1640,9 +1640,9 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
-        mockprov "github.com/react-go-quick-starter/server/internal/adsplatform/mock"
-        "github.com/react-go-quick-starter/server/internal/qianchuanbinding"
+        "github.com/agentforge/server/internal/adsplatform"
+        mockprov "github.com/agentforge/server/internal/adsplatform/mock"
+        "github.com/agentforge/server/internal/qianchuanbinding"
     )
 
     type fakeSecrets struct {
@@ -1735,7 +1735,7 @@
         "time"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/adsplatform"
     )
 
     // ErrSecretMissing is returned when one of the *_secret_ref values does
@@ -1911,8 +1911,8 @@
 
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
-        "github.com/react-go-quick-starter/server/internal/handler"
-        "github.com/react-go-quick-starter/server/internal/qianchuanbinding"
+        "github.com/agentforge/server/internal/handler"
+        "github.com/agentforge/server/internal/qianchuanbinding"
     )
 
     func TestHandler_Create_201(t *testing.T) {
@@ -1959,11 +1959,11 @@
         "github.com/google/uuid"
         "github.com/labstack/echo/v4"
 
-        "github.com/react-go-quick-starter/server/internal/adsplatform"
-        "github.com/react-go-quick-starter/server/internal/i18n"
-        appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
-        "github.com/react-go-quick-starter/server/internal/model"
-        "github.com/react-go-quick-starter/server/internal/qianchuanbinding"
+        "github.com/agentforge/server/internal/adsplatform"
+        "github.com/agentforge/server/internal/i18n"
+        appMiddleware "github.com/agentforge/server/internal/middleware"
+        "github.com/agentforge/server/internal/model"
+        "github.com/agentforge/server/internal/qianchuanbinding"
     )
 
     // QianchuanBindingsService is the narrow contract the handler depends on.
@@ -2267,8 +2267,8 @@
         "testing"
 
         "github.com/google/uuid"
-        "github.com/react-go-quick-starter/server/internal/qianchuanbinding"
-        "github.com/react-go-quick-starter/server/internal/testdb"
+        "github.com/agentforge/server/internal/qianchuanbinding"
+        "github.com/agentforge/server/internal/testdb"
     )
 
     func TestGormRepo_RoundTrip(t *testing.T) {

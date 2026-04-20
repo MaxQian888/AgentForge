@@ -1,4 +1,4 @@
 interface:
   display_name: "Run And Deploy Starter"
   short_description: "Run and deploy this Next.js, Go, and Tauri starter safely"
-  default_prompt: "Use $deploying-and-running-react-go-quick-starter to run, package, or deploy this repository using its actual web, Go sidecar, and Tauri workflows."
+  default_prompt: "Use $deploying-and-running-agentforge to run, package, or deploy this repository using its actual web, Go sidecar, and Tauri workflows."

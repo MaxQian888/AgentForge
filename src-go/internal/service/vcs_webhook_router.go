@@ -8,7 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 // ErrPushHandlerNotImplemented is a sentinel returned by RouteEvent for
@@ -35,8 +35,12 @@ type prPayload struct {
 	PullRequest struct {
 		Number  int    `json:"number"`
 		HTMLURL string `json:"html_url"`
-		Head    struct{ SHA string `json:"sha"` } `json:"head"`
-		Base    struct{ SHA string `json:"sha"` } `json:"base"`
+		Head    struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+		Base struct {
+			SHA string `json:"sha"`
+		} `json:"base"`
 	} `json:"pull_request"`
 }
 

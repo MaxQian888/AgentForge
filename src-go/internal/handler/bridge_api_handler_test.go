@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
+	bridge "github.com/agentforge/server/internal/bridge"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/service"
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
-	bridge "github.com/react-go-quick-starter/server/internal/bridge"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type bridgeAPIValidator struct {

@@ -4,14 +4,14 @@
 // disk spill, never a user-visible failure.
 //
 // Lifecycle:
-//   1. NewAuditSink builds an unstarted sink.
-//   2. Start(ctx) launches the worker goroutine.
-//   3. AuditService.RecordEvent → sink.Enqueue (non-blocking when room).
-//   4. Worker drains the queue, retrying with exponential backoff on
-//      ErrDatabaseUnavailable. After degradationWindow of sustained
-//      failure, events spill to logs/audit_backlog.jsonl and the sink
-//      emits a degraded signal via the supplied logger.
-//   5. Stop drains in-flight events with a bounded shutdown deadline.
+//  1. NewAuditSink builds an unstarted sink.
+//  2. Start(ctx) launches the worker goroutine.
+//  3. AuditService.RecordEvent → sink.Enqueue (non-blocking when room).
+//  4. Worker drains the queue, retrying with exponential backoff on
+//     ErrDatabaseUnavailable. After degradationWindow of sustained
+//     failure, events spill to logs/audit_backlog.jsonl and the sink
+//     emits a degraded signal via the supplied logger.
+//  5. Stop drains in-flight events with a bounded shutdown deadline.
 package service
 
 import (
@@ -27,8 +27,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
 )
 
 // AuditSinkConfig tunes the sink's retry/spill behavior. Zero values fall
@@ -282,8 +282,8 @@ func (s *AuditSink) spill(event *model.AuditEvent, reason error) {
 	defer f.Close()
 
 	wrapper := struct {
-		SpilledAt string             `json:"spilledAt"`
-		Reason    string             `json:"reason"`
+		SpilledAt string              `json:"spilledAt"`
+		Reason    string              `json:"reason"`
 		Event     model.AuditEventDTO `json:"event"`
 	}{
 		SpilledAt: time.Now().UTC().Format(time.RFC3339Nano),

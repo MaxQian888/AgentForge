@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	pluginsdk "github.com/react-go-quick-starter/server/plugin-sdk-go"
+	pluginsdk "github.com/agentforge/server/plugin-sdk-go"
 )
 
 func TestDescribeExposesWorkflowMetadata(t *testing.T) {

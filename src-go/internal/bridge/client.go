@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -253,12 +253,12 @@ type RuntimeCatalogProviderDTO struct {
 }
 
 type RuntimeLaunchContractDTO struct {
-	PromptTransport       string   `json:"prompt_transport"`
-	OutputMode            string   `json:"output_mode"`
-	SupportedOutputModes  []string `json:"supported_output_modes,omitempty"`
+	PromptTransport        string   `json:"prompt_transport"`
+	OutputMode             string   `json:"output_mode"`
+	SupportedOutputModes   []string `json:"supported_output_modes,omitempty"`
 	SupportedApprovalModes []string `json:"supported_approval_modes,omitempty"`
-	AdditionalDirectories bool     `json:"additional_directories"`
-	EnvOverrides          bool     `json:"env_overrides"`
+	AdditionalDirectories  bool     `json:"additional_directories"`
+	EnvOverrides           bool     `json:"env_overrides"`
 }
 
 type RuntimeLifecycleDTO struct {

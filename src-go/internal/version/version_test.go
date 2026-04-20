@@ -3,7 +3,7 @@ package version_test
 import (
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/version"
+	"github.com/agentforge/server/internal/version"
 )
 
 func TestDefaultValues(t *testing.T) {

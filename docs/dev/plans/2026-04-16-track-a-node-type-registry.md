@@ -92,7 +92,7 @@ import (
     "encoding/json"
 
     "github.com/google/uuid"
-    "github.com/react-go-quick-starter/server/internal/model"
+    "github.com/agentforge/server/internal/model"
 )
 
 // NodeTypeHandler is the contract every built-in and plugin-contributed node type must satisfy.
@@ -406,7 +406,7 @@ import (
     "testing"
 
     "github.com/google/uuid"
-    "github.com/react-go-quick-starter/server/internal/model"
+    "github.com/agentforge/server/internal/model"
 )
 
 type fakeHub struct{ events []map[string]any }

@@ -8,7 +8,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/react-go-quick-starter/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs"
 )
 
 // Stub satisfies vcs.Provider with errors.ErrUnsupported on every method.

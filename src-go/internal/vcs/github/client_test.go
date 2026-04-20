@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/vcs"
-	ghimpl "github.com/react-go-quick-starter/server/internal/vcs/github"
+	"github.com/agentforge/server/internal/vcs"
+	ghimpl "github.com/agentforge/server/internal/vcs/github"
 )
 
 func newServer(t *testing.T, h http.Handler) (*httptest.Server, *ghimpl.Client) {

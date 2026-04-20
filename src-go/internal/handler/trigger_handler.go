@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/react-go-quick-starter/server/internal/i18n"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/trigger"
+	"github.com/agentforge/server/internal/i18n"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/trigger"
 )
 
 // triggerRouter is the subset of *trigger.Router that the handler uses.
@@ -92,11 +92,11 @@ func (h *TriggerHandler) RegisterRoutes(e *echo.Echo) {
 
 // imEventRequest is the normalized IM event payload the IM Bridge POSTs.
 type imEventRequest struct {
-	Platform    string          `json:"platform"`              // feishu, slack, discord, etc.
-	Command     string          `json:"command"`               // e.g. "/review"
-	Content     string          `json:"content"`               // full message body for match_regex
-	Args        []any           `json:"args"`                  // parsed command arguments
-	ChatID      string          `json:"chatId"`                // chat scope for allowlists
+	Platform    string          `json:"platform"` // feishu, slack, discord, etc.
+	Command     string          `json:"command"`  // e.g. "/review"
+	Content     string          `json:"content"`  // full message body for match_regex
+	Args        []any           `json:"args"`     // parsed command arguments
+	ChatID      string          `json:"chatId"`   // chat scope for allowlists
 	ThreadID    string          `json:"threadId,omitempty"`
 	UserID      string          `json:"userId,omitempty"`
 	UserName    string          `json:"userName,omitempty"`
@@ -298,12 +298,12 @@ func (h *TriggerHandler) Create(c echo.Context) error {
 // they are silently ignored at JSON-decode time and the handler responds
 // with a contract violation if they appear in the raw body.
 type patchTriggerRequest struct {
-	Config           json.RawMessage  `json:"config,omitempty"`
-	InputMapping     json.RawMessage  `json:"inputMapping,omitempty"`
-	ActingEmployeeID *string          `json:"actingEmployeeId,omitempty"`
-	DisplayName      *string          `json:"displayName,omitempty"`
-	Description      *string          `json:"description,omitempty"`
-	Enabled          *bool            `json:"enabled,omitempty"`
+	Config           json.RawMessage `json:"config,omitempty"`
+	InputMapping     json.RawMessage `json:"inputMapping,omitempty"`
+	ActingEmployeeID *string         `json:"actingEmployeeId,omitempty"`
+	DisplayName      *string         `json:"displayName,omitempty"`
+	Description      *string         `json:"description,omitempty"`
+	Enabled          *bool           `json:"enabled,omitempty"`
 
 	// Disallowed fields — present here purely to detect clients sending them
 	// so we can return a clean 400 instead of silently ignoring.

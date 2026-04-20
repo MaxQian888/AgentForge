@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/agentforge/server/internal/workflow/nodetypes"
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 )
 
 // WaitEventDataStoreAdapter merges a resume payload into the parent

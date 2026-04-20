@@ -7,10 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/agentforge/server/internal/handler"
+	"github.com/agentforge/server/internal/model"
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 func TestCustomHTTPErrorHandler_GenericError(t *testing.T) {

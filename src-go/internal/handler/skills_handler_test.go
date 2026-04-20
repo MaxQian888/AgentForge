@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agentforge/server/internal/handler"
+	skillspkg "github.com/agentforge/server/internal/skills"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/handler"
-	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 )
 
 func TestSkillsHandlerListAndGet(t *testing.T) {

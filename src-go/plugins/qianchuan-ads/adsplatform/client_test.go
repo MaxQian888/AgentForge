@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	"github.com/react-go-quick-starter/server/plugins/qianchuan-ads/adsplatform"
+	"github.com/agentforge/server/internal/adsplatform"
+	qianchuan "github.com/agentforge/server/plugins/qianchuan-ads/adsplatform"
 )
 
 func TestClient_AccessTokenHeaderInjected(t *testing.T) {

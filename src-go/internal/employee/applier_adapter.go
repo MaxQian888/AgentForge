@@ -3,7 +3,7 @@ package employee
 import (
 	"context"
 
-	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
+	"github.com/agentforge/server/internal/workflow/nodetypes"
 )
 
 // ApplierAdapter bridges *employee.Service into the nodetypes.EmployeeSpawner

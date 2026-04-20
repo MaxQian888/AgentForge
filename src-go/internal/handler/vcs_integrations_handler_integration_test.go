@@ -15,11 +15,11 @@ import (
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 
-	"github.com/react-go-quick-starter/server/internal/handler"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/vcs"
-	"github.com/react-go-quick-starter/server/internal/vcs/mock"
+	"github.com/agentforge/server/internal/handler"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/vcs"
+	"github.com/agentforge/server/internal/vcs/mock"
 )
 
 // vcsIntegrationDDL mirrors migration 072 but spelled in SQLite-friendly

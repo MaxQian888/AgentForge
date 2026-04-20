@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	bridge "github.com/agentforge/server/internal/bridge"
+	"github.com/agentforge/server/internal/service"
 	"github.com/labstack/echo/v4"
-	bridge "github.com/react-go-quick-starter/server/internal/bridge"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type bridgeHealthReaderStub struct {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 func TestPluginInstanceRepository_UpsertAndGetCurrentInMemory(t *testing.T) {

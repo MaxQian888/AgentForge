@@ -14,13 +14,13 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/react-go-quick-starter/server/internal/employee"
-	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
-	"github.com/react-go-quick-starter/server/internal/service"
-	"github.com/react-go-quick-starter/server/internal/trigger"
-	"github.com/react-go-quick-starter/server/migrations"
-	"github.com/react-go-quick-starter/server/pkg/database"
+	"github.com/agentforge/server/internal/employee"
+	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/repository"
+	"github.com/agentforge/server/internal/service"
+	"github.com/agentforge/server/internal/trigger"
+	"github.com/agentforge/server/migrations"
+	"github.com/agentforge/server/pkg/database"
 )
 
 // Ensure the unused-import guards at build time even when some tests skip.
