@@ -19,6 +19,7 @@
 ## Coordination notes (read before starting)
 
 - **Migration number**: 067 is currently used by `secrets` (Plan 1B). If 1B and any 3A/3B migrations land first, this plan's number shifts up — pick the next free slot at implementation time. Currently treat as `0XX_create_qianchuan_strategies` — confirm number before writing the file.
+- **Implementation note 2026-04-20**: per-user directive (parallel plans 1A using 067/068, 1B using 069), this plan landed migration as `070_create_qianchuan_strategies`.
 - **Action allowlist is load-bearing**: the 6 action types `adjust_bid`, `adjust_budget`, `pause_ad`, `resume_ad`, `apply_material`, `notify_im`, `record_event` are the contract Plan 3D's runtime ships against. Adding/removing types is a cross-plan change.
 - **Expression evaluator reuse**: rule conditions MUST be parsed by `nodetypes.EvaluateExpression` (with template-var resolution). DO NOT introduce a new expression engine — Spec §4 decision #3 explicitly chose to reuse it to avoid sandbox surface area. The strategy parser only **pre-validates** that the expression is non-empty and that any `len(path)` it contains looks well-formed; actual evaluation happens at strategy-runtime.
 - **Snapshot data shape**: a "snapshot" is the JSON object exposed to expressions as `snapshot.*`. v1 fields used by seed strategies: `snapshot.metrics.cost`, `snapshot.metrics.conversions`, `snapshot.metrics.cost_per_conversion`, `snapshot.metrics.cvr`, `snapshot.window_minutes`, `snapshot.ad_id`, `snapshot.ads[].{id,cost,conversions,cvr}`. Plan 3A/3B finalize the wire shape; this plan just declares which field names rules can reference and rejects unknown roots.
@@ -31,8 +32,8 @@
 
 ## Task 1 — Migration: qianchuan_strategies table
 
-- [ ] Step 1.1 — write the up migration
-  - File: `src-go/migrations/0XX_create_qianchuan_strategies.up.sql` (number TBD; see coord note)
+- [x] Step 1.1 — write the up migration
+  - File: `src-go/migrations/070_create_qianchuan_strategies.up.sql`
     ```sql
     -- Declarative strategy library. project_id NULL = system seed strategy.
     -- yaml_source = the raw YAML the author saw.
@@ -65,8 +66,8 @@
         EXECUTE FUNCTION update_updated_at_column();
     ```
 
-- [ ] Step 1.2 — write the down migration
-  - File: `src-go/migrations/0XX_create_qianchuan_strategies.down.sql`
+- [x] Step 1.2 — write the down migration
+  - File: `src-go/migrations/070_create_qianchuan_strategies.down.sql`
     ```sql
     DROP TRIGGER IF EXISTS set_qianchuan_strategies_updated_at ON qianchuan_strategies;
     DROP INDEX IF EXISTS qianchuan_strategies_status_idx;
@@ -74,7 +75,7 @@
     DROP TABLE IF EXISTS qianchuan_strategies;
     ```
 
-- [ ] Step 1.3 — apply + verify
+- [x] Step 1.3 — apply + verify (embed.go is glob-based; embed_test.go validates)
   - Run `pnpm dev:backend` (which runs migrations) or invoke the migrate tool directly
   - `psql -c "\d qianchuan_strategies"` shows the columns + check constraint
   - Verify `embed.go` picks up both files (no manual change needed; embed is glob-based — confirm via `embed_test.go`)
