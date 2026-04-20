@@ -764,7 +764,7 @@
 
 ## Task 7 — Outbound dispatcher core (eventbus Mod)
 
-- [ ] Step 7.1 — failing 4-cell matrix test
+- [x] Step 7.1 — failing 4-cell matrix test
   - File: `src-go/internal/service/outbound_dispatcher_test.go` (new)
     ```go
     package service_test
@@ -846,7 +846,7 @@
     }
     ```
 
-- [ ] Step 7.2 — failing retry+failure test
+- [x] Step 7.2 — failing retry+failure test
   - Append to the file:
     ```go
     func TestDispatcher_RetriesThenEmitsFailureEvent(t *testing.T) {
@@ -881,7 +881,7 @@
     }
     ```
 
-- [ ] Step 7.3 — implement the dispatcher
+- [x] Step 7.3 — implement the dispatcher
   - File: `src-go/internal/service/outbound_dispatcher.go` (new)
     ```go
     package service
@@ -1027,10 +1027,10 @@
     ```
   - The helpers `decodeSystemMetadata`, `decodeReplyTarget`, `buildDefaultCard` go in the same file or `outbound_dispatcher_helpers.go`. `buildDefaultCard` reads `final_output` (preferred) or last node output (`exec.DataStore` last key) for `summary`.
 
-- [ ] Step 7.4 — failing test for default card content (success + failed)
+- [x] Step 7.4 — failing test for default card content (success + failed)
   - File: `src-go/internal/service/outbound_dispatcher_card_test.go` (new) — table-test that asserts card title, status, fields[`Run`], and `view` action URL = `<feBaseURL>/runs/<exec_id>` for completed; for failed asserts title `+ ' 执行失败'`, fields contain `失败节点` + `Run`, summary contains `error_message`. Use a fake `WorkflowDefinitionLoader` to provide the workflow name (or pass workflow name through completion event payload — extend the payload shape in step 7.3).
 
-- [ ] Step 7.5 — verify
+- [x] Step 7.5 — verify
   - `rtk go test ./internal/service/...` — all dispatcher tests pass.
 
 ---
