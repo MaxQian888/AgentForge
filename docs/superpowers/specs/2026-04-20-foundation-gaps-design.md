@@ -86,9 +86,9 @@ The "数字员工" (digital employee) surface has CRUD and trigger plumbing, but
                      │
 ┌────────────────────┴──────────────────────────────────────────┐
 │  IM Bridge (src-im-bridge)                                     │
-│  ├─ core/card_schema.ts (新，provider-neutral 抽象)            │
-│  ├─ platform/feishu/render.ts (新，从 live.go 抽出 render)    │
-│  ├─ platform/{slack,dingtalk,...}/render.ts (新，文本 fallback)│
+│  ├─ core/card_schema.go (新，provider-neutral 抽象)            │
+│  ├─ platform/feishu/render.go (新，从 live.go 抽出 render)    │
+│  ├─ platform/{slack,dingtalk,...}/render.go (新，文本 fallback)│
 │  └─ inbound card_action → POST /api/v1/im/card-actions (新)    │
 │  ⚠️ 删除 feishu/live.go 内 renderInteractiveCard /             │
 │       renderStructuredMessage 旧实现（不并行保留）             │
@@ -198,9 +198,11 @@ card_action:execution_not_waiting
 
 ## 8. Provider-Neutral Card Schema
 
-```ts
-// src-im-bridge/core/card_schema.ts
-export interface ProviderNeutralCard {
+```go
+// src-im-bridge/core/card_schema.go (字段以 JSON 线协议为准；下文用 TS interface 仅为可读性)
+// 真实 Go 结构: 使用 struct + json tag，CardAction 使用 type 字段做 discriminated union 解码
+
+interface ProviderNeutralCard {
   title: string
   status?: 'success' | 'failed' | 'running' | 'pending' | 'info'
   summary?: string                // 短 markdown
@@ -215,11 +217,11 @@ export type CardAction =
       correlation_token: string, payload?: Record<string, unknown> }
 ```
 
-每 provider 一个 renderer：
-- `platform/feishu/render.ts` → 完整富卡片
-- `platform/slack/render.ts` → blocks
-- `platform/dingtalk/render.ts` → ActionCard
-- 其余 → `platform/_fallback/text.ts`：`title\nsummary\n[label] value\n...\nURL` 拼接
+每 provider 一个 renderer（IM Bridge 是 **Go** 模块，文件后缀实际为 `.go`，下面写 `.ts` 是历史草稿，对应 Go 文件）：
+- `platform/feishu/render.go` → 完整富卡片
+- `platform/slack/render.go` → blocks
+- `platform/dingtalk/render.go` → ActionCard
+- 其余 → `platform/_fallback/text.go`：`title\nsummary\n[label] value\n...\nURL` 拼接
 
 ## 9. End-to-End Data Flows
 
@@ -343,7 +345,7 @@ Unit Go
   ├─ trigger registrar merge: dag_node 替换 + manual 保留
   └─ http_call handler: 2xx / 4xx / treat_as_success / timeout
 
-Unit TS (IM Bridge)
+Unit Go (IM Bridge — 非 TS)
   ├─ card schema render: Feishu / Slack / 钉钉 snapshot
   ├─ 不支持 provider → plain text 退化 snapshot
   └─ inbound card_action: valid / expired token
@@ -363,6 +365,14 @@ FE Jest
   ├─ secret 表单: create + rotate + value 仅创建/轮换时可见
   └─ /employees/:id/runs: union list + drill-down + WS 增量
 ```
+
+## 13.1 Spec Drifts Found During Plan Writing
+
+Plan-writer subagents surfaced 3 facts that contradict earlier spec text. Preserved here so future readers see the truth:
+
+- **IM Bridge is Go, not TypeScript/Bun.** §5 / §8 / §13 originally referred to `.ts` files; corrected above. Go-side `ProviderNeutralCard` struct lives in `src-im-bridge/core/card_schema.go` with JSON tags matching the schema in §8.
+- **No separate `EventWorkflowExecutionFailed`.** Existing `EventWorkflowExecutionCompleted` carries `status ∈ {completed, failed, cancelled}`; outbound_dispatcher branches on payload status field. Plan 1D follows this contract.
+- **`acting_employee_id` already exists on `workflow_executions` and `workflow_triggers`** (added by migration 064 — `merge: Employee runtime + workflow trigger foundation`). §6.2 / §6.3 only ADD the new columns; they do not re-add `acting_employee_id`.
 
 ## 14. Open Risks
 
