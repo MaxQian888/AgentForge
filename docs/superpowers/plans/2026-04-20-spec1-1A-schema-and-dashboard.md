@@ -1290,7 +1290,7 @@
 
 ## Task 9 — Employee detail layout shell + Runs page
 
-- [ ] Step 9.1 — write failing page test
+- [x] Step 9.1 — write failing page test
   - File: `app/(dashboard)/employees/[id]/runs/page.test.tsx` (new)
   - Content:
     ```tsx
@@ -1350,9 +1350,9 @@
     });
     ```
 
-- [ ] Step 9.2 — run `pnpm test -- "employees/\[id\]/runs/page"` — expect failure (module not found)
+- [x] Step 9.2 — run `pnpm test -- "employees/\[id\]/runs/page"` — expect failure (module not found)
 
-- [ ] Step 9.3 — create the layout shell
+- [x] Step 9.3 — create the layout shell
   - File: `app/(dashboard)/employees/[id]/layout.tsx` (new)
   - Content:
     ```tsx
@@ -1419,7 +1419,7 @@
     }
     ```
 
-- [ ] Step 9.4 — implement the page
+- [x] Step 9.4 — implement the page
   - File: `app/(dashboard)/employees/[id]/runs/page.tsx` (new)
   - Content:
     ```tsx
@@ -1520,11 +1520,11 @@
     }
     ```
 
-- [ ] Step 9.5 — run `pnpm test -- "employees/\[id\]/runs/page"` — expect green
+- [x] Step 9.5 — run `pnpm test -- "employees/\[id\]/runs/page"` — expect green
 
-- [ ] Step 9.6 — run `rtk pnpm exec tsc --noEmit && rtk lint app/\(dashboard\)/employees lib/stores/employee-runs-store.ts components/employees/employee-run-row.tsx` — expect both green
+- [x] Step 9.6 — run `rtk pnpm exec tsc --noEmit && rtk lint app/\(dashboard\)/employees lib/stores/employee-runs-store.ts components/employees/employee-run-row.tsx` — expect both green
 
-- [ ] Step 9.7 — run `rtk git add app/\(dashboard\)/employees lib/stores/employee-runs-store.ts components/employees/employee-run-row.tsx components/employees/employee-run-row.test.tsx app/\(dashboard\)/employees/\[id\]/runs/page.test.tsx && rtk git commit -m "feat(fe): /employees/[id]/runs page + employee detail layout shell (spec1 §9 Trace A view)"`
+- [x] Step 9.7 — run `rtk git add app/\(dashboard\)/employees lib/stores/employee-runs-store.ts components/employees/employee-run-row.tsx components/employees/employee-run-row.test.tsx app/\(dashboard\)/employees/\[id\]/runs/page.test.tsx && rtk git commit -m "feat(fe): /employees/[id]/runs page + employee detail layout shell (spec1 §9 Trace A view)"`
 
 ---
 
