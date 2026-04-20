@@ -136,7 +136,7 @@ func (d *OutboundDispatcher) lookupWorkflowName(ctx context.Context, exec *model
 	if d.wfRepo == nil {
 		return fallback
 	}
-	wf, err := d.wfRepo.GetWorkflow(ctx, exec.WorkflowID)
+	wf, err := d.wfRepo.GetByID(ctx, exec.WorkflowID)
 	if err != nil || wf == nil {
 		return fallback
 	}

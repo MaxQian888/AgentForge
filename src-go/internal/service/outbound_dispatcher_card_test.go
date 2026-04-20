@@ -155,6 +155,6 @@ type fakeWorkflowLoader struct {
 	name string
 }
 
-func (f *fakeWorkflowLoader) GetWorkflow(ctx context.Context, id uuid.UUID) (*model.WorkflowDefinition, error) {
+func (f *fakeWorkflowLoader) GetByID(ctx context.Context, id uuid.UUID) (*model.WorkflowDefinition, error) {
 	return &model.WorkflowDefinition{ID: id, Name: f.name}, nil
 }

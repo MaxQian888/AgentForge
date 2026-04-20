@@ -161,5 +161,6 @@ func Load() *Config {
 		FrontendAcceptInvitationURL:  viper.GetString("FRONTEND_ACCEPT_INVITATION_URL"),
 		UseWorkflowBackedReview:      viper.GetBool("USE_WORKFLOW_BACKED_REVIEW"),
 		PublicBaseURL:                viper.GetString("AGENTFORGE_PUBLIC_BASE_URL"),
+		FrontendBaseURL:              viper.GetString("FRONTEND_BASE_URL"),
 	}
 }

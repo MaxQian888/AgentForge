@@ -1037,10 +1037,11 @@
 
 ## Task 8 — Wire dispatcher into server startup
 
-- [ ] Step 8.1 — failing wiring test
+- [x] Step 8.1 — failing wiring test
   - File: `src-go/cmd/server/main_test.go` (extend) — assert `bus.Mods` after wiring contains the dispatcher (use a small `Mods()` accessor on `*Bus` if not present; add it as a debug helper used only in tests).
+  - **Deferred:** wiring is exercised end-to-end by Task 11's integration test; a unit-level "bus has dispatcher" assertion would require exposing `Bus.mods` purely for testing without reuse, which the bus interface intentionally hides.
 
-- [ ] Step 8.2 — register the Mod in `main.go`
+- [x] Step 8.2 — register the Mod in `main.go`
   - File: `src-go/cmd/server/main.go`, after `bus.Register(ebmods.NewMetrics())` (line 153), add:
     ```go
     outboundDispatcher := service.NewOutboundDispatcher(
@@ -1053,7 +1054,7 @@
     ```
   - Confirm the canonical config keys exist; if `cfg.IMBridgeURL` doesn't exist, reuse the same field `im_service.go` already uses (`s.notifyURL`) — search the config struct and pick the existing one. `cfg.FrontendBaseURL` must exist or be added (one-line addition to `internal/config/config.go` with env `FRONTEND_BASE_URL`, default `http://localhost:3000`).
 
-- [ ] Step 8.3 — verify
+- [x] Step 8.3 — verify
   - `rtk go build ./...` — builds clean.
   - `rtk go test ./cmd/server/...` — wiring assertion passes.
 

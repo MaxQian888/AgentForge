@@ -24,9 +24,10 @@ type ExecutionLoader interface {
 
 // WorkflowDefinitionLoader optionally resolves the workflow display name used
 // in the default card title. When nil, the dispatcher falls back to the
-// workflow id.
+// workflow id. The signature matches repository.WorkflowDefinitionRepository
+// so the existing repo can be passed in directly.
 type WorkflowDefinitionLoader interface {
-	GetWorkflow(ctx context.Context, id uuid.UUID) (*model.WorkflowDefinition, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*model.WorkflowDefinition, error)
 }
 
 // OutboundDispatcher subscribes to terminal workflow execution events and
