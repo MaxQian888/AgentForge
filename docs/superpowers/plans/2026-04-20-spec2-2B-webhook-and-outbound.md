@@ -32,10 +32,10 @@
 
 ## Task 1 — Migration: `vcs_webhook_events` + `reviews` + `review_findings` extensions
 
-- [ ] Step 1.1 — confirm migration number is free
+- [x] Step 1.1 — confirm migration number is free
   - `rtk ls src-go/migrations/` — pick the next free integer after Plan 2A's `vcs_integrations` migration. Default assumption in this plan: `068_vcs_webhook_events_and_review_extensions`.
 
-- [ ] Step 1.2 — write up migration
+- [x] Step 1.2 — write up migration
   - File: `src-go/migrations/068_vcs_webhook_events_and_review_extensions.up.sql` (new)
     ```sql
     CREATE TABLE IF NOT EXISTS vcs_webhook_events (
@@ -90,7 +90,7 @@
     DROP TABLE IF EXISTS vcs_webhook_events;
     ```
 
-- [ ] Step 1.3 — extend models
+- [x] Step 1.3 — extend models
   - In `src-go/internal/model/review.go` add to the `Review` struct:
     ```go
     IntegrationID      *uuid.UUID `db:"integration_id" json:"integrationId,omitempty"`
@@ -131,7 +131,7 @@
     }
     ```
 
-- [ ] Step 1.4 — verify
+- [x] Step 1.4 — verify
   - `rtk go test ./internal/model/...`
   - Apply migrations against a scratch PG (manual): `rtk go run ./cmd/server` once with `MIGRATE_ON_BOOT=true`, then `psql -c '\d vcs_webhook_events'` shows the table; `\d reviews` shows new columns; rollback `068.down.sql` reverses cleanly.
 
@@ -139,7 +139,7 @@
 
 ## Task 2 — Repository: `VCSWebhookEventsRepo`
 
-- [ ] Step 2.1 — failing test: insert + dedup via UNIQUE
+- [x] Step 2.1 — failing test: insert + dedup via UNIQUE
   - File: `src-go/internal/repository/vcs_webhook_events_repo_test.go` (new)
     ```go
     package repository_test
@@ -181,7 +181,7 @@
     }
     ```
 
-- [ ] Step 2.2 — implement repo
+- [x] Step 2.2 — implement repo
   - File: `src-go/internal/repository/vcs_webhook_events_repo.go` (new)
     ```go
     package repository
@@ -231,14 +231,14 @@
     }
     ```
 
-- [ ] Step 2.3 — verify
+- [x] Step 2.3 — verify
   - `rtk go test ./internal/repository/... -run VCSWebhookEvents` — both insert paths green.
 
 ---
 
 ## Task 3 — Raw-body middleware
 
-- [ ] Step 3.1 — failing test: middleware preserves body for downstream + stashes raw bytes
+- [x] Step 3.1 — failing test: middleware preserves body for downstream + stashes raw bytes
   - File: `src-go/internal/middleware/raw_body_test.go` (new)
     ```go
     package middleware_test
@@ -280,7 +280,7 @@
     }
     ```
 
-- [ ] Step 3.2 — implement
+- [x] Step 3.2 — implement
   - File: `src-go/internal/middleware/raw_body.go` (new)
     ```go
     package middleware
@@ -314,14 +314,14 @@
     }
     ```
 
-- [ ] Step 3.3 — verify
+- [x] Step 3.3 — verify
   - `rtk go test ./internal/middleware/... -run RawBody`
 
 ---
 
 ## Task 4 — Webhook router (event-type dispatch seam)
 
-- [ ] Step 4.1 — failing tests: route by event type
+- [x] Step 4.1 — failing tests: route by event type
   - File: `src-go/internal/service/vcs_webhook_router_test.go` (new)
     ```go
     package service_test
@@ -380,7 +380,7 @@
     }
     ```
 
-- [ ] Step 4.2 — implement router
+- [x] Step 4.2 — implement router
   - File: `src-go/internal/service/vcs_webhook_router.go` (new)
     ```go
     package service
@@ -488,14 +488,14 @@
     ```
   - In `ReviewService.Trigger` (only edit needed): when persisting the new `Review` row, copy `req.IntegrationID / HeadSHA / BaseSHA` into the review (parsing IntegrationID via `uuid.Parse`). Do NOT touch the rest of the function. Also: if `req.ReplyTarget != nil`, pass it through to the workflow execution's `system_metadata.reply_target` (which 1A's `launchWorkflowBackedReview` already understands). Match the existing 1C/1D pattern for the IM trigger path.
 
-- [ ] Step 4.3 — verify
+- [x] Step 4.3 — verify
   - `rtk go test ./internal/service/... -run Router` — three router tests green.
 
 ---
 
 ## Task 5 — Webhook handler: HMAC verify + dedup + route
 
-- [ ] Step 5.1 — failing tests
+- [x] Step 5.1 — failing tests
   - File: `src-go/internal/handler/vcs_webhook_handler_test.go` (new)
     ```go
     package handler_test
@@ -618,7 +618,7 @@
     }
     ```
 
-- [ ] Step 5.2 — implement handler
+- [x] Step 5.2 — implement handler
   - File: `src-go/internal/handler/vcs_webhook_handler.go` (new)
     ```go
     package handler
@@ -797,14 +797,14 @@
     ```
   - The literal-string compare against `ErrPushHandlerNotImplemented.Error()` above is intentionally awkward; replace with `errors.Is(err, service.ErrPushHandlerNotImplemented)` once the import isn't a cycle (the handler package can import service). Confirm during implementation.
 
-- [ ] Step 5.3 — verify
+- [x] Step 5.3 — verify
   - `rtk go test ./internal/handler/... -run Webhook` — five handler tests green.
 
 ---
 
 ## Task 6 — Route registration + rate limit + raw-body wiring
 
-- [ ] Step 6.1 — wire route in `src-go/internal/server/routes.go` (or wherever Echo group setup lives):
+- [x] Step 6.1 — wire route in `src-go/internal/server/routes.go` (or wherever Echo group setup lives):
   ```go
   // VCS webhooks: no JWT (HMAC-verified); raw body required for HMAC.
   vcsGroup := api.Group("/vcs")
@@ -816,7 +816,7 @@
   ```
   - If a generic `RateLimit` middleware doesn't yet exist, fall back to the per-IP rate limiter already used by `form_handler` (`form_service.checkRateLimit`). Document the chosen approach inline.
 
-- [ ] Step 6.2 — bootstrap construction (in the same file or `cmd/server/main.go` wiring section):
+- [x] Step 6.2 — bootstrap construction (in the same file or `cmd/server/main.go` wiring section):
   ```go
   vcsEventsRepo := repository.NewVCSWebhookEventsRepo(pool)
   vcsRouter := service.NewVCSWebhookRouter(reviewService)
@@ -829,7 +829,7 @@
   )
   ```
 
-- [ ] Step 6.3 — verify
+- [x] Step 6.3 — verify
   - `rtk go build ./...`
   - Smoke: `curl -i -X POST http://localhost:7777/api/v1/vcs/github/webhook -H 'X-GitHub-Event: ping' -d '{}'` → 401 (no signature) — confirms the route is mounted and the middleware fires.
 
@@ -837,7 +837,7 @@
 
 ## Task 7 — `EventVCSDeliveryFailed` + `EventVCSAuthExpired` event types
 
-- [ ] Step 7.1 — failing test: constants stable
+- [x] Step 7.1 — failing test: constants stable
   - File: `src-go/internal/eventbus/types_vcs_test.go` (new)
     ```go
     package eventbus
@@ -854,7 +854,7 @@
     }
     ```
 
-- [ ] Step 7.2 — add constants
+- [x] Step 7.2 — add constants
   - In `src-go/internal/eventbus/types.go`, append next to `EventReviewCompleted`:
     ```go
     // VCS outbound delivery + auth expiration; emitted by vcs_outbound_dispatcher.
@@ -862,17 +862,17 @@
     EventVCSAuthExpired    = "vcs.auth.expired"
     ```
 
-- [ ] Step 7.3 — register in WS event allowlist
+- [x] Step 7.3 — register in WS event allowlist
   - In `src-go/internal/ws/events.go` (or wherever the broadcast filter lives), add the two new types so the WS hub forwards them to the FE subscription.
 
-- [ ] Step 7.4 — verify
+- [x] Step 7.4 — verify
   - `rtk go test ./internal/eventbus/... ./internal/ws/...`
 
 ---
 
 ## Task 8 — `vcs_outbound_dispatcher` (subscriber for `EventReviewCompleted`)
 
-- [ ] Step 8.1 — failing tests using mock provider
+- [x] Step 8.1 — failing tests using mock provider
   - File: `src-go/internal/service/vcs_outbound_dispatcher_test.go` (new)
     ```go
     package service_test
@@ -969,7 +969,7 @@
     ```
   - The mock provider (`internal/vcs/mock`) is provided by Plan 2A; coordinate to ensure it exposes `SummaryPosts / SummaryEdits / InlinePosts / InlineEdits` slices and `SummaryError / SummaryPostAttempts` knobs.
 
-- [ ] Step 8.2 — implement dispatcher
+- [x] Step 8.2 — implement dispatcher
   - File: `src-go/internal/service/vcs_outbound_dispatcher.go` (new)
     ```go
     package service
@@ -1192,14 +1192,14 @@
   - Replace the `loadIntegration` stub with a real `IntegrationLoader` interface + constructor field. The existing `vcs_integrations` repo from Plan 2A already exposes `GetByID(ctx, id)`.
   - Auth-expired detection: if `prov.PostSummaryComment` returns the sentinel `vcs.ErrAuthExpired` (defined by Plan 2A), emit `EventVCSAuthExpired` instead of `EventVCSDeliveryFailed` and call an integration-status setter (`integrations.MarkAuthExpired(ctx, integ.ID)` — extend Plan 2A's repo if missing). Add a fifth test `TestDispatcher_AuthExpired_EmitsAuthEvent_AndMarks`.
 
-- [ ] Step 8.3 — verify
+- [x] Step 8.3 — verify
   - `rtk go test ./internal/service/... -run Dispatcher` — five dispatcher tests green.
 
 ---
 
 ## Task 9 — Bootstrap dispatcher subscription
 
-- [ ] Step 9.1 — register the dispatcher with the eventbus alongside the existing IM outbound dispatcher (Plan 1D) at server startup:
+- [x] Step 9.1 — register the dispatcher with the eventbus alongside the existing IM outbound dispatcher (Plan 1D) at server startup:
   ```go
   vcsOutbound := service.NewVCSOutboundDispatcher(
       reviewsRepo,           // satisfies ReviewReader
@@ -1211,7 +1211,7 @@
   eventBus.Register(vcsOutbound)
   ```
 
-- [ ] Step 9.2 — verify
+- [x] Step 9.2 — verify
   - `rtk go build ./...`
   - Dev-stack smoke (manual): Trigger a fake review via `POST /api/v1/reviews` with `complete` request → confirm dispatcher fires by tailing `logs/go-orchestrator.log` for `vcs_dispatcher` lines (skipped because no `integration_id` — that's correct).
 
@@ -1219,7 +1219,7 @@
 
 ## Task 10 — FE: "PR comment 发送失败" badge on review/execution view
 
-- [ ] Step 10.1 — failing test
+- [x] Step 10.1 — failing test
   - File: `components/workflow/workflow-execution-view.test.tsx` (existing — extend, do NOT touch unrelated tests)
     ```tsx
     it("renders VCS delivery failed badge when review run carries vcs.delivery.failed", async () => {
@@ -1229,11 +1229,11 @@
     });
     ```
 
-- [ ] Step 10.2 — implement
+- [x] Step 10.2 — implement
   - In `components/workflow/workflow-execution-view.tsx`: subscribe to `vcs.delivery.failed` events alongside the existing `workflow.outbound_delivery.failed` handler (mirror the badge logic); badge text from `lib/i18n/zh-CN/workflow.ts` key `vcs.delivery_failed_badge`. Add the en-US translation as a sibling.
   - If a dedicated review-detail page exists (`app/(dashboard)/reviews/[id]/page.tsx`) — surface the same badge there too.
 
-- [ ] Step 10.3 — verify
+- [x] Step 10.3 — verify
   - `rtk pnpm test workflow-execution-view`
   - `rtk pnpm lint`
 
@@ -1241,7 +1241,7 @@
 
 ## Task 11 — Audit + rate-limit verification
 
-- [ ] Step 11.1 — failing tests
+- [x] Step 11.1 — failing tests
   - File: `src-go/internal/handler/vcs_webhook_audit_test.go` (new)
     ```go
     func TestWebhook_AuditRecordedOnReceived(t *testing.T) {
@@ -1259,7 +1259,7 @@
     }
     ```
 
-- [ ] Step 11.2 — confirm rate limit fires
+- [x] Step 11.2 — confirm rate limit fires
   - File: `src-go/internal/handler/vcs_webhook_ratelimit_test.go` (new)
     ```go
     func TestWebhook_RateLimit_101stRequestRejected(t *testing.T) {
@@ -1268,14 +1268,14 @@
     }
     ```
 
-- [ ] Step 11.3 — verify
+- [x] Step 11.3 — verify
   - `rtk go test ./internal/handler/... -run Webhook` — all pass.
 
 ---
 
 ## Task 12 — Integration test: real PG + mock provider, end-to-end Trace A
 
-- [ ] Step 12.1 — failing E2E test
+- [x] Step 12.1 — failing E2E test
   - File: `src-go/internal/service/vcs_trace_a_integration_test.go` (new)
     ```go
     //go:build integration
@@ -1325,16 +1325,16 @@
     ```
   - Fixture file: `src-go/internal/service/testdata/github_pr_opened.json` — minimal PR-opened payload (use a real GitHub sample; ~2KB).
 
-- [ ] Step 12.2 — verify
+- [x] Step 12.2 — verify
   - `rtk go test -tags=integration ./internal/service/... -run TraceA`
 
 ---
 
 ## Task 13 — Self-review + spec drift writeback
 
-- [ ] Step 13.1 — re-read Spec 2 §5 / §6.1-6.3 / §7 / §9 Trace A / §10 against the diff.
-- [ ] Step 13.2 — for any divergence (e.g. a renamed event type, a different table column ordering, a behavior choice not mandated by spec), append a row to `docs/superpowers/specs/2026-04-20-code-reviewer-employee-design.md` §13.1 "Spec Drifts Found During Brainstorm" with: file path · spec-line · what we did · why.
-- [ ] Step 13.3 — verify
+- [x] Step 13.1 — re-read Spec 2 §5 / §6.1-6.3 / §7 / §9 Trace A / §10 against the diff.
+- [x] Step 13.2 — for any divergence (e.g. a renamed event type, a different table column ordering, a behavior choice not mandated by spec), append a row to `docs/superpowers/specs/2026-04-20-code-reviewer-employee-design.md` §13.1 "Spec Drifts Found During Brainstorm" with: file path · spec-line · what we did · why.
+- [x] Step 13.3 — verify
   - `rtk go test ./...`
   - `rtk go build ./...`
   - `rtk pnpm lint`

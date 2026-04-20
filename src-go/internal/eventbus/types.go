@@ -86,11 +86,22 @@ const (
 	// Payload shape: {executionId: string, lastError: string, attempts: int}
 	EventOutboundDeliveryFailed = "workflow.outbound_delivery.failed"
 
+	// Emitted when a Qianchuan binding's token refresh fails terminally
+	// (401/403 or transient threshold exceeded). Payload: AuthExpiredPayload.
+	// Subscribers: ws_fanout, audit_trail, optional IM alert.
+	EventAdsPlatformAuthExpired = "adsplatform.auth_expired"
+
 	// Unified cross-engine workflow-run events (bridge-unified-run-view).
 	// Emitted alongside the engine-native channels; payload is a
 	// service.UnifiedRunRow so frontend subscribers stay engine-agnostic.
 	EventWorkflowRunStatusChanged = "workflow.run.status_changed"
 	EventWorkflowRunTerminal      = "workflow.run.terminal"
+
+	// VCS outbound delivery + auth expiration; emitted by vcs_outbound_dispatcher.
+	// Payload: {review_id, op, error} for delivery failed;
+	//          {integration_id, reason} for auth expired.
+	EventVCSDeliveryFailed = "vcs.delivery.failed"
+	EventVCSAuthExpired    = "vcs.auth.expired"
 )
 
 // Event types pushed from the TS bridge into Go orchestration.

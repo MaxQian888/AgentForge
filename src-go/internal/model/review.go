@@ -18,6 +18,13 @@ type ReviewFinding struct {
 	CWE         string   `json:"cwe,omitempty"`
 	Sources     []string `json:"sources,omitempty"`
 	Dismissed   bool     `json:"dismissed,omitempty"`
+	// VCS outbound fields (Spec 2B §6.3).
+	SuggestedPatch  string     `json:"suggestedPatch,omitempty"`
+	Decision        string     `json:"decision,omitempty"`
+	DecidedAt       *time.Time `json:"decidedAt,omitempty"`
+	DecidedBy       *uuid.UUID `json:"decidedBy,omitempty"`
+	InlineCommentID string     `json:"inlineCommentId,omitempty"`
+	ActiveFixRunID  *uuid.UUID `json:"activeFixRunId,omitempty"`
 }
 
 type ReviewExecutionKind string
@@ -72,12 +79,23 @@ type Review struct {
 	Summary           string                   `db:"summary"`
 	Recommendation    string                   `db:"recommendation"`
 	CostUSD           float64                  `db:"cost_usd"`
+	// VCS integration fields (Spec 2B §6.2).
+	IntegrationID      *uuid.UUID `db:"integration_id" json:"integrationId,omitempty"`
+	HeadSHA            string     `db:"head_sha" json:"headSha,omitempty"`
+	BaseSHA            string     `db:"base_sha" json:"baseSha,omitempty"`
+	LastReviewedSHA    string     `db:"last_reviewed_sha" json:"lastReviewedSha,omitempty"`
+	SummaryCommentID   string     `db:"summary_comment_id" json:"summaryCommentId,omitempty"`
+	AutomationDecision string     `db:"automation_decision" json:"automationDecision"`
 	// ExecutionID links this review to a workflow_executions row when the
 	// review was launched through the system:code-review template path.
 	// Nil on legacy reviews created before the workflow-backed refactor.
 	ExecutionID *uuid.UUID `db:"execution_id" json:"executionId,omitempty"`
-	CreatedAt   time.Time  `db:"created_at"`
-	UpdatedAt   time.Time  `db:"updated_at"`
+	// ProjectID is populated when the review is triggered by a VCS webhook
+	// (derived from the integration's project_id) or from the task's
+	// project_id. It's NOT persisted on the reviews table — it's derived.
+	ProjectID uuid.UUID  `db:"-" json:"projectId,omitempty"`
+	CreatedAt time.Time  `db:"created_at"`
+	UpdatedAt time.Time  `db:"updated_at"`
 }
 
 const (
@@ -128,7 +146,7 @@ type TriggerReviewRequest struct {
 	ProjectID    string   `json:"projectId,omitempty"`
 	PRURL        string   `json:"prUrl" validate:"required"`
 	PRNumber     int      `json:"prNumber"`
-	Trigger      string   `json:"trigger" validate:"required,oneof=agent layer1 manual"`
+	Trigger      string   `json:"trigger" validate:"required,oneof=agent layer1 manual vcs_webhook"`
 	Event        string   `json:"event"`
 	Dimensions   []string `json:"dimensions"`
 	ChangedFiles []string `json:"changedFiles"`
@@ -138,6 +156,11 @@ type TriggerReviewRequest struct {
 	// step router when its `review` step declares an `employee_id` or inherits
 	// the run-level acting_employee_id (change bridge-employee-attribution-legacy).
 	ActingEmployeeID string `json:"actingEmployeeId,omitempty"`
+	// VCS webhook trigger fields (Spec 2B §5).
+	IntegrationID string         `json:"integrationId,omitempty"`
+	HeadSHA       string         `json:"headSha,omitempty"`
+	BaseSHA       string         `json:"baseSha,omitempty"`
+	ReplyTarget   map[string]any `json:"replyTarget,omitempty"`
 }
 
 type CIReviewRequest struct {

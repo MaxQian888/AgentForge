@@ -13,11 +13,14 @@ jest.mock("@/lib/stores/auth-store", () => ({
 
 // Mutable ref that tests can reassign before render.
 const outboundRef = { set: new Set<string>() };
+const vcsRef = { set: new Set<string>() };
 
 jest.mock("@/lib/stores/workflow-store", () => {
   const makeState = () => ({
     outboundDeliveryFailedExecIds: outboundRef.set,
     markOutboundDeliveryFailed: jest.fn(),
+    vcsDeliveryFailedReviewIds: vcsRef.set,
+    markVCSDeliveryFailed: jest.fn(),
     definitions: [],
     resolveReview: jest.fn().mockResolvedValue(true),
     sendExternalEvent: jest.fn().mockResolvedValue(true),

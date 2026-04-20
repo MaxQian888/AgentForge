@@ -589,6 +589,13 @@ export const useWSStore = create<WSState>()((set) => ({
       }
     });
 
+    client.on("vcs.delivery.failed", (data) => {
+      const payload = extractPayload<{ review_id?: string; op?: string; error?: string }>(data);
+      if (typeof payload?.review_id === "string") {
+        useWorkflowStore.getState().markVCSDeliveryFailed(payload.review_id);
+      }
+    });
+
     client.on("workflow.trigger_fired", (data) => {
       const envelope =
         data && typeof data === "object"

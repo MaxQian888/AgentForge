@@ -349,6 +349,9 @@ export function WorkflowExecutionView({
   const outboundDeliveryFailed = useWorkflowStore(
     (s) => s.outboundDeliveryFailedExecIds.has(executionId)
   );
+  const vcsDeliveryFailed = useWorkflowStore(
+    (s) => s.vcsDeliveryFailedReviewIds.has(executionId)
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -461,6 +464,15 @@ export function WorkflowExecutionView({
                   title="后端尝试 3 次仍未把结果回帖到 IM 线程"
                 >
                   回帖失败
+                </Badge>
+              )}
+              {vcsDeliveryFailed && (
+                <Badge
+                  variant="destructive"
+                  className="text-[10px]"
+                  title="PR comment delivery failed after 3 retries"
+                >
+                  PR comment 发送失败
                 </Badge>
               )}
             </div>

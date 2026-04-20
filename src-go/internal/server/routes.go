@@ -18,8 +18,10 @@ import (
 	"github.com/react-go-quick-starter/server/internal/employee"
 	"github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	"github.com/react-go-quick-starter/server/internal/adsplatform/qianchuan"
+	qianchuanprov "github.com/react-go-quick-starter/server/internal/adsplatform/qianchuan"
 	"github.com/react-go-quick-starter/server/internal/handler"
+	qianchuanoauth "github.com/react-go-quick-starter/server/internal/qianchuan"
+	"github.com/react-go-quick-starter/server/internal/imcards"
 	"github.com/react-go-quick-starter/server/internal/knowledge"
 	"github.com/react-go-quick-starter/server/internal/knowledge/liveartifact"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
@@ -164,6 +166,41 @@ func (a vcsAuditAdapter) Record(ctx context.Context, projectID uuid.UUID, action
 		PayloadSnapshotJSON: payload,
 	}
 	_ = a.svc.RecordEvent(ctx, ev)
+}
+
+// vcsIntegrationResolverAdapter adapts VCSIntegrationRepo.FindByRepo (returns
+// slice) into the handler.IntegrationResolver interface (returns single row).
+// For webhook dispatch, multiple integrations sharing the same repo is
+// not supported yet — we return the first active match.
+type vcsIntegrationResolverAdapter struct {
+	repo *repository.VCSIntegrationRepo
+}
+
+func (a vcsIntegrationResolverAdapter) ResolveByRepo(ctx context.Context, host, owner, repo string) (*model.VCSIntegration, error) {
+	rows, err := a.repo.FindByRepo(ctx, host, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		if r.Status == "active" || r.Status == "" {
+			return r, nil
+		}
+	}
+	if len(rows) > 0 {
+		return rows[0], nil
+	}
+	return nil, repository.ErrVCSIntegrationNotFound
+}
+
+// webhookAuditAdapter implements handler.WebhookAuditRecorder by forwarding
+// into the central AuditService.
+type webhookAuditAdapter struct{ svc *service.AuditService }
+
+func (a webhookAuditAdapter) RecordEvent(ctx context.Context, e *model.AuditEvent) error {
+	if a.svc == nil {
+		return nil
+	}
+	return a.svc.RecordEvent(ctx, e)
 }
 
 type bridgeIntentAdapter struct {
@@ -335,10 +372,11 @@ func (a reviewWorkflowLauncherAdapter) LaunchReviewWorkflow(ctx context.Context,
 }
 
 type RouteServices struct {
-	TaskProgress *service.TaskProgressService
-	Automation   *service.AutomationEngineService
-	AuditSink    *service.AuditSink
-	Invitation   *service.InvitationService
+	TaskProgress        *service.TaskProgressService
+	Automation          *service.AutomationEngineService
+	AuditSink           *service.AuditSink
+	Invitation          *service.InvitationService
+	QianchuanRefresher  *qianchuanoauth.Refresher
 }
 
 func RegisterRoutes(
@@ -722,6 +760,18 @@ func RegisterRoutes(
 		WithQueryRepo(triggerRepo).
 		WithCRUDService(triggerCRUDSvc)
 	triggerH.RegisterRoutes(e)
+
+	// Card-action routing (spec1 §10): IM Bridge POSTs inbound button
+	// clicks here; the router resolves correlation tokens, resumes parked
+	// wait_event nodes, or falls through to the trigger handler.
+	cardActionRouter := &imcards.Router{
+		Correlations: imcards.NewCorrelationsRepo(taskRepo.DB()),
+		Resumer:      dagWorkflowSvc.WaitEventResumer(),
+		Fallback:     nil, // TODO(spec1-followup): wire FallbackTriggerRouter adapter
+		Audit:        nil, // TODO(spec1-followup): wire AuditSink adapter
+	}
+	cardActionsH := handler.NewIMCardActionsHandler(cardActionRouter)
+	e.POST("/api/v1/im/card-actions", cardActionsH.Handle)
 
 	// Start the schedule ticker in the background. It evaluates enabled
 	// source=schedule workflow_triggers every minute boundary and fires the
@@ -1192,12 +1242,43 @@ func RegisterRoutes(
 	vcsIntegrationsH := handler.NewVCSIntegrationsHandler(vcsSvc)
 	vcsIntegrationsH.Register(projectGroup, protected)
 
+	// VCS webhook inbound (spec2 §5 S2-B). Public (no JWT); HMAC-verified.
+	// CaptureRawBody middleware stores bytes before Echo consumes the reader.
+	vcsEventsRepo := repository.NewVCSWebhookEventsRepo(taskRepo.DB())
+	vcsWebhookRouter := service.NewVCSWebhookRouter(reviewSvc)
+	vcsWebhookHandler := handler.NewVCSWebhookHandler(
+		vcsIntegrationResolverAdapter{repo: vcsIntegrationRepo},
+		vcsSecretsResolverAdapter{svc: secretsSvc},
+		vcsWebhookRouter,
+		vcsEventsRepo,
+		webhookAuditAdapter{svc: auditSvc},
+	)
+	v1.POST("/vcs/github/webhook", vcsWebhookHandler.HandleGitHubWebhook, appMiddleware.CaptureRawBody())
+
+	// VCS outbound dispatcher (spec2 §5 S2-B): subscribes to EventReviewCompleted
+	// and posts summary + inline comments to the VCS provider.
+	{
+		feBase := strings.TrimRight(cfg.FrontendBaseURL, "/")
+		if feBase == "" {
+			feBase = "http://localhost:3000"
+		}
+		vcsOutbound := service.NewVCSOutboundDispatcher(
+			reviewSvc,
+			vcsIntegrationRepo,
+			vcsSecretsResolverAdapter{svc: secretsSvc},
+			vcsRegistry,
+			bus,
+			feBase,
+		)
+		bus.Register(vcsOutbound)
+	}
+
 	// Qianchuan bindings CRUD (spec3 §6.1). Project-scoped list/create on
 	// projectGroup; id-scoped patch/delete/sync/test on protected. Provider
 	// is constructed via env-driven Register(); auth probe runs on Create.
 	qcBindingRepo := qianchuanbinding.NewGormRepo(taskRepo.DB())
 	qcRegistry := adsplatform.NewRegistry()
-	qianchuan.Register(qcRegistry)
+	qianchuanprov.Register(qcRegistry)
 	qcProvider, qcProviderErr := qcRegistry.Resolve("qianchuan")
 	if qcProviderErr != nil {
 		log.WithError(qcProviderErr).Fatal("qianchuan provider not registered")
@@ -1206,6 +1287,29 @@ func RegisterRoutes(
 	qcBindingH := handler.NewQianchuanBindingsHandler(qcBindingSvc, qianchuanBindingsAuditEmitter{svc: auditSvc})
 	qcBindingH.Register(projectGroup)
 	qcBindingH.RegisterFlat(e)
+
+	// Qianchuan OAuth bind flow (Plan 3B). State repo + handler.
+	qcOAuthStateRepo := qianchuanoauth.NewOAuthStateRepo(taskRepo.DB())
+	qcPublicBase := cfg.PublicBaseURL
+	if qcPublicBase == "" {
+		qcPublicBase = "http://localhost:7777"
+		log.Warn("AGENTFORGE_PUBLIC_BASE_URL not set — qianchuan OAuth callbacks won't work over the public internet")
+	}
+	qcFEBase := os.Getenv("AGENTFORGE_FE_PUBLIC_BASE_URL")
+	if qcFEBase == "" {
+		qcFEBase = "http://localhost:3000"
+	}
+	qcOAuthH := &handler.QianchuanOAuthHandler{
+		States:       qcOAuthStateRepo,
+		Registry:     qcRegistry,
+		Secrets:      secretsSvc,
+		Bindings:     qcBindingSvc,
+		Audit:        qianchuanBindingsAuditEmitter{svc: auditSvc},
+		PublicBase:   qcPublicBase,
+		FEPublicBase: qcFEBase,
+	}
+	projectGroup.POST("/qianchuan/oauth/bind/initiate", qcOAuthH.Initiate, appMiddleware.Require(appMiddleware.ActionQianchuanBindWrite))
+	e.GET("/api/v1/qianchuan/oauth/callback", qcOAuthH.Callback) // No RBAC — state token is the trust anchor
 
 	// Per-employee unified runs feed (workflow_executions ∪ agent_runs).
 	// Route is global (not project-scoped) because the employee id is
@@ -1452,10 +1556,22 @@ func RegisterRoutes(
 		log.WithError(err).Warn("seed qianchuan system strategies")
 	}
 
+	// Qianchuan token refresher (Plan 3B §5-6). Started in cmd/server/main.go.
+	qcRefresher := &qianchuanoauth.Refresher{
+		Bindings:    qcBindingRepo,
+		Secrets:     secretsSvc,
+		Registry:    qcRegistry,
+		Bus:         bus,
+		Audit:       qianchuanBindingsAuditEmitter{svc: auditSvc},
+		TickEvery:   60 * time.Second,
+		EarlyWindow: 10 * time.Minute,
+	}
+
 	return &RouteServices{
-		TaskProgress: taskProgressSvc,
-		Automation:   automationEngine,
-		AuditSink:    auditSink,
-		Invitation:   invitationSvc,
+		TaskProgress:       taskProgressSvc,
+		Automation:         automationEngine,
+		AuditSink:          auditSink,
+		Invitation:         invitationSvc,
+		QianchuanRefresher: qcRefresher,
 	}
 }

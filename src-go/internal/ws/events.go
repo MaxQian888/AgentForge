@@ -109,6 +109,11 @@ const (
 	// UI. Payload is service.UnifiedRunRow — keyed on the shared envelope.
 	EventWorkflowRunStatusChanged = "workflow.run.status_changed"
 	EventWorkflowRunTerminal      = "workflow.run.terminal"
+
+	// VCS outbound events (spec2 §5 S2-B). Forwarded to WS clients so the
+	// frontend can surface delivery-failed badges.
+	EventVCSDeliveryFailed = "vcs.delivery.failed"
+	EventVCSAuthExpired    = "vcs.auth.expired"
 )
 
 // Event types pushed from the TS bridge into Go orchestration.

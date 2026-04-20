@@ -242,6 +242,10 @@ interface WorkflowState {
   // Outbound delivery failure tracking (spec §10)
   outboundDeliveryFailedExecIds: Set<string>;
   markOutboundDeliveryFailed: (executionId: string) => void;
+
+  // VCS delivery failure tracking (spec2 §5 S2-B)
+  vcsDeliveryFailedReviewIds: Set<string>;
+  markVCSDeliveryFailed: (reviewId: string) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -290,6 +294,15 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
       const next = new Set(state.outboundDeliveryFailedExecIds);
       next.add(executionId);
       return { outboundDeliveryFailedExecIds: next };
+    });
+  },
+
+  vcsDeliveryFailedReviewIds: new Set<string>(),
+  markVCSDeliveryFailed: (reviewId: string) => {
+    set((state) => {
+      const next = new Set(state.vcsDeliveryFailedReviewIds);
+      next.add(reviewId);
+      return { vcsDeliveryFailedReviewIds: next };
     });
   },
 
