@@ -8,11 +8,18 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
-// renderStructuredMessage converts a StructuredMessage to a Feishu interactive
+// renderStructured converts a StructuredMessage to a Feishu interactive
 // card JSON string. It supports section-based rendering for text, image,
-// divider, context, fields, and actions — matching the capability of the Slack
-// and Discord renderers.
-func renderStructuredMessage(message *core.StructuredMessage) (string, error) {
+// divider, context, fields, and actions — the richer surface that the
+// ProviderNeutralCard schema (spec §8) intentionally does not model.
+//
+// This file replaces the deleted renderer.go (per spec §12 "old hardcode
+// one-shot deletion"); functions were renamed from renderStructuredMessage
+// → renderStructured (and helpers from render*Sections / renderFields*  /
+// renderButtons / feishuCardHeader to renderStructured*) so live.go can
+// route SendStructured / ReplyStructured here while the new neutral path
+// goes through core.DispatchCard.
+func renderStructured(message *core.StructuredMessage) (string, error) {
 	if message == nil {
 		return "", fmt.Errorf("structured message is required")
 	}
@@ -22,7 +29,7 @@ func renderStructuredMessage(message *core.StructuredMessage) (string, error) {
 	if len(message.Sections) > 0 {
 		elements = renderStructuredSections(message.Sections)
 	} else {
-		elements = renderLegacySections(message)
+		elements = renderStructuredLegacySections(message)
 	}
 
 	if len(elements) == 0 {
@@ -31,7 +38,7 @@ func renderStructuredMessage(message *core.StructuredMessage) (string, error) {
 
 	payload := map[string]any{
 		"config":   map[string]any{"wide_screen_mode": true},
-		"header":   feishuCardHeader(message.Title),
+		"header":   renderStructuredCardHeader(message.Title),
 		"elements": elements,
 	}
 
@@ -42,7 +49,6 @@ func renderStructuredMessage(message *core.StructuredMessage) (string, error) {
 	return string(body), nil
 }
 
-// renderStructuredSections maps each StructuredSection to Feishu card elements.
 func renderStructuredSections(sections []core.StructuredSection) []map[string]any {
 	elements := make([]map[string]any, 0, len(sections))
 	for _, section := range sections {
@@ -72,9 +78,9 @@ func renderStructuredSections(sections []core.StructuredSection) []map[string]an
 				alt = "image"
 			}
 			elements = append(elements, map[string]any{
-				"tag":      "img",
-				"img_key":  url,
-				"alt":      map[string]any{"tag": "plain_text", "content": alt},
+				"tag":     "img",
+				"img_key": url,
+				"alt":     map[string]any{"tag": "plain_text", "content": alt},
 			})
 		case core.StructuredSectionTypeDivider:
 			elements = append(elements, map[string]any{"tag": "hr"})
@@ -102,7 +108,7 @@ func renderStructuredSections(sections []core.StructuredSection) []map[string]an
 			if section.FieldsSection == nil || len(section.FieldsSection.Fields) == 0 {
 				continue
 			}
-			elements = append(elements, renderFieldsAsColumns(section.FieldsSection.Fields)...)
+			elements = append(elements, renderStructuredFieldsAsColumns(section.FieldsSection.Fields)...)
 		case core.StructuredSectionTypeActions:
 			if section.ActionsSection == nil || len(section.ActionsSection.Actions) == 0 {
 				continue
@@ -116,7 +122,7 @@ func renderStructuredSections(sections []core.StructuredSection) []map[string]an
 				if end > len(section.ActionsSection.Actions) {
 					end = len(section.ActionsSection.Actions)
 				}
-				buttons := renderButtons(section.ActionsSection.Actions[start:end])
+				buttons := renderStructuredButtons(section.ActionsSection.Actions[start:end])
 				if len(buttons) > 0 {
 					elements = append(elements, map[string]any{
 						"tag":     "action",
@@ -136,9 +142,7 @@ func renderStructuredSections(sections []core.StructuredSection) []map[string]an
 	return elements
 }
 
-// renderLegacySections converts the flat Title/Body/Fields/Actions structure
-// into Feishu card elements for backward compatibility.
-func renderLegacySections(message *core.StructuredMessage) []map[string]any {
+func renderStructuredLegacySections(message *core.StructuredMessage) []map[string]any {
 	elements := make([]map[string]any, 0, 4)
 
 	if body := strings.TrimSpace(message.Body); body != "" {
@@ -149,12 +153,12 @@ func renderLegacySections(message *core.StructuredMessage) []map[string]any {
 	}
 
 	if len(message.Fields) > 0 {
-		elements = append(elements, renderFieldsAsColumns(message.Fields)...)
+		elements = append(elements, renderStructuredFieldsAsColumns(message.Fields)...)
 	}
 
 	if len(message.Actions) > 0 {
 		elements = append(elements, map[string]any{"tag": "hr"})
-		buttons := renderButtons(message.Actions)
+		buttons := renderStructuredButtons(message.Actions)
 		if len(buttons) > 0 {
 			elements = append(elements, map[string]any{
 				"tag":     "action",
@@ -166,15 +170,13 @@ func renderLegacySections(message *core.StructuredMessage) []map[string]any {
 	return elements
 }
 
-// renderFieldsAsColumns renders structured fields as 2-column layouts using
-// Feishu's column_set element.
-func renderFieldsAsColumns(fields []core.StructuredField) []map[string]any {
+func renderStructuredFieldsAsColumns(fields []core.StructuredField) []map[string]any {
 	elements := make([]map[string]any, 0, (len(fields)+1)/2)
 	for i := 0; i < len(fields); i += 2 {
 		columns := make([]map[string]any, 0, 2)
-		columns = append(columns, fieldToColumn(fields[i]))
+		columns = append(columns, renderStructuredFieldToColumn(fields[i]))
 		if i+1 < len(fields) {
-			columns = append(columns, fieldToColumn(fields[i+1]))
+			columns = append(columns, renderStructuredFieldToColumn(fields[i+1]))
 		}
 		elements = append(elements, map[string]any{
 			"tag":              "column_set",
@@ -186,7 +188,7 @@ func renderFieldsAsColumns(fields []core.StructuredField) []map[string]any {
 	return elements
 }
 
-func fieldToColumn(field core.StructuredField) map[string]any {
+func renderStructuredFieldToColumn(field core.StructuredField) map[string]any {
 	label := strings.TrimSpace(field.Label)
 	value := strings.TrimSpace(field.Value)
 	content := value
@@ -209,8 +211,7 @@ func fieldToColumn(field core.StructuredField) map[string]any {
 	}
 }
 
-// renderButtons converts structured actions to Feishu button elements.
-func renderButtons(actions []core.StructuredAction) []map[string]any {
+func renderStructuredButtons(actions []core.StructuredAction) []map[string]any {
 	buttons := make([]map[string]any, 0, len(actions))
 	for _, action := range actions {
 		label := strings.TrimSpace(action.Label)
@@ -232,7 +233,7 @@ func renderButtons(actions []core.StructuredAction) []map[string]any {
 	return buttons
 }
 
-func feishuCardHeader(title string) map[string]any {
+func renderStructuredCardHeader(title string) map[string]any {
 	return map[string]any{
 		"title": map[string]any{
 			"tag":     "plain_text",

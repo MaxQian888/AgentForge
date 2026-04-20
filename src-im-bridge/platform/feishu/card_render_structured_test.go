@@ -7,14 +7,14 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
-func TestRenderStructuredMessage_TextSection(t *testing.T) {
+func TestRenderStructured_TextSection(t *testing.T) {
 	msg := &core.StructuredMessage{
 		Title: "Test Card",
 		Sections: []core.StructuredSection{
 			{Type: "text", TextSection: &core.TextSection{Body: "Hello world"}},
 		},
 	}
-	result, err := renderStructuredMessage(msg)
+	result, err := renderStructured(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -36,14 +36,14 @@ func TestRenderStructuredMessage_TextSection(t *testing.T) {
 	}
 }
 
-func TestRenderStructuredMessage_ImageSection(t *testing.T) {
+func TestRenderStructured_ImageSection(t *testing.T) {
 	msg := &core.StructuredMessage{
 		Title: "Images",
 		Sections: []core.StructuredSection{
 			{Type: "image", ImageSection: &core.ImageSection{URL: "img_key_123", AltText: "screenshot"}},
 		},
 	}
-	result, err := renderStructuredMessage(msg)
+	result, err := renderStructured(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestRenderStructuredMessage_ImageSection(t *testing.T) {
 	}
 }
 
-func TestRenderStructuredMessage_DividerSection(t *testing.T) {
+func TestRenderStructured_DividerSection(t *testing.T) {
 	msg := &core.StructuredMessage{
 		Title: "Divider",
 		Sections: []core.StructuredSection{
@@ -68,7 +68,7 @@ func TestRenderStructuredMessage_DividerSection(t *testing.T) {
 			{Type: "text", TextSection: &core.TextSection{Body: "after"}},
 		},
 	}
-	result, err := renderStructuredMessage(msg)
+	result, err := renderStructured(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,14 +84,14 @@ func TestRenderStructuredMessage_DividerSection(t *testing.T) {
 	}
 }
 
-func TestRenderStructuredMessage_ContextSection(t *testing.T) {
+func TestRenderStructured_ContextSection(t *testing.T) {
 	msg := &core.StructuredMessage{
 		Title: "Context",
 		Sections: []core.StructuredSection{
 			{Type: "context", ContextSection: &core.ContextSection{Elements: []string{"hint 1", "hint 2"}}},
 		},
 	}
-	result, err := renderStructuredMessage(msg)
+	result, err := renderStructured(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestRenderStructuredMessage_ContextSection(t *testing.T) {
 	}
 }
 
-func TestRenderStructuredMessage_FieldsSection(t *testing.T) {
+func TestRenderStructured_FieldsSection(t *testing.T) {
 	msg := &core.StructuredMessage{
 		Title: "Fields",
 		Sections: []core.StructuredSection{
@@ -121,14 +121,14 @@ func TestRenderStructuredMessage_FieldsSection(t *testing.T) {
 			}},
 		},
 	}
-	result, err := renderStructuredMessage(msg)
+	result, err := renderStructured(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	var parsed map[string]any
 	json.Unmarshal([]byte(result), &parsed)
 	elements := parsed["elements"].([]any)
-	// 3 fields → 2 column_sets (first has 2, second has 1)
+	// 3 fields -> 2 column_sets (first has 2, second has 1)
 	if len(elements) != 2 {
 		t.Fatalf("expected 2 column_set elements, got %d", len(elements))
 	}
@@ -142,7 +142,7 @@ func TestRenderStructuredMessage_FieldsSection(t *testing.T) {
 	}
 }
 
-func TestRenderStructuredMessage_ActionsSection(t *testing.T) {
+func TestRenderStructured_ActionsSection(t *testing.T) {
 	msg := &core.StructuredMessage{
 		Title: "Actions",
 		Sections: []core.StructuredSection{
@@ -154,7 +154,7 @@ func TestRenderStructuredMessage_ActionsSection(t *testing.T) {
 			}},
 		},
 	}
-	result, err := renderStructuredMessage(msg)
+	result, err := renderStructured(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestRenderStructuredMessage_ActionsSection(t *testing.T) {
 	}
 }
 
-func TestRenderStructuredMessage_LegacyPath(t *testing.T) {
+func TestRenderStructured_LegacyPath(t *testing.T) {
 	msg := &core.StructuredMessage{
 		Title: "Legacy",
 		Body:  "Some markdown body",
@@ -190,7 +190,7 @@ func TestRenderStructuredMessage_LegacyPath(t *testing.T) {
 			{ID: "act:do:1", Label: "Do It", Style: core.ActionStyleDanger},
 		},
 	}
-	result, err := renderStructuredMessage(msg)
+	result, err := renderStructured(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -203,15 +203,15 @@ func TestRenderStructuredMessage_LegacyPath(t *testing.T) {
 	}
 }
 
-func TestRenderStructuredMessage_NilReturnsError(t *testing.T) {
-	_, err := renderStructuredMessage(nil)
+func TestRenderStructured_NilReturnsError(t *testing.T) {
+	_, err := renderStructured(nil)
 	if err == nil {
 		t.Fatal("expected error for nil message")
 	}
 }
 
-func TestRenderStructuredMessage_EmptyReturnsError(t *testing.T) {
-	_, err := renderStructuredMessage(&core.StructuredMessage{})
+func TestRenderStructured_EmptyReturnsError(t *testing.T) {
+	_, err := renderStructured(&core.StructuredMessage{})
 	if err == nil {
 		t.Fatal("expected error for empty message")
 	}
