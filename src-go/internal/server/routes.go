@@ -25,6 +25,7 @@ import (
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/role"
+	"github.com/react-go-quick-starter/server/internal/secrets"
 	"github.com/react-go-quick-starter/server/internal/service"
 	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 	"github.com/react-go-quick-starter/server/internal/storage"
@@ -77,6 +78,18 @@ func (p projectTemplateAuditEmitter) EmitProjectCreatedFromTemplate(
 		),
 	}
 	_ = p.svc.RecordEvent(ctx, event)
+}
+
+// secretsAuditEmitter adapts service.AuditService to the narrow
+// secrets.AuditEventEmitter contract so the secrets audit-recorder
+// adapter can forward into the central audit pipeline.
+type secretsAuditEmitter struct{ svc *service.AuditService }
+
+func (e secretsAuditEmitter) Record(ctx context.Context, ev *model.AuditEvent) error {
+	if e.svc == nil {
+		return nil
+	}
+	return e.svc.RecordEvent(ctx, ev)
 }
 
 type bridgeIntentAdapter struct {
@@ -320,6 +333,21 @@ func RegisterRoutes(
 		_, ok := appMiddleware.MinRoleFor(appMiddleware.ActionID(actionID))
 		return ok
 	})
+	// Secrets subsystem. AGENTFORGE_SECRETS_KEY is REQUIRED — failing
+	// closed here is the single source of truth for spec1 §11 master-key
+	// handling.
+	secretsKey := os.Getenv("AGENTFORGE_SECRETS_KEY")
+	if secretsKey == "" {
+		log.Fatal("AGENTFORGE_SECRETS_KEY is required (32 raw bytes or 44-char base64)")
+	}
+	secretsCipher, secretsCipherErr := secrets.NewCipher(secretsKey)
+	if secretsCipherErr != nil {
+		log.Fatalf("init secrets cipher: %v", secretsCipherErr)
+	}
+	secretsRepo := secrets.NewGormRepo(taskRepo.DB())
+	secretsAuditAdapter := secrets.NewAuditServiceAdapter(secretsAuditEmitter{svc: auditSvc})
+	secretsSvc := secrets.NewService(secretsRepo, secretsCipher, secretsAuditAdapter)
+
 	// Register the RBAC emitter so allow + deny paths produce audit events.
 	appMiddleware.SetAuditEmitter(func(ctx context.Context, e appMiddleware.AuditEmission) {
 		event := &model.AuditEvent{
@@ -1036,6 +1064,10 @@ func RegisterRoutes(
 	// Employee resource (persistent agent entities with role binding and lifecycle state).
 	employeeH := handler.NewEmployeeHandler(employeeSvc)
 	employeeH.Register(projectGroup)
+
+	// Project-scoped secrets store (spec1 §6.1 / §7 / §11).
+	secretsH := handler.NewSecretsHandler(&handler.EchoSecretsServiceAdapter{S: secretsSvc})
+	secretsH.Register(projectGroup)
 
 	// Per-employee unified runs feed (workflow_executions ∪ agent_runs).
 	// Route is global (not project-scoped) because the employee id is

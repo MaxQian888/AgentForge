@@ -138,6 +138,32 @@ func TestRegisterRoutes_DoesNotWireInstructionIntrospectionRoutes(t *testing.T) 
 	}
 }
 
+// TestRegisterRoutes_WiresSecretsRoutes asserts the project-scoped secrets
+// CRUD endpoints are mounted on projectGroup with RBAC gating. Spec1 1B §7.
+func TestRegisterRoutes_WiresSecretsRoutes(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("routes.go"))
+	if err != nil {
+		t.Fatalf("ReadFile(routes.go) error = %v", err)
+	}
+	source := string(content)
+	expected := []string{
+		// Construction wiring.
+		`secrets.NewCipher(secretsKey)`,
+		`secrets.NewGormRepo(taskRepo.DB())`,
+		`secrets.NewService(`,
+		// Handler registration via SecretsHandler.Register.
+		`secretsH := handler.NewSecretsHandler(`,
+		`secretsH.Register(projectGroup)`,
+		// Fail-fast on missing master key.
+		`AGENTFORGE_SECRETS_KEY is required`,
+	}
+	for _, snippet := range expected {
+		if !strings.Contains(source, snippet) {
+			t.Fatalf("expected RegisterRoutes to contain %q", snippet)
+		}
+	}
+}
+
 func TestRegisterRoutes_WiresMemoryExplorerRoutes(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join("routes.go"))
 	if err != nil {

@@ -26,6 +26,8 @@
 - **Whitelist scope (§11)**: the secret_resolver gates `{{secrets.X}}` to a fixed set of HTTP-node config field paths. References from any other field path or from dataStore expressions reject with `secret:not_allowed_field`. The same resolver also rejects `{{system_metadata.*}}` references inside dataStore template expressions (per §14 last bullet).
 - **FE project nav**: `app/(dashboard)/projects/[id]/` does NOT yet exist (only `app/(dashboard)/projects/page.tsx`). This plan creates the `[id]/secrets/page.tsx` route under a thin layout shell scoped to this slice; if a richer project-detail layout lands later it can absorb the nav entry.
 
+- **AGENTFORGE_SECRETS_KEY in dev**: there is no `src-go/.env.example` file yet. Local devs MUST set `AGENTFORGE_SECRETS_KEY` (32 raw bytes or 44-char base64) in their environment before `pnpm dev:backend`/`pnpm dev:all` will start — the secrets subsystem fail-fasts on missing key. Test code generates a deterministic test key in `src-go/internal/server/server_test_main_test.go::TestMain`. A future change should add `src-go/.env.example` documenting this and other required env vars.
+
 ---
 
 ## Task 1 — Migration 069 secrets table + audit resource_type extension
@@ -1509,7 +1511,7 @@
 
 ## Task 8 — Wire secrets subsystem into server bootstrap
 
-- [ ] Step 8.1 — read env, build cipher, fail-fast on missing key
+- [x] Step 8.1 — read env, build cipher, fail-fast on missing key
   - File: `src-go/internal/server/routes.go`
   - In the existing service-construction region (search for `auditSvc := service.NewAuditService(`), add immediately after the audit emitter is registered:
     ```go
@@ -1543,11 +1545,11 @@
     ```
   - Update imports at the top of the file to include `"os"`, `"github.com/react-go-quick-starter/server/internal/secrets"`, and (only if missing) `"github.com/react-go-quick-starter/server/internal/handler"`.
 
-- [ ] Step 8.2 — verify wiring compiles + secrets routes are mounted
+- [x] Step 8.2 — verify wiring compiles + secrets routes are mounted
   - Run `rtk go build ./...` from `src-go/` — must succeed.
   - Add to `src-go/internal/server/routes_wiring_test.go` an assertion that `/api/v1/projects/:pid/secrets` (GET, POST), `/api/v1/projects/:pid/secrets/:name` (PATCH, DELETE) are registered. Pattern: copy the closest existing test (e.g. one that asserts employees routes mount).
 
-- [ ] Step 8.3 — commit: `feat(secrets): wire cipher + repo + service + handler into server bootstrap`
+- [x] Step 8.3 — commit: `feat(secrets): wire cipher + repo + service + handler into server bootstrap`
 
 ---
 
