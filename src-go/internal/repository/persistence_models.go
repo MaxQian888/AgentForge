@@ -1107,18 +1107,19 @@ func (r *logRecord) toModel() *model.Log {
 }
 
 type reviewRecord struct {
-	ID                uuid.UUID `gorm:"column:id;primaryKey"`
-	TaskID            uuid.UUID `gorm:"column:task_id"`
-	PRURL             string    `gorm:"column:pr_url"`
-	PRNumber          int       `gorm:"column:pr_number"`
-	Layer             int       `gorm:"column:layer"`
-	Status            string    `gorm:"column:status"`
-	RiskLevel         string    `gorm:"column:risk_level"`
-	Findings          rawJSON   `gorm:"column:findings;type:jsonb"`
-	ExecutionMetadata rawJSON   `gorm:"column:execution_metadata;type:jsonb"`
+	ID                uuid.UUID  `gorm:"column:id;primaryKey"`
+	TaskID            uuid.UUID  `gorm:"column:task_id"`
+	PRURL             string     `gorm:"column:pr_url"`
+	PRNumber          int        `gorm:"column:pr_number"`
+	Layer             int        `gorm:"column:layer"`
+	Status            string     `gorm:"column:status"`
+	RiskLevel         string     `gorm:"column:risk_level"`
+	Findings          rawJSON    `gorm:"column:findings;type:jsonb"`
+	ExecutionMetadata rawJSON    `gorm:"column:execution_metadata;type:jsonb"`
 	Summary           string     `gorm:"column:summary"`
 	Recommendation    string     `gorm:"column:recommendation"`
 	CostUSD           float64    `gorm:"column:cost_usd"`
+	ParentReviewID    *uuid.UUID `gorm:"column:parent_review_id"`
 	ExecutionID       *uuid.UUID `gorm:"column:execution_id"`
 	CreatedAt         time.Time  `gorm:"column:created_at"`
 	UpdatedAt         time.Time  `gorm:"column:updated_at"`
@@ -1157,6 +1158,7 @@ func newReviewRecord(review *model.Review) (*reviewRecord, error) {
 		Summary:           review.Summary,
 		Recommendation:    review.Recommendation,
 		CostUSD:           review.CostUSD,
+		ParentReviewID:    review.ParentReviewID,
 		ExecutionID:       review.ExecutionID,
 		CreatedAt:         review.CreatedAt,
 		UpdatedAt:         review.UpdatedAt,
@@ -1178,6 +1180,7 @@ func (r *reviewRecord) toModel() (*model.Review, error) {
 		Summary:        r.Summary,
 		Recommendation: r.Recommendation,
 		CostUSD:        r.CostUSD,
+		ParentReviewID: r.ParentReviewID,
 		ExecutionID:    r.ExecutionID,
 		CreatedAt:      r.CreatedAt,
 		UpdatedAt:      r.UpdatedAt,

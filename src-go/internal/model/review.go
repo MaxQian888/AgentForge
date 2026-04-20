@@ -86,6 +86,9 @@ type Review struct {
 	LastReviewedSHA    string     `db:"last_reviewed_sha" json:"lastReviewedSha,omitempty"`
 	SummaryCommentID   string     `db:"summary_comment_id" json:"summaryCommentId,omitempty"`
 	AutomationDecision string     `db:"automation_decision" json:"automationDecision"`
+	// ParentReviewID links an incremental (diff-of-diff) review to the
+	// review that anchored its base SHA. Nil on initial reviews.
+	ParentReviewID *uuid.UUID `db:"parent_review_id" json:"parentReviewId,omitempty"`
 	// ExecutionID links this review to a workflow_executions row when the
 	// review was launched through the system:code-review template path.
 	// Nil on legacy reviews created before the workflow-backed refactor.
@@ -137,6 +140,7 @@ type ReviewDTO struct {
 	Summary           string                   `json:"summary"`
 	Recommendation    string                   `json:"recommendation"`
 	CostUSD           float64                  `json:"costUsd"`
+	ParentReviewID    string                   `json:"parentReviewId,omitempty"`
 	CreatedAt         string                   `json:"createdAt"`
 	UpdatedAt         string                   `json:"updatedAt"`
 }
@@ -227,6 +231,10 @@ func (r *Review) ToDTO() ReviewDTO {
 	if r.TaskID != uuid.Nil {
 		taskID = r.TaskID.String()
 	}
+	parentReviewID := ""
+	if r.ParentReviewID != nil {
+		parentReviewID = r.ParentReviewID.String()
+	}
 	return ReviewDTO{
 		ID:                r.ID.String(),
 		TaskID:            taskID,
@@ -240,6 +248,7 @@ func (r *Review) ToDTO() ReviewDTO {
 		Summary:           r.Summary,
 		Recommendation:    r.Recommendation,
 		CostUSD:           r.CostUSD,
+		ParentReviewID:    parentReviewID,
 		CreatedAt:         r.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:         r.UpdatedAt.Format(time.RFC3339),
 	}
