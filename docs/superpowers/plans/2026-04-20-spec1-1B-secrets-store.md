@@ -539,7 +539,7 @@
 
 ## Task 4 — `internal/secrets/service.go` orchestrating cipher + repo + audit
 
-- [ ] Step 4.1 — write failing service test (no plaintext leaks + last_used_at touched)
+- [x] Step 4.1 — write failing service test (no plaintext leaks + last_used_at touched)
   - File: `src-go/internal/secrets/service_test.go`
     ```go
     package secrets_test
@@ -650,7 +650,7 @@
     ```
   - Run `rtk go test ./internal/secrets/...` — fails: `Service`, `NewService`, `AuditRecorder` undefined.
 
-- [ ] Step 4.2 — implement service
+- [x] Step 4.2 — implement service
   - File: `src-go/internal/secrets/service.go`
     ```go
     package secrets
@@ -821,7 +821,7 @@
     ```
   - Run `rtk go test ./internal/secrets/...` — three service tests pass.
 
-- [ ] Step 4.3 — commit: `feat(secrets): orchestrate create/rotate/resolve with audit hook`
+- [x] Step 4.3 — commit: `feat(secrets): orchestrate create/rotate/resolve with audit hook`
 
 ---
 
