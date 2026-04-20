@@ -239,7 +239,7 @@
 
 ## Task 3 — `internal/vcs/provider.go` interface + typed errors
 
-- [ ] Step 3.1 — write failing interface contract test
+- [x] Step 3.1 — write failing interface contract test
   - File: `src-go/internal/vcs/provider_test.go`
     ```go
     package vcs_test
@@ -268,7 +268,7 @@
     ```
   - Run `rtk go test ./internal/vcs/...` — fails (sentinels missing).
 
-- [ ] Step 3.2 — implement interface + typed errors
+- [x] Step 3.2 — implement interface + typed errors
   - File: `src-go/internal/vcs/provider.go`
     ```go
     package vcs
@@ -334,7 +334,7 @@
     ```
   - Run `rtk go test ./internal/vcs/...` — passes.
 
-- [ ] Step 3.3 — commit: `feat(vcs): Provider interface + typed sentinel errors`
+- [x] Step 3.3 — commit: `feat(vcs): Provider interface + typed sentinel errors`
 
 ---
 
