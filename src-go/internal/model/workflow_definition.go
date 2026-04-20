@@ -58,9 +58,10 @@ type WorkflowExecution struct {
 	CurrentNodes json.RawMessage `db:"current_nodes" json:"currentNodes" gorm:"type:jsonb"` // array of node IDs currently active
 	Context      json.RawMessage `db:"context" json:"context,omitempty" gorm:"type:jsonb"`  // runtime state
 	DataStore    json.RawMessage `db:"data_store" json:"dataStore,omitempty" gorm:"type:jsonb"` // accumulated node outputs keyed by node ID
-	ErrorMessage string          `db:"error_message" json:"errorMessage,omitempty"`
-	TriggeredBy  *uuid.UUID      `db:"triggered_by" json:"triggeredBy,omitempty"`
-	StartedAt    *time.Time      `db:"started_at" json:"startedAt,omitempty"`
+	ErrorMessage     string          `db:"error_message" json:"errorMessage,omitempty"`
+	TriggeredBy      *uuid.UUID      `db:"triggered_by" json:"triggeredBy,omitempty"`
+	ActingEmployeeID *uuid.UUID      `db:"acting_employee_id" json:"actingEmployeeId,omitempty"`
+	StartedAt        *time.Time      `db:"started_at" json:"startedAt,omitempty"`
 	CompletedAt  *time.Time      `db:"completed_at" json:"completedAt,omitempty"`
 	CreatedAt    time.Time       `db:"created_at" json:"createdAt"`
 	UpdatedAt    time.Time       `db:"updated_at" json:"updatedAt"`
@@ -125,12 +126,13 @@ const (
 
 // Workflow node execution status constants.
 const (
-	NodeExecPending   = "pending"
-	NodeExecRunning   = "running"
-	NodeExecCompleted = "completed"
-	NodeExecFailed    = "failed"
-	NodeExecSkipped   = "skipped"
-	NodeExecWaiting   = "waiting"
+	NodeExecPending             = "pending"
+	NodeExecRunning             = "running"
+	NodeExecCompleted           = "completed"
+	NodeExecFailed              = "failed"
+	NodeExecSkipped             = "skipped"
+	NodeExecWaiting             = "waiting"
+	NodeExecAwaitingSubWorkflow = "awaiting_sub_workflow"
 )
 
 // WorkflowPendingReview tracks a human review request within a workflow execution.
@@ -193,6 +195,96 @@ func (r *WorkflowPendingReview) ToDTO() WorkflowPendingReviewDTO {
 	return dto
 }
 
+// Sub-workflow parent↔child linkage engine-kind constants. The values match
+// the TriggerTargetKind enum so a sub_workflow invocation and a trigger-fired
+// invocation address the same engine registry.
+const (
+	SubWorkflowEngineDAG    = "dag"
+	SubWorkflowEnginePlugin = "plugin"
+)
+
+// Sub-workflow parent-kind constants. Distinguishes which engine owns the
+// parent run side of a linkage row. Introduced by bridge-legacy-to-dag-invocation
+// so a legacy workflow plugin run invoking a DAG child can be routed back
+// through the plugin runtime's resume path.
+//
+// Values:
+//   - SubWorkflowParentKindDAGExecution ('dag_execution'): parent_execution_id
+//     references a workflow_executions.id (existing rows).
+//   - SubWorkflowParentKindPluginRun ('plugin_run'): parent_execution_id is
+//     reinterpreted as the plugin run id (workflow plugin runs are currently
+//     in-memory, so there is no FK constraint).
+const (
+	SubWorkflowParentKindDAGExecution = "dag_execution"
+	SubWorkflowParentKindPluginRun    = "plugin_run"
+)
+
+// Sub-workflow parent↔child linkage status constants.
+const (
+	SubWorkflowLinkStatusRunning    = "running"
+	SubWorkflowLinkStatusCompleted  = "completed"
+	SubWorkflowLinkStatusFailed     = "failed"
+	SubWorkflowLinkStatusCancelled  = "cancelled"
+)
+
+// WorkflowRunParentLink persists a single parent↔child sub-workflow invocation.
+// Each sub_workflow node on a parent DAG execution produces exactly one row
+// via a unique index on (ParentExecutionID, ParentNodeID); retries and
+// re-resolutions reuse the existing row rather than creating duplicates.
+type WorkflowRunParentLink struct {
+	ID                uuid.UUID  `db:"id" json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	ParentExecutionID uuid.UUID  `db:"parent_execution_id" json:"parentExecutionId"`
+	// ParentKind identifies which engine owns the parent run side of the
+	// linkage. Defaults to SubWorkflowParentKindDAGExecution for existing rows
+	// (migration 066_workflow_run_parent_link_parent_kind). When set to
+	// SubWorkflowParentKindPluginRun, ParentExecutionID is reinterpreted as
+	// the plugin run id (see bridge-legacy-to-dag-invocation).
+	ParentKind        string     `db:"parent_kind" json:"parentKind"`
+	ParentNodeID      string     `db:"parent_node_id" json:"parentNodeId"`
+	ChildEngineKind   string     `db:"child_engine_kind" json:"childEngineKind"`
+	ChildRunID        uuid.UUID  `db:"child_run_id" json:"childRunId"`
+	Status            string     `db:"status" json:"status"`
+	StartedAt         time.Time  `db:"started_at" json:"startedAt"`
+	TerminatedAt      *time.Time `db:"terminated_at" json:"terminatedAt,omitempty"`
+}
+
+// WorkflowRunParentLinkDTO is the API-facing representation. IDs are stringified
+// for JSON stability across clients that don't natively handle UUIDs.
+type WorkflowRunParentLinkDTO struct {
+	ID                string  `json:"id"`
+	ParentExecutionID string  `json:"parentExecutionId"`
+	ParentKind        string  `json:"parentKind"`
+	ParentNodeID      string  `json:"parentNodeId"`
+	ChildEngineKind   string  `json:"childEngineKind"`
+	ChildRunID        string  `json:"childRunId"`
+	Status            string  `json:"status"`
+	StartedAt         string  `json:"startedAt"`
+	TerminatedAt      *string `json:"terminatedAt,omitempty"`
+}
+
+// ToDTO converts a WorkflowRunParentLink into its API representation.
+func (l *WorkflowRunParentLink) ToDTO() WorkflowRunParentLinkDTO {
+	parentKind := l.ParentKind
+	if parentKind == "" {
+		parentKind = SubWorkflowParentKindDAGExecution
+	}
+	dto := WorkflowRunParentLinkDTO{
+		ID:                l.ID.String(),
+		ParentExecutionID: l.ParentExecutionID.String(),
+		ParentKind:        parentKind,
+		ParentNodeID:      l.ParentNodeID,
+		ChildEngineKind:   l.ChildEngineKind,
+		ChildRunID:        l.ChildRunID.String(),
+		Status:            l.Status,
+		StartedAt:         l.StartedAt.Format(time.RFC3339),
+	}
+	if l.TerminatedAt != nil {
+		s := l.TerminatedAt.Format(time.RFC3339)
+		dto.TerminatedAt = &s
+	}
+	return dto
+}
+
 // WorkflowRunMapping links an agent run back to the workflow node that spawned it.
 type WorkflowRunMapping struct {
 	ID          uuid.UUID `db:"id" json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
@@ -227,17 +319,18 @@ type WorkflowDefinitionDTO struct {
 
 // WorkflowExecutionDTO is the API representation for an execution.
 type WorkflowExecutionDTO struct {
-	ID           string   `json:"id"`
-	WorkflowID   string   `json:"workflowId"`
-	ProjectID    string   `json:"projectId"`
-	TaskID       *string  `json:"taskId,omitempty"`
-	Status       string   `json:"status"`
-	CurrentNodes []string `json:"currentNodes"`
-	ErrorMessage string   `json:"errorMessage,omitempty"`
-	StartedAt    *string  `json:"startedAt,omitempty"`
-	CompletedAt  *string  `json:"completedAt,omitempty"`
-	CreatedAt    string   `json:"createdAt"`
-	UpdatedAt    string   `json:"updatedAt"`
+	ID               string   `json:"id"`
+	WorkflowID       string   `json:"workflowId"`
+	ProjectID        string   `json:"projectId"`
+	TaskID           *string  `json:"taskId,omitempty"`
+	Status           string   `json:"status"`
+	CurrentNodes     []string `json:"currentNodes"`
+	ErrorMessage     string   `json:"errorMessage,omitempty"`
+	ActingEmployeeID *string  `json:"actingEmployeeId,omitempty"`
+	StartedAt        *string  `json:"startedAt,omitempty"`
+	CompletedAt      *string  `json:"completedAt,omitempty"`
+	CreatedAt        string   `json:"createdAt"`
+	UpdatedAt        string   `json:"updatedAt"`
 }
 
 // WorkflowNodeExecutionDTO is the API representation for a node execution.
@@ -341,6 +434,10 @@ func (e *WorkflowExecution) ToDTO() WorkflowExecutionDTO {
 	if e.TaskID != nil {
 		s := e.TaskID.String()
 		dto.TaskID = &s
+	}
+	if e.ActingEmployeeID != nil {
+		s := e.ActingEmployeeID.String()
+		dto.ActingEmployeeID = &s
 	}
 	if len(e.CurrentNodes) > 0 {
 		_ = json.Unmarshal(e.CurrentNodes, &dto.CurrentNodes)
