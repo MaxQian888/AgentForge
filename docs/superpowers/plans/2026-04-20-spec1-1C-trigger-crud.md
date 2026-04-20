@@ -26,7 +26,7 @@
 
 ## Task 1 — Extend WorkflowTrigger model + repository for CRUD distinguishability
 
-- [ ] Step 1.1 — write failing repo test asserting `created_via` round-trips
+- [x] Step 1.1 — write failing repo test asserting `created_via` round-trips
   - File: `src-go/internal/repository/workflow_trigger_repo_test.go`
   - Add `TestWorkflowTriggerRepo_CreatedViaRoundTrip` after existing tests (around line of last `func Test`):
     ```go
@@ -52,7 +52,7 @@
     }
     ```
 
-- [ ] Step 1.2 — add `CreatedVia / DisplayName / Description` to `model.WorkflowTrigger`
+- [x] Step 1.2 — add `CreatedVia / DisplayName / Description` to `model.WorkflowTrigger`
   - File: `src-go/internal/model/workflow_trigger.go`, after line 25 add:
     ```go
     type TriggerCreatedVia string
@@ -69,7 +69,7 @@
     Description string            `db:"description"  json:"description,omitempty"`
     ```
 
-- [ ] Step 1.3 — extend `workflowTriggerRecord` + mappers + add `Create` / `GetByID` / `Update`
+- [x] Step 1.3 — extend `workflowTriggerRecord` + mappers + add `Create` / `GetByID` / `Update`
   - File: `src-go/internal/repository/workflow_trigger_repo.go`
   - Add to `workflowTriggerRecord` (after line 42, before `ActingEmployeeID`):
     ```go
@@ -80,8 +80,17 @@
   - Wire into `newWorkflowTriggerRecord` (line 55) and `toModel` (line 88) — copy `CreatedVia` defaulting to `"dag_node"` when blank, `DisplayName`, `Description`.
   - After `Delete` (line 339), add `Create(ctx, t)` (insert without dedup lookup; sets `t.ID/CreatedAt/UpdatedAt`), `GetByID(ctx, id) (*model.WorkflowTrigger, error)`, `Update(ctx, t)` (full replace of mutable columns including `display_name`, `description`, `config`, `input_mapping`, `acting_employee_id`, `enabled`, `idempotency_key_template`, `dedupe_window_seconds`; `id`/`workflow_id`/`source`/`created_via` are NOT touched). Return `ErrNotFound` when row missing.
 
-- [ ] Step 1.4 — verify
+- [x] Step 1.4 — verify
   - Run `rtk go test ./internal/repository/...` — new test passes; existing trigger tests still pass.
+
+  **Note (deviation from plan)**: model + record fields were already landed by 1A
+  prior to this plan execution; verified via Grep before adding new code. The
+  Step 1.1 spec called for an integration-style `newTestRepo` test against
+  Postgres, but this repo's existing test pattern is nil-DB only (no
+  in-process SQLite/PG harness). Round-trip validation of `created_via /
+  display_name / description` is therefore deferred to the live-PG integration
+  test in Task 12, where a real DB is available. New nil-DB tests cover the
+  Create/GetByID/Update happy preconditions.
 
 ---
 

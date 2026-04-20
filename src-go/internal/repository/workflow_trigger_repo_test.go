@@ -87,3 +87,58 @@ func TestWorkflowTriggerRepository_Delete_NilDB(t *testing.T) {
 		t.Errorf("expected ErrDatabaseUnavailable, got %v", err)
 	}
 }
+
+func TestWorkflowTriggerRepository_Create_NilDB(t *testing.T) {
+	repo := repository.NewWorkflowTriggerRepository(nil)
+	wfID := uuid.New()
+	err := repo.Create(context.Background(), &model.WorkflowTrigger{
+		WorkflowID:  &wfID,
+		ProjectID:   uuid.New(),
+		Source:      model.TriggerSourceIM,
+		TargetKind:  model.TriggerTargetDAG,
+		Config:      []byte(`{}`),
+		CreatedVia:  model.TriggerCreatedViaManual,
+		DisplayName: "manual row",
+	})
+	if err != repository.ErrDatabaseUnavailable {
+		t.Errorf("expected ErrDatabaseUnavailable, got %v", err)
+	}
+}
+
+func TestWorkflowTriggerRepository_GetByID_NilDB(t *testing.T) {
+	repo := repository.NewWorkflowTriggerRepository(nil)
+	_, err := repo.GetByID(context.Background(), uuid.New())
+	if err != repository.ErrDatabaseUnavailable {
+		t.Errorf("expected ErrDatabaseUnavailable, got %v", err)
+	}
+}
+
+func TestWorkflowTriggerRepository_Update_NilDB(t *testing.T) {
+	repo := repository.NewWorkflowTriggerRepository(nil)
+	err := repo.Update(context.Background(), &model.WorkflowTrigger{
+		ID:     uuid.New(),
+		Config: []byte(`{}`),
+	})
+	if err != repository.ErrDatabaseUnavailable {
+		t.Errorf("expected ErrDatabaseUnavailable, got %v", err)
+	}
+}
+
+// TestWorkflowTriggerRepository_Update_MissingID asserts the precondition that
+// callers must supply a populated ID. Exercised even without a DB.
+func TestWorkflowTriggerRepository_Update_MissingID(t *testing.T) {
+	repo := repository.NewWorkflowTriggerRepository(nil)
+	err := repo.Update(context.Background(), &model.WorkflowTrigger{Config: []byte(`{}`)})
+	if err == nil {
+		t.Fatal("expected error for missing ID")
+	}
+}
+
+// TestWorkflowTriggerRepository_Create_NilTrigger guards the nil-input branch.
+func TestWorkflowTriggerRepository_Create_NilTrigger(t *testing.T) {
+	repo := repository.NewWorkflowTriggerRepository(nil)
+	err := repo.Create(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for nil trigger")
+	}
+}

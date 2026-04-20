@@ -367,6 +367,98 @@ func (r *WorkflowTriggerRepository) Delete(ctx context.Context, id uuid.UUID) er
 	return nil
 }
 
+// Create inserts a brand-new trigger row WITHOUT the dedup-by-config lookup that
+// Upsert performs. It is the entry point used by the Spec 1C trigger CRUD
+// surface, where the user's intent is "make a new manual trigger" rather than
+// "reconcile a DAG node". Stamps t.ID/CreatedAt/UpdatedAt before INSERT.
+//
+// The caller is responsible for setting CreatedVia. When blank, defaults to
+// 'manual' to match the FE CRUD origin.
+func (r *WorkflowTriggerRepository) Create(ctx context.Context, t *model.WorkflowTrigger) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if t == nil {
+		return fmt.Errorf("create workflow trigger: nil trigger")
+	}
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
+	}
+	if t.TargetKind == "" {
+		t.TargetKind = model.TriggerTargetDAG
+	}
+	if t.CreatedVia == "" {
+		t.CreatedVia = model.TriggerCreatedViaManual
+	}
+	now := time.Now().UTC()
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = now
+	}
+	if t.UpdatedAt.IsZero() {
+		t.UpdatedAt = now
+	}
+	rec := newWorkflowTriggerRecord(t)
+	if err := r.db.WithContext(ctx).Create(rec).Error; err != nil {
+		return fmt.Errorf("create workflow trigger: %w", err)
+	}
+	return nil
+}
+
+// GetByID fetches a single trigger row by primary key.
+// Returns ErrNotFound when no row matched.
+func (r *WorkflowTriggerRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.WorkflowTrigger, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	var rec workflowTriggerRecord
+	if err := r.db.WithContext(ctx).Where("id = ?", id).Take(&rec).Error; err != nil {
+		if normalized := normalizeRepositoryError(err); errors.Is(normalized, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get workflow trigger: %w", err)
+	}
+	return rec.toModel(), nil
+}
+
+// Update replaces the mutable columns of an existing trigger row identified
+// by t.ID. The id, workflow_id, source, and created_via columns are NEVER
+// modified — Spec 1C forbids editing those after the row has been persisted
+// (the FE CRUD treats them as the row's identity). Returns ErrNotFound when
+// no row matched.
+func (r *WorkflowTriggerRepository) Update(ctx context.Context, t *model.WorkflowTrigger) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if t == nil || t.ID == uuid.Nil {
+		return fmt.Errorf("update workflow trigger: missing id")
+	}
+	now := time.Now().UTC()
+	updates := map[string]any{
+		"config":                    newJSONText(rawMessageToString(t.Config), "{}"),
+		"input_mapping":             newJSONText(rawMessageToString(t.InputMapping), "{}"),
+		"idempotency_key_template":  t.IdempotencyKeyTemplate,
+		"dedupe_window_seconds":     t.DedupeWindowSeconds,
+		"enabled":                   t.Enabled,
+		"disabled_reason":           t.DisabledReason,
+		"display_name":              t.DisplayName,
+		"description":               t.Description,
+		"acting_employee_id":        t.ActingEmployeeID,
+		"updated_at":                now,
+	}
+	res := r.db.WithContext(ctx).
+		Model(&workflowTriggerRecord{}).
+		Where("id = ?", t.ID).
+		Updates(updates)
+	if res.Error != nil {
+		return fmt.Errorf("update workflow trigger: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	t.UpdatedAt = now
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
