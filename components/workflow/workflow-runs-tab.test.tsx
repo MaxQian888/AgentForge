@@ -1,34 +1,43 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type {
+  WorkflowRunStore,
+  UnifiedRunRow,
+  UnifiedRunFilter,
+  UnifiedRunDetail,
+} from "@/lib/stores/workflow-run-store";
+import type { WorkflowDefinition } from "@/lib/stores/workflow-store";
 
 const fetchUnifiedRuns = jest.fn();
 const fetchRunDetail = jest.fn();
 const setFilter = jest.fn();
 const clearDetail = jest.fn();
 
-let runStoreState = {
-  rows: [] as any[],
+let runStoreState: WorkflowRunStore = {
+  rows: [] as UnifiedRunRow[],
   summary: { running: 0, paused: 0, failed: 0 },
-  nextCursor: null as string | null,
+  nextCursor: null,
   loading: false,
-  filter: {} as any,
-  selectedDetail: null as any,
+  filter: {} as UnifiedRunFilter,
+  selectedDetail: null as UnifiedRunDetail | null,
   detailLoading: false,
+  error: null,
   fetchUnifiedRuns,
   fetchRunDetail,
   setFilter,
   clearDetail,
+  applyRealtimeRow: jest.fn(),
 };
 
 jest.mock("@/lib/stores/workflow-run-store", () => {
-  const selector = (selectorFn?: (s: any) => any) =>
+  const selector = (selectorFn?: (s: WorkflowRunStore) => unknown) =>
     selectorFn ? selectorFn(runStoreState) : runStoreState;
   selector.getState = () => runStoreState;
   return { useWorkflowRunStore: selector };
 });
 
 jest.mock("@/lib/stores/workflow-store", () => ({
-  useWorkflowStore: (selectorFn?: (s: any) => any) =>
+  useWorkflowStore: (selectorFn?: (s: { definitions: WorkflowDefinition[] }) => unknown) =>
     selectorFn ? selectorFn({ definitions: [] }) : { definitions: [] },
 }));
 
@@ -45,10 +54,12 @@ describe("WorkflowRunsTab", () => {
       filter: {},
       selectedDetail: null,
       detailLoading: false,
+      error: null,
       fetchUnifiedRuns,
       fetchRunDetail,
       setFilter,
       clearDetail,
+      applyRealtimeRow: jest.fn(),
     };
   });
 

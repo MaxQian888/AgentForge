@@ -1,24 +1,26 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { WorkflowDefinition } from "@/lib/stores/workflow-store";
+import type { PluginRecord } from "@/lib/stores/plugin-store";
 
 // Both stores are mocked at the module boundary so the component can pull the
 // reader without needing a real zustand runtime. The tests supply the target
 // lists through the component's prop overrides, so the store payloads are
 // deliberately minimal.
 jest.mock("@/lib/stores/workflow-store", () => ({
-  useWorkflowStore: (selectorFn?: (s: any) => any) =>
+  useWorkflowStore: (selectorFn?: (s: { definitions: WorkflowDefinition[] }) => unknown) =>
     selectorFn ? selectorFn({ definitions: [] }) : { definitions: [] },
 }));
 
 jest.mock("@/lib/stores/plugin-store", () => ({
-  usePluginStore: (selectorFn?: (s: any) => any) =>
+  usePluginStore: (selectorFn?: (s: { plugins: PluginRecord[] }) => unknown) =>
     selectorFn ? selectorFn({ plugins: [] }) : { plugins: [] },
 }));
 
 import { SubWorkflowConfig } from "./sub-workflow-config";
 
 describe("SubWorkflowConfig", () => {
-  const baseDagWorkflow: any = {
+  const baseDagWorkflow: WorkflowDefinition = {
     id: "11111111-1111-1111-1111-111111111111",
     name: "Sibling DAG",
     projectId: "proj-1",
@@ -31,7 +33,7 @@ describe("SubWorkflowConfig", () => {
     createdAt: "",
     updatedAt: "",
   };
-  const baseParent: any = {
+  const baseParent: WorkflowDefinition = {
     id: "22222222-2222-2222-2222-222222222222",
     name: "Parent DAG",
     projectId: "proj-1",
@@ -44,11 +46,11 @@ describe("SubWorkflowConfig", () => {
     createdAt: "",
     updatedAt: "",
   };
-  const basePlugin: any = {
+  const basePlugin: PluginRecord = {
     apiVersion: "agentforge/v1",
     kind: "WorkflowPlugin",
-    metadata: { id: "plug-1", name: "Release Train" },
-    spec: {},
+    metadata: { id: "plug-1", name: "Release Train", version: "1.0.0" },
+    spec: { runtime: "declarative" },
     permissions: {},
     source: { type: "local" },
     lifecycle_state: "enabled",

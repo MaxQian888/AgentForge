@@ -342,9 +342,6 @@ export function WorkflowExecutionView({
   nodes,
   engine = "dag",
 }: WorkflowExecutionViewProps) {
-  if (engine !== "dag") {
-    return null;
-  }
   const [execution, setExecution] = useState<WorkflowExecution | null>(null);
   const [nodeExecs, setNodeExecs] = useState<WorkflowNodeExecution[]>([]);
   const [subInvocations, setSubInvocations] = useState<SubWorkflowLinkDTO[]>([]);
@@ -409,6 +406,10 @@ export function WorkflowExecutionView({
       // ignore
     }
   }, [executionId, fetchExecution]);
+
+  if (engine !== "dag") {
+    return null;
+  }
 
   if (loading) {
     return (

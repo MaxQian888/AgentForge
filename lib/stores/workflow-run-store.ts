@@ -77,7 +77,7 @@ export interface UnifiedRunDetail {
   body: unknown;
 }
 
-interface WorkflowRunState {
+export interface WorkflowRunStore {
   rows: UnifiedRunRow[];
   summary: UnifiedRunSummary;
   nextCursor: string | null;
@@ -147,7 +147,7 @@ function summarizeRows(rows: UnifiedRunRow[]): UnifiedRunSummary {
   return out;
 }
 
-export const useWorkflowRunStore = create<WorkflowRunState>()((set, get) => ({
+export const useWorkflowRunStore = create<WorkflowRunStore>()((set, get) => ({
   rows: [],
   summary: EMPTY_SUMMARY,
   nextCursor: null,
@@ -210,7 +210,7 @@ export const useWorkflowRunStore = create<WorkflowRunState>()((set, get) => ({
   // workflow.run.status_changed or workflow.run.terminal event arrives. It
   // upserts the row by (engine, runId) so the list stays consistent with
   // live transitions without a page refresh.
-  applyRealtimeRow: (row, _terminal) => {
+  applyRealtimeRow: (row, terminal) => {
     set((state) => {
       const idx = state.rows.findIndex(
         (r) => r.engine === row.engine && r.runId === row.runId
@@ -219,8 +219,10 @@ export const useWorkflowRunStore = create<WorkflowRunState>()((set, get) => ({
       if (idx >= 0) {
         nextRows = [...state.rows];
         nextRows[idx] = { ...nextRows[idx], ...row };
-      } else {
+      } else if (!terminal) {
         nextRows = [row, ...state.rows];
+      } else {
+        nextRows = state.rows;
       }
       return { rows: nextRows, summary: summarizeRows(nextRows) };
     });
