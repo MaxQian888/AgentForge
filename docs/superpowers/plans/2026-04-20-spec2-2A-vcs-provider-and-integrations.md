@@ -1174,7 +1174,7 @@
 
 ## Task 8 — `internal/repository/vcs_integration_repo.go` persistence
 
-- [ ] Step 8.1 — write failing repo test (matches existing repo conventions)
+- [x] Step 8.1 — write failing repo test (matches existing repo conventions)
   - File: `src-go/internal/repository/vcs_integration_repo_test.go`
     ```go
     package repository_test
@@ -1257,7 +1257,7 @@
     ```
   - Run `rtk go test ./internal/repository/...` (-run VCSIntegration) — fails.
 
-- [ ] Step 8.2 — implement model + repo
+- [x] Step 8.2 — implement model + repo
   - File: `src-go/internal/model/vcs_integration.go`
     ```go
     package model
@@ -1388,7 +1388,7 @@
     ```
   - Run `rtk go test ./internal/repository/...` (-run VCSIntegration) — passes.
 
-- [ ] Step 8.3 — commit: `feat(repo): vcs_integrations CRUD with unique-conflict mapping`
+- [x] Step 8.3 — commit: `feat(repo): vcs_integrations CRUD with unique-conflict mapping`
 
 ---
 
