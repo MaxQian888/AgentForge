@@ -598,7 +598,7 @@
 
 ## Task 4 — Qianchuan client core (HTTP + retry + error mapping)
 
-- [ ] Step 4.1 — failing tests using `httptest.Server`
+- [x] Step 4.1 — failing tests using `httptest.Server`
   - File: `src-go/internal/adsplatform/qianchuan/client_test.go`
     ```go
     package qianchuan_test
@@ -687,7 +687,7 @@
     }
     ```
 
-- [ ] Step 4.2 — implement client
+- [x] Step 4.2 — implement client
   - File: `src-go/internal/adsplatform/qianchuan/client.go`
     ```go
     // Package qianchuan implements adsplatform.Provider against the Qianchuan
@@ -906,7 +906,7 @@
     ```
   - Run `rtk go test ./internal/adsplatform/qianchuan/...` — four tests pass.
 
-- [ ] Step 4.3 — commit `feat(qianchuan): add HTTP client with retry + error mapping`
+- [x] Step 4.3 — commit `feat(qianchuan): add HTTP client with retry + error mapping`
 
 ---
 

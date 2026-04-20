@@ -21,6 +21,7 @@ type mockTriggerRepo struct {
 	rows        map[uuid.UUID]*model.WorkflowTrigger
 	upsertCount int
 	deleteCount int
+	deletedIDs  []uuid.UUID
 }
 
 func newMockTriggerRepo() *mockTriggerRepo {
@@ -51,6 +52,7 @@ func (m *mockTriggerRepo) ListByWorkflow(_ context.Context, workflowID uuid.UUID
 
 func (m *mockTriggerRepo) Delete(_ context.Context, id uuid.UUID) error {
 	m.deleteCount++
+	m.deletedIDs = append(m.deletedIDs, id)
 	delete(m.rows, id)
 	return nil
 }
@@ -624,6 +626,149 @@ func TestRegistrar_SyncFromDefinition_InvalidEmployeeUUID(t *testing.T) {
 	if outcomes[0].DisabledReason != trigger.DisabledReasonActingEmployeeMissing {
 		t.Errorf("expected reason %q, got %q",
 			trigger.DisabledReasonActingEmployeeMissing, outcomes[0].DisabledReason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Spec 1C §6.2: registrar merges by created_via instead of delete-and-insert.
+// ---------------------------------------------------------------------------
+
+// TestRegistrar_SyncFromDefinition_PreservesManualRows verifies that a
+// re-save of the DAG (with no remaining trigger nodes) deletes stale
+// 'dag_node' rows but leaves any 'manual' rows for the same workflow alone.
+// The 'manual' rows are owned by the FE trigger-CRUD surface (Spec 1C).
+func TestRegistrar_SyncFromDefinition_PreservesManualRows(t *testing.T) {
+	repo := newMockTriggerRepo()
+	reg := trigger.NewRegistrar(repo)
+
+	wfID := uuid.New()
+	projID := uuid.New()
+	wfRef := wfID
+
+	// Pre-seed a manual row for this workflow — owned by the FE CRUD.
+	manualID := uuid.New()
+	repo.rows[manualID] = &model.WorkflowTrigger{
+		ID:         manualID,
+		WorkflowID: &wfRef,
+		ProjectID:  projID,
+		Source:     model.TriggerSourceIM,
+		TargetKind: model.TriggerTargetDAG,
+		Config:     json.RawMessage(`{"platform":"feishu","command":"/manual"}`),
+		CreatedVia: model.TriggerCreatedViaManual,
+		Enabled:    true,
+	}
+	// Pre-seed a stale dag_node row — should be deleted on sync.
+	staleID := uuid.New()
+	repo.rows[staleID] = &model.WorkflowTrigger{
+		ID:         staleID,
+		WorkflowID: &wfRef,
+		ProjectID:  projID,
+		Source:     model.TriggerSourceIM,
+		TargetKind: model.TriggerTargetDAG,
+		Config:     json.RawMessage(`{"platform":"feishu","command":"/old"}`),
+		CreatedVia: model.TriggerCreatedViaDAGNode,
+		Enabled:    true,
+	}
+
+	// Sync with empty DAG node list → stale dag_node deleted, manual kept.
+	if _, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nil, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if _, ok := repo.rows[manualID]; !ok {
+		t.Error("manual row was deleted by sync; must be preserved")
+	}
+	if _, ok := repo.rows[staleID]; ok {
+		t.Error("stale dag_node row was not deleted")
+	}
+	if repo.deleteCount != 1 {
+		t.Errorf("expected exactly 1 delete (stale dag_node), got %d", repo.deleteCount)
+	}
+	if len(repo.deletedIDs) != 1 || repo.deletedIDs[0] != staleID {
+		t.Errorf("unexpected deletedIDs: %v (want [%s])", repo.deletedIDs, staleID)
+	}
+}
+
+// TestRegistrar_SyncFromDefinition_DAGRowsAddedUpdatedRemoved exercises the
+// merge logic across all three transitions in a single pass: a new dag_node
+// node is upserted, an existing dag_node node matches and is preserved, an
+// extra orphan dag_node is deleted, and a manual row mixed in for the same
+// workflow is left untouched.
+func TestRegistrar_SyncFromDefinition_DAGRowsAddedUpdatedRemoved(t *testing.T) {
+	repo := newMockTriggerRepo()
+	reg := trigger.NewRegistrar(repo)
+
+	wfID := uuid.New()
+	projID := uuid.New()
+	wfRef := wfID
+
+	// Pre-seed a manual row (must survive untouched).
+	manualID := uuid.New()
+	repo.rows[manualID] = &model.WorkflowTrigger{
+		ID:         manualID,
+		WorkflowID: &wfRef,
+		ProjectID:  projID,
+		Source:     model.TriggerSourceIM,
+		TargetKind: model.TriggerTargetDAG,
+		Config:     json.RawMessage(`{"platform":"feishu","command":"/manual"}`),
+		CreatedVia: model.TriggerCreatedViaManual,
+		Enabled:    true,
+	}
+	// Pre-seed a stale dag_node row absent from the new DAG (must be deleted).
+	orphanDAGID := uuid.New()
+	repo.rows[orphanDAGID] = &model.WorkflowTrigger{
+		ID:         orphanDAGID,
+		WorkflowID: &wfRef,
+		ProjectID:  projID,
+		Source:     model.TriggerSourceIM,
+		TargetKind: model.TriggerTargetDAG,
+		Config:     json.RawMessage(`{"platform":"feishu","command":"/orphan"}`),
+		CreatedVia: model.TriggerCreatedViaDAGNode,
+		Enabled:    true,
+	}
+
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source": "im",
+			"im":     map[string]any{"platform": "feishu", "command": "/n1"},
+		}),
+		makeNode("n2", model.NodeTypeTrigger, map[string]any{
+			"source": "im",
+			"im":     map[string]any{"platform": "feishu", "command": "/n2"},
+		}),
+	}
+
+	if _, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// Manual row preserved.
+	if _, ok := repo.rows[manualID]; !ok {
+		t.Error("manual row deleted; must be preserved across DAG re-save")
+	}
+	// Orphan dag_node row deleted.
+	if _, ok := repo.rows[orphanDAGID]; ok {
+		t.Error("orphan dag_node row not deleted")
+	}
+	// All upserts stamped CreatedVia=dag_node.
+	dagNodeRows := 0
+	for id, row := range repo.rows {
+		if id == manualID {
+			continue
+		}
+		if row.CreatedVia != model.TriggerCreatedViaDAGNode {
+			t.Errorf("row %s upserted with unexpected created_via=%q", id, row.CreatedVia)
+		}
+		dagNodeRows++
+	}
+	if dagNodeRows != 2 {
+		t.Errorf("expected 2 dag_node rows after sync, got %d", dagNodeRows)
+	}
+	if repo.upsertCount != 2 {
+		t.Errorf("expected 2 upserts, got %d", repo.upsertCount)
+	}
+	if repo.deleteCount != 1 || repo.deletedIDs[0] != orphanDAGID {
+		t.Errorf("expected single delete of orphan dag_node, got deletes=%d ids=%v",
+			repo.deleteCount, repo.deletedIDs)
 	}
 }
 

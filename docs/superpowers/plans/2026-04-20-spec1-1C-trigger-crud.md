@@ -96,7 +96,7 @@
 
 ## Task 2 — Refactor registrar from delete-and-insert to merge-by-created_via
 
-- [ ] Step 2.1 — write failing test: manual rows survive a DAG re-save
+- [x] Step 2.1 — write failing test: manual rows survive a DAG re-save
   - File: `src-go/internal/trigger/registrar_test.go`
   - Add at end:
     ```go
@@ -137,7 +137,7 @@
     ```
   - Also extend `mockTriggerRepo.Delete` to track which IDs were deleted (for assertion clarity) — keep the existing `deleteCount` field and add `deletedIDs []uuid.UUID`.
 
-- [ ] Step 2.2 — implement merge logic in registrar
+- [x] Step 2.2 — implement merge logic in registrar
   - File: `src-go/internal/trigger/registrar.go`
   - Inside the `for _, node := range nodes` loop (around line 159), set `tr.CreatedVia = model.TriggerCreatedViaDAGNode` before the upsert (line 273).
   - After the upsert section, change the cleanup loop (lines 286–299) so the delete-stale step ONLY targets `created_via='dag_node'` rows:
@@ -155,14 +155,14 @@
     }
     ```
 
-- [ ] Step 2.3 — add complementary test: dag_node rows added/updated/removed cleanly
+- [x] Step 2.3 — add complementary test: dag_node rows added/updated/removed cleanly
   - Same file, add `TestRegistrar_SyncFromDefinition_DAGRowsAddedUpdatedRemoved` that:
     1. starts with one pre-existing `dag_node` row matching node "n1" config (asserts no delete);
     2. node "n2" is new (asserts upsert called with `CreatedVia=dag_node`);
     3. an extra pre-existing `dag_node` row absent from DAG is deleted;
     4. a `manual` row mixed in with the same workflow is untouched.
 
-- [ ] Step 2.4 — verify
+- [x] Step 2.4 — verify
   - Run `rtk go test ./internal/trigger/...` — all green; existing 12 tests still pass.
 
 ---

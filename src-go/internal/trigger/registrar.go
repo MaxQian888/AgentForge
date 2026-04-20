@@ -233,7 +233,12 @@ func (r *Registrar) SyncFromDefinition(
 			IdempotencyKeyTemplate: cfg.IdempotencyKeyTemplate,
 			DedupeWindowSeconds:    cfg.DedupeWindowSeconds,
 			Enabled:                requestedEnabled,
-			CreatedBy:              createdBy,
+			// Spec 1C §6.2: rows materialized from a DAG trigger node are
+			// owned by the registrar and may be reaped on re-save. The
+			// distinct 'manual' value is used for FE-authored rows and is
+			// asserted to never be touched by the cleanup loop below.
+			CreatedVia: model.TriggerCreatedViaDAGNode,
+			CreatedBy:  createdBy,
 		}
 
 		// Parse and stamp the optional acting_employee_id. An invalid UUID is
@@ -284,17 +289,23 @@ func (r *Registrar) SyncFromDefinition(
 	}
 
 	// Delete rows that are no longer represented in the current DAG.
+	// Spec 1C §6.2: scope cleanup to created_via='dag_node' rows only —
+	// 'manual' rows are owned by the FE CRUD and must survive a DAG re-save.
 	existing, err := r.repo.ListByWorkflow(ctx, workflowID)
 	if err != nil {
 		return outcomes, fmt.Errorf("sync triggers: list existing: %w", err)
 	}
 
 	for _, row := range existing {
+		if row.CreatedVia == model.TriggerCreatedViaManual {
+			// Manual rows are owned by the FE CRUD; never reaped by a sync.
+			continue
+		}
 		if _, keep := keepSet[row.ID]; keep {
 			continue
 		}
 		if err := r.repo.Delete(ctx, row.ID); err != nil {
-			return outcomes, fmt.Errorf("sync triggers: delete stale row %s: %w", row.ID, err)
+			return outcomes, fmt.Errorf("sync triggers: delete stale dag_node row %s: %w", row.ID, err)
 		}
 	}
 
