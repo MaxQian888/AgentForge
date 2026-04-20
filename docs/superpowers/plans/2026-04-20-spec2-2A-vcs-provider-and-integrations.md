@@ -127,7 +127,7 @@
 
 ## Task 2 — `internal/vcs/types.go` shared types
 
-- [ ] Step 2.1 — write failing type compile-check test
+- [x] Step 2.1 — write failing type compile-check test
   - File: `src-go/internal/vcs/types_test.go`
     ```go
     package vcs_test
@@ -154,7 +154,7 @@
     ```
   - Run `rtk go test ./internal/vcs/...` — fails (package missing).
 
-- [ ] Step 2.2 — implement shared types
+- [x] Step 2.2 — implement shared types
   - File: `src-go/internal/vcs/types.go`
     ```go
     // Package vcs is the provider-neutral seam for source-control hosts
@@ -233,7 +233,7 @@
     ```
   - Run `rtk go test ./internal/vcs/...` — passes.
 
-- [ ] Step 2.3 — commit: `feat(vcs): shared neutral types (RepoRef, PullRequest, Diff, InlineComment, OpenPROpts)`
+- [x] Step 2.3 — commit: `feat(vcs): shared neutral types (RepoRef, PullRequest, Diff, InlineComment, OpenPROpts)`
 
 ---
 
