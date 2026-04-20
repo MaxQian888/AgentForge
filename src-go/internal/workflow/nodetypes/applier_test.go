@@ -623,7 +623,11 @@ func TestApplier_WaitEvent_NilHub_StillParks(t *testing.T) {
 	}
 }
 
-func TestApplier_InvokeSubWorkflow_StubParks(t *testing.T) {
+func TestApplier_InvokeSubWorkflow_FailsWhenEngineRegistryMissing(t *testing.T) {
+	// Replaces the old "stub parks" assertion: when the applier has no engine
+	// registry wired, EffectInvokeSubWorkflow surfaces a structured error
+	// rather than silently parking. Happy-path behavior is covered by the
+	// sub_workflow-specific applier tests in applier_sub_workflow_test.go.
 	applier := &EffectApplier{}
 
 	exec := newExec()
@@ -631,17 +635,15 @@ func TestApplier_InvokeSubWorkflow_StubParks(t *testing.T) {
 		{
 			Kind: EffectInvokeSubWorkflow,
 			Payload: mustJSON(InvokeSubWorkflowPayload{
-				WorkflowID: "wf-child",
+				TargetKind:       SubWorkflowTargetDAG,
+				TargetWorkflowID: "wf-child",
 			}),
 		},
 	}
 
-	parked, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !parked {
-		t.Fatal("expected parked=true for sub_workflow stub")
+	_, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
+	if err == nil {
+		t.Fatal("expected error when no engine registry is wired")
 	}
 }
 

@@ -86,6 +86,16 @@ type EffectApplier struct {
 	EmployeeSpawner EmployeeSpawner
 	MappingRepo     RunMappingRepo
 	ReviewRepo      ReviewRepo
+	// Sub-workflow invocation deps. SubWorkflowEngines routes an
+	// EffectInvokeSubWorkflow to the correct child-runtime adapter;
+	// SubWorkflowLinks persists parent↔child linkage rows;
+	// SubWorkflowGuard rejects cycles and depth violations before dispatch.
+	// All three MUST be wired for sub_workflow nodes to execute — if any is
+	// nil the applier surfaces a structured "not configured" error at
+	// dispatch time rather than parking silently.
+	SubWorkflowEngines *SubWorkflowEngineRegistry
+	SubWorkflowLinks   SubWorkflowLinkRepo
+	SubWorkflowGuard   *RecursionGuard
 }
 
 // Apply iterates effects in order and executes each one.
@@ -133,7 +143,7 @@ func (a *EffectApplier) Apply(
 			return true, nil
 
 		case EffectInvokeSubWorkflow:
-			if err := a.applyInvokeSubWorkflow(exec, node, e.Payload); err != nil {
+			if err := a.applyInvokeSubWorkflow(ctx, exec, node, e.Payload); err != nil {
 				return false, fmt.Errorf("invoke_sub_workflow: %w", err)
 			}
 			return true, nil
@@ -347,14 +357,121 @@ func (a *EffectApplier) applyWaitEvent(exec *model.WorkflowExecution, node *mode
 	return nil
 }
 
-func (a *EffectApplier) applyInvokeSubWorkflow(exec *model.WorkflowExecution, node *model.WorkflowNode, raw json.RawMessage) error {
+func (a *EffectApplier) applyInvokeSubWorkflow(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, raw json.RawMessage) error {
 	var p InvokeSubWorkflowPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
-	// Track A stub: the sub_workflow handler itself fails fast (Task 6), so this
-	// applier path is defensive. Park the node and let the caller surface the
-	// lack-of-implementation via the handler contract.
-	log.Printf("[WARN] EffectApplier: TODO: sub_workflow not wired (execution=%s, node=%s, targetWorkflow=%s)", exec.ID, node.ID, p.WorkflowID)
+
+	target := p.TargetWorkflowID
+	if target == "" {
+		target = p.WorkflowID
+	}
+	if target == "" {
+		return &SubWorkflowInvocationError{
+			Reason:  SubWorkflowRejectUnknownTarget,
+			Message: "payload missing targetWorkflowId",
+		}
+	}
+
+	kind := p.TargetKind
+	if kind == "" {
+		kind = SubWorkflowTargetDAG
+	}
+
+	if a.SubWorkflowEngines == nil {
+		return fmt.Errorf("sub_workflow: engine registry is not configured")
+	}
+	engine, ok := a.SubWorkflowEngines.Get(kind)
+	if !ok {
+		return &SubWorkflowInvocationError{
+			Reason:  SubWorkflowRejectUnknownTarget,
+			Message: fmt.Sprintf("no engine registered for target kind %q", kind),
+		}
+	}
+
+	// Pre-dispatch validation (unknown target + cross-project rejection).
+	// Engines return SubWorkflowInvocationError so the caller can classify
+	// the failure without parsing error strings.
+	invForValidate := SubWorkflowInvocation{
+		ParentExecutionID: exec.ID,
+		ParentNodeID:      node.ID,
+		ProjectID:         exec.ProjectID,
+		ActingEmployeeID:  exec.ActingEmployeeID,
+	}
+	if err := engine.Validate(ctx, target, invForValidate); err != nil {
+		return err
+	}
+
+	// Recursion guard: only walk for DAG targets (plugin children cannot host
+	// sub_workflow nodes, so no cyclic chain is possible through them).
+	if kind == SubWorkflowTargetDAG && a.SubWorkflowGuard != nil {
+		if err := a.SubWorkflowGuard.Check(ctx, exec.ID, target); err != nil {
+			return err
+		}
+	}
+
+	// Render input mapping against parent context. Unresolvable references
+	// surface as structured errors so callers can classify them.
+	parentDataStore := map[string]any{}
+	if len(exec.DataStore) > 0 {
+		_ = json.Unmarshal(exec.DataStore, &parentDataStore)
+	}
+	parentContext := map[string]any{}
+	if len(exec.Context) > 0 {
+		_ = json.Unmarshal(exec.Context, &parentContext)
+	}
+	seed, err := renderSubWorkflowMapping(p.InputMapping, parentDataStore, parentContext)
+	if err != nil {
+		return err
+	}
+	// Augment the seed with parent attribution so the child can correlate.
+	seed["$parent"] = map[string]any{
+		"executionId": exec.ID.String(),
+		"nodeId":      node.ID,
+		"projectId":   exec.ProjectID.String(),
+	}
+
+	// Start the child run through the engine adapter.
+	childRunID, err := engine.Start(ctx, target, seed, invForValidate)
+	if err != nil {
+		return fmt.Errorf("sub_workflow: engine start: %w", err)
+	}
+
+	// Persist the parent-link row so the terminal-state hook on either engine
+	// can resume this parent when the child completes. ParentKind is stamped
+	// "dag_execution" here because the applier is only invoked for DAG parent
+	// nodes; plugin-run parents insert their own rows via the legacy step
+	// router (bridge-legacy-to-dag-invocation).
+	if a.SubWorkflowLinks != nil {
+		if err := a.SubWorkflowLinks.Create(ctx, &SubWorkflowLinkRecord{
+			ID:                uuid.New(),
+			ParentExecutionID: exec.ID,
+			ParentKind:        "dag_execution",
+			ParentNodeID:      node.ID,
+			ChildEngineKind:   string(kind),
+			ChildRunID:        childRunID,
+			Status:            "running",
+		}); err != nil {
+			// Soft-fail parity with spawn_agent mapping: the child is already
+			// started; log but don't fail the node. Loss of the link means
+			// the parent won't auto-resume, which operators can reconcile by
+			// manually completing the node.
+			log.Printf("[WARN] EffectApplier: failed to persist parent link for node %s (child %s): %v", node.ID, childRunID, err)
+		}
+	} else {
+		log.Printf("[WARN] EffectApplier: SubWorkflowLinks is nil, skipping parent link for node %s (async resume will not work)", node.ID)
+	}
+
+	// Broadcast a sub_workflow.started hint so the frontend can stitch parent
+	// ↔ child into the execution detail view.
+	if a.Hub != nil {
+		a.Hub.BroadcastEvent("workflow.sub_workflow.started", exec.ProjectID.String(), map[string]any{
+			"executionId": exec.ID.String(),
+			"nodeId":      node.ID,
+			"childEngine": string(kind),
+			"childRunId":  childRunID.String(),
+		})
+	}
 	return nil
 }

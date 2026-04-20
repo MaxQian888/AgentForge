@@ -53,9 +53,37 @@ type WaitEventPayload struct {
 	MatchKey  string `json:"matchKey,omitempty"`
 }
 
+// SubWorkflowTargetKind is the closed enumeration of target engines a
+// sub_workflow node may invoke. Must stay in sync with model.TriggerTargetKind
+// values, because the applier looks engines up through the same target-engine
+// registry the trigger router uses.
+type SubWorkflowTargetKind string
+
+const (
+	// SubWorkflowTargetDAG invokes another DAG workflow definition as a child.
+	SubWorkflowTargetDAG SubWorkflowTargetKind = "dag"
+	// SubWorkflowTargetPlugin invokes a legacy workflow plugin as a child.
+	SubWorkflowTargetPlugin SubWorkflowTargetKind = "plugin"
+)
+
+// InvokeSubWorkflowPayload carries everything the applier needs to dispatch a
+// child workflow run. TargetKind picks the engine (defaults to "dag" when
+// empty). TargetWorkflowID resolves through the engine's own registry —
+// a UUID string for DAG, a plugin id for the plugin engine. InputMapping is
+// a templated JSON object evaluated against the parent run context; its
+// rendered values become the child's initial seed. WaitForCompletion is
+// reserved for a future fire-and-forget mode; initial delivery always
+// treats it as true.
 type InvokeSubWorkflowPayload struct {
-	WorkflowID string          `json:"workflowId"`
-	Variables  json.RawMessage `json:"variables,omitempty"`
+	// WorkflowID is retained for back-compat with handlers that already emit
+	// the old payload shape. New handlers should prefer TargetWorkflowID.
+	// When both are set, TargetWorkflowID wins.
+	WorkflowID        string                `json:"workflowId,omitempty"`
+	TargetKind        SubWorkflowTargetKind `json:"targetKind,omitempty"`
+	TargetWorkflowID  string                `json:"targetWorkflowId,omitempty"`
+	InputMapping      json.RawMessage       `json:"inputMapping,omitempty"`
+	WaitForCompletion bool                  `json:"waitForCompletion,omitempty"`
+	Variables         json.RawMessage       `json:"variables,omitempty"`
 }
 
 type BroadcastEventPayload struct {
