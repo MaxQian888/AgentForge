@@ -1629,7 +1629,7 @@
 
 ## Task 7 — Service layer: validation + secret-existence checks + provider integration
 
-- [ ] Step 7.1 — failing service tests using mock provider + in-memory secrets
+- [x] Step 7.1 — failing service tests using mock provider + in-memory secrets
   - File: `src-go/internal/qianchuanbinding/service_test.go`
     ```go
     package qianchuanbinding_test
@@ -1723,7 +1723,7 @@
     }
     ```
 
-- [ ] Step 7.2 — implement service
+- [x] Step 7.2 — implement service
   - File: `src-go/internal/qianchuanbinding/service.go`
     ```go
     package qianchuanbinding
@@ -1890,7 +1890,7 @@
     }
     ```
 
-- [ ] Step 7.3 — commit `feat(qianchuanbinding): service with secret-resolve + auth-probe`
+- [x] Step 7.3 — commit `feat(qianchuanbinding): service with secret-resolve + auth-probe`
 
 ---
 
