@@ -486,6 +486,13 @@ FE Jest
 - **Integration test uses in-memory SQLite via gorm**, not a Postgres-tagged build. Same intent (handler+service+real-repo round-trip) without the CI infra dep; switch to Postgres once the rest of the suite standardises on it.
 - **Project sidebar "Integrations" entry is owned by whichever 1B / 2A plan ships `app/(dashboard)/projects/[id]/layout.tsx` first.** 2A leaves a `// TODO(spec2-2A nav)` comment in `page.tsx`; the entry currently links to `./integrations/vcs` once the layout exists.
 
+### 13.1.C — Drifts recorded during Plan 2C implementation
+
+- **Function name drift:** spec §12 calls the IM-bridge helper `renderFollowupTaskSuggestions`; the actual deleted symbol on master was `formatReviewFollowUpTasks` in `src-im-bridge/commands/review.go`.
+- **Event constant drift:** `EventReviewFixRequested` was duplicated in BOTH `eventbus/types.go` AND `ws/events.go`; spec §12 only mentions the eventbus copy. Both deleted.
+- **Trace C scope:** this plan handles `pull_request:synchronize` only; standalone `push` events are NOT subscribed. Synchronize is the canonical PR-head-moved signal from GitHub. This is a deliberate scope reduction vs spec §9 wording "OR a regular PR sync".
+- **Migration number landed as 076** (plan reserved 070; renumbered after qianchuan 074/075 plans landed).
+
 ## 14. Open Risks
 
 - **Bridge plugin → finding patch 字段需扩展**：要求 reviewer plugins 在 `findings/v1` 结构里加 `suggested_patch` 字段。已有 plugins 不会自动产 patch，但兼容（缺省 null 走 fixer agent 路径）。Plan 应包含一项：升级 `findings/v1` 至 `findings/v2`（带 patch 字段）+ 现有 plugins 的兼容映射。
