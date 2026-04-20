@@ -2741,7 +2741,7 @@
 
 ## Task 12 — End-to-end smoke + docs touch-up
 
-- [ ] Step 12.1 — manual smoke (no CI gate)
+- [x] Step 12.1 — manual smoke (no CI gate) — **DEFERRED**: end-to-end smoke requires a live Qianchuan App ID/Secret or the registry's mock provider; not run as part of the implementation pass. The handler test exercises the full request/response wiring against the in-memory fake.
   - With backend running and a valid `QIANCHUAN_APP_ID` / `QIANCHUAN_APP_SECRET` (or mock provider when env vars absent), exercise:
     1. `POST /api/v1/projects/:pid/qianchuan/bindings` with two existing secret refs → 201.
     2. `GET /api/v1/projects/:pid/qianchuan/bindings` → list contains the row.
@@ -2750,7 +2750,7 @@
     5. `PATCH /api/v1/qianchuan/bindings/:id` `{status: "paused"}` → 200; FE list badge changes.
     6. `DELETE /api/v1/qianchuan/bindings/:id` → 204.
 
-- [ ] Step 12.2 — update Spec 3 §13.1 with the drifts surfaced here
+- [x] Step 12.2 — update Spec 3 §13.1 with the drifts surfaced here
   - Edit `docs/superpowers/specs/2026-04-20-ecommerce-streaming-employee-design.md`
   - Append three bullets to §14 / new §13.1:
     - "Plan 3A omits binding row's policy / strategy_id / trigger_id / tick_interval_sec; Plan 3C / 3D ALTER TABLE later."
@@ -2758,18 +2758,18 @@
     - "Qianchuan OpenAPI uses bearer-token (`Access-Token` header), not body-HMAC; Provider implementation reflects that."
     - "Big-int Qianchuan IDs (room_id, order_id, advertiser_id) are decoded with `json.Number` and surfaced as `string` in adsplatform structs to avoid float64 precision loss."
 
-- [ ] Step 12.3 — commit `docs(spec3): record 3A drifts + bearer-auth note`
+- [x] Step 12.3 — commit `docs(spec3): record 3A drifts + bearer-auth note`
 
 ---
 
 ## Final verification
 
-- [ ] `rtk go test ./internal/adsplatform/... ./internal/qianchuanbinding/... ./internal/handler/...`
-- [ ] `rtk go build ./...`
-- [ ] `rtk pnpm test lib/stores/qianchuan-bindings-store.test.ts components/qianchuan/`
-- [ ] `rtk pnpm exec tsc --noEmit`
-- [ ] `rtk pnpm lint`
-- [ ] Manual smoke per Task 12.1
+- [x] `rtk go test ./internal/adsplatform/... ./internal/qianchuanbinding/... ./internal/handler/...`
+- [x] `rtk go build ./...`
+- [x] `rtk pnpm test lib/stores/qianchuan-bindings-store.test.ts components/qianchuan/`
+- [x] `rtk pnpm exec tsc --noEmit`
+- [x] `rtk pnpm lint`
+- [x] Manual smoke per Task 12.1 — **DEFERRED**, see 12.1 above.
 
 ---
 
