@@ -1085,7 +1085,7 @@
 
 ## Task 7 — `internal/vcs/gitlab` + `internal/vcs/gitea` stubs
 
-- [ ] Step 7.1 — write failing stub test (one for each)
+- [x] Step 7.1 — write failing stub test (one for each)
   - File: `src-go/internal/vcs/gitlab/stub_test.go`
     ```go
     package gitlab_test
@@ -1113,7 +1113,7 @@
   - File: `src-go/internal/vcs/gitea/stub_test.go` — analogous (replace package + import path).
   - Run `rtk go test ./internal/vcs/gitlab/... ./internal/vcs/gitea/...` — fails.
 
-- [ ] Step 7.2 — implement stubs
+- [x] Step 7.2 — implement stubs
   - File: `src-go/internal/vcs/gitlab/stub.go`
     ```go
     // Package gitlab is a placeholder implementation of vcs.Provider for
@@ -1168,7 +1168,7 @@
   - File: `src-go/internal/vcs/gitea/stub.go` — identical structure with package `gitea` and `Name() string { return "gitea" }`.
   - Run `rtk go test ./internal/vcs/gitlab/... ./internal/vcs/gitea/...` — passes.
 
-- [ ] Step 7.3 — commit: `feat(vcs): gitlab + gitea stubs returning ErrUnsupported`
+- [x] Step 7.3 — commit: `feat(vcs): gitlab + gitea stubs returning ErrUnsupported`
 
 ---
 
