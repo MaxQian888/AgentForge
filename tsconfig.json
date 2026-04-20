@@ -43,6 +43,7 @@
   "exclude": [
     "node_modules",
     "src-bridge",
+    "src-im-bridge",
     "src-go",
     "src-tauri",
     "src-marketplace",
