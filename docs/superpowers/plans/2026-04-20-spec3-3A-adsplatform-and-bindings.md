@@ -2254,7 +2254,7 @@
 
 ## Task 9 — Integration test: real PG + mock provider end-to-end
 
-- [ ] Step 9.1 — write integration test (build tag `integration`)
+- [x] Step 9.1 — write integration test (build tag `integration`) — **SKIPPED**: `internal/testdb` helper package does not exist on master. Deferred to a follow-up task once a testdb harness lands.
   - File: `src-go/internal/qianchuanbinding/repo_integration_test.go`
     ```go
     //go:build integration
@@ -2299,16 +2299,14 @@
     }
     ```
 
-- [ ] Step 9.2 — run
-  - `rtk go test -tags=integration ./internal/qianchuanbinding/...`
-
-- [ ] Step 9.3 — commit `test(qianchuanbinding): integration round-trip + duplicate rejection`
+- [x] Step 9.2 — run — **SKIPPED**, see 9.1.
+- [x] Step 9.3 — commit `test(qianchuanbinding): integration round-trip + duplicate rejection` — **SKIPPED**.
 
 ---
 
 ## Task 10 — FE store + types
 
-- [ ] Step 10.1 — write failing Jest store test
+- [x] Step 10.1 — write failing Jest store test
   - File: `lib/stores/qianchuan-bindings-store.test.ts`
     ```ts
     import { act } from "@testing-library/react";
@@ -2338,7 +2336,7 @@
     });
     ```
 
-- [ ] Step 10.2 — implement store
+- [x] Step 10.2 — implement store
   - File: `lib/stores/qianchuan-bindings-store.ts`
     ```ts
     "use client";
@@ -2513,7 +2511,7 @@
     ```
   - Run `rtk pnpm test lib/stores/qianchuan-bindings-store.test.ts` — green.
 
-- [ ] Step 10.3 — commit `feat(fe): qianchuan bindings zustand store`
+- [x] Step 10.3 — commit `feat(fe): qianchuan bindings zustand store`
 
 ---
 
