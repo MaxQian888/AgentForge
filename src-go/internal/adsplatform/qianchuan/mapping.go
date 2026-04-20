@@ -8,7 +8,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/adsplatform"
 )
 
-// mapTokens reads {data: {access_token, refresh_token, expires_in, refresh_token_expires_in}}.
+// mapTokens reads {data: {access_token, refresh_token, expires_in, advertiser_ids}}.
 func mapTokens(obj map[string]any) (*adsplatform.Tokens, error) {
 	data, _ := obj["data"].(map[string]any)
 	if data == nil {
@@ -21,7 +21,24 @@ func mapTokens(obj map[string]any) (*adsplatform.Tokens, error) {
 		secs, _ := e.Int64()
 		expires = time.Now().Add(time.Duration(secs) * time.Second)
 	}
-	return &adsplatform.Tokens{AccessToken: access, RefreshToken: refresh, ExpiresAt: expires}, nil
+	// Extract advertiser_ids (present in OAuthExchange response).
+	var advIDs []string
+	if rawIDs, ok := data["advertiser_ids"].([]any); ok {
+		for _, raw := range rawIDs {
+			switch v := raw.(type) {
+			case string:
+				advIDs = append(advIDs, v)
+			case json.Number:
+				advIDs = append(advIDs, v.String())
+			}
+		}
+	}
+	return &adsplatform.Tokens{
+		AccessToken:   access,
+		RefreshToken:  refresh,
+		ExpiresAt:     expires,
+		AdvertiserIDs: advIDs,
+	}, nil
 }
 
 // mapMetrics reads /qianchuan/report/live/get/ data.list rows.

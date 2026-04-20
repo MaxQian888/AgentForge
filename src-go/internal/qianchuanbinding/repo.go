@@ -189,3 +189,40 @@ func (r *GormRepo) TouchSync(ctx context.Context, id uuid.UUID, when time.Time) 
 		Where("id = ?", id).
 		Update("last_synced_at", when).Error
 }
+
+// FindDueForRefresh returns active bindings whose token_expires_at is before
+// the supplied threshold. Caller passes now()+earlyWindow.
+func (r *GormRepo) FindDueForRefresh(ctx context.Context, before time.Time) ([]*Record, error) {
+	var rows []bindingRow
+	if err := r.db.WithContext(ctx).
+		Where("status = ? AND token_expires_at < ?", StatusActive, before).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*Record, 0, len(rows))
+	for i := range rows {
+		out = append(out, toRecord(&rows[i]))
+	}
+	return out, nil
+}
+
+// UpdateExpiry updates the token_expires_at timestamp on a binding after
+// a successful token refresh.
+func (r *GormRepo) UpdateExpiry(ctx context.Context, id uuid.UUID, expiresAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&bindingRow{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"token_expires_at": expiresAt,
+			"updated_at":       time.Now().UTC(),
+		}).Error
+}
+
+// MarkAuthExpired transitions a binding to auth_expired status.
+func (r *GormRepo) MarkAuthExpired(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).Model(&bindingRow{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"status":     StatusAuthExpired,
+			"updated_at": time.Now().UTC(),
+		}).Error
+}

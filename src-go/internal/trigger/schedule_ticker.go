@@ -32,6 +32,15 @@ type systemClock struct{}
 
 func (systemClock) Now() time.Time { return time.Now().UTC() }
 
+// BindingStatusChecker allows the ticker to skip firing a trigger whose
+// associated qianchuan binding is in auth_expired (or otherwise non-active)
+// state. If nil, no binding check is performed. The checker is called with
+// the binding_id extracted from the trigger config; return true to allow
+// dispatch, false to skip.
+type BindingStatusChecker interface {
+	IsBindingActive(ctx context.Context, bindingID string) bool
+}
+
 // ScheduleTicker watches enabled source=schedule workflow_triggers and
 // invokes the router when each trigger's cron expression crosses a minute
 // boundary. This is a lightweight shim — it runs in-process without DB
@@ -43,10 +52,11 @@ func (systemClock) Now() time.Time { return time.Now().UTC() }
 // most one firing is evaluated per trigger per minute. Idempotency on the
 // Router itself protects against brief double-dispatch at restart.
 type ScheduleTicker struct {
-	lister     ScheduleLister
-	dispatcher ScheduleDispatcher
-	clock      Clock
-	parser     cron.Parser
+	lister          ScheduleLister
+	dispatcher      ScheduleDispatcher
+	clock           Clock
+	parser          cron.Parser
+	bindingChecker  BindingStatusChecker
 
 	mu       sync.Mutex
 	lastFire map[string]time.Time // trigger_id → last minute we successfully dispatched
@@ -134,7 +144,24 @@ func (t *ScheduleTicker) shouldFire(tr *model.WorkflowTrigger, minute time.Time)
 	return true
 }
 
+// SetBindingChecker installs an optional pre-dispatch gate that skips
+// triggers whose associated binding is not active (e.g. auth_expired).
+// Plan 3B §7.4 — runtime check without pausing the trigger row.
+func (t *ScheduleTicker) SetBindingChecker(bc BindingStatusChecker) {
+	t.bindingChecker = bc
+}
+
 func (t *ScheduleTicker) dispatchOne(ctx context.Context, tr *model.WorkflowTrigger, minute time.Time) {
+	// Plan 3B auth_expired gate: if the trigger references a qianchuan
+	// binding_id in its config and the binding is not active, skip dispatch.
+	if t.bindingChecker != nil {
+		if bindingID := extractBindingID(tr.Config); bindingID != "" {
+			if !t.bindingChecker.IsBindingActive(ctx, bindingID) {
+				return
+			}
+		}
+	}
+
 	data := map[string]any{
 		"trigger_id":  tr.ID.String(),
 		"target_kind": string(tr.TargetKind),
@@ -154,6 +181,20 @@ func (t *ScheduleTicker) dispatchOne(ctx context.Context, tr *model.WorkflowTrig
 	t.mu.Lock()
 	t.lastFire[tr.ID.String()] = minute
 	t.mu.Unlock()
+}
+
+// extractBindingID reads binding_id from a trigger's config JSON if present.
+func extractBindingID(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var cfg struct {
+		BindingID string `json:"binding_id"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return ""
+	}
+	return cfg.BindingID
 }
 
 // extractCronExpr reads the cron string from a schedule trigger's Config

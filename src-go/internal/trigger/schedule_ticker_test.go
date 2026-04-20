@@ -126,3 +126,44 @@ func TestScheduleTicker_EmptyCronSkipped(t *testing.T) {
 		t.Fatalf("empty cron should not dispatch; got %d", len(dispatcher.events))
 	}
 }
+
+// --- Plan 3B §7.4: auth_expired binding gate ---
+
+type fakeBindingChecker struct {
+	active map[string]bool
+}
+
+func (f *fakeBindingChecker) IsBindingActive(_ context.Context, bindingID string) bool {
+	return f.active[bindingID]
+}
+
+func TestScheduleTicker_SkipsWhenAuthExpired(t *testing.T) {
+	bindingID := uuid.New().String()
+	cfg, _ := json.Marshal(map[string]any{"cron": "* * * * *", "binding_id": bindingID})
+	wfID := uuid.New()
+	tr := &model.WorkflowTrigger{
+		ID: uuid.New(), WorkflowID: &wfID, ProjectID: uuid.New(),
+		Source: model.TriggerSourceSchedule, TargetKind: model.TriggerTargetDAG, Config: cfg, Enabled: true,
+	}
+
+	clock := &fakeClock{t: time.Date(2026, 4, 19, 14, 30, 0, 0, time.UTC)}
+	lister := &fakeScheduleLister{triggers: []*model.WorkflowTrigger{tr}}
+	dispatcher := &fakeScheduleDispatcher{}
+
+	ticker := trigger.NewScheduleTicker(lister, dispatcher, clock)
+	ticker.SetBindingChecker(&fakeBindingChecker{active: map[string]bool{bindingID: false}})
+
+	_ = ticker.Tick(context.Background())
+	if len(dispatcher.events) != 0 {
+		t.Fatalf("expected dispatch to be skipped for auth_expired binding; got %d", len(dispatcher.events))
+	}
+
+	// With active binding, dispatch should proceed.
+	dispatcher.events = nil
+	ticker2 := trigger.NewScheduleTicker(lister, dispatcher, clock)
+	ticker2.SetBindingChecker(&fakeBindingChecker{active: map[string]bool{bindingID: true}})
+	_ = ticker2.Tick(context.Background())
+	if len(dispatcher.events) != 1 {
+		t.Fatalf("expected 1 dispatch for active binding; got %d", len(dispatcher.events))
+	}
+}

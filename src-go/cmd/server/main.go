@@ -278,6 +278,13 @@ func main() {
 	defer schedulerCancel()
 	go scheduler.RunLoop(schedulerCtx, 15*time.Second, schedulerSvc)
 
+	// Qianchuan token refresher (Plan 3B). Single-instance goroutine; see
+	// spec3 §11 for the double-refresh idempotency argument.
+	qcRefresherCtx, qcRefresherCancel := context.WithCancel(context.Background())
+	defer qcRefresherCancel()
+	// TODO(spec3-multi-instance): leader-elect this loop before scaling backend horizontally.
+	go routeServices.QianchuanRefresher.Run(qcRefresherCtx)
+
 	// Graceful shutdown on SIGINT / SIGTERM
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -285,6 +292,7 @@ func main() {
 	go func() {
 		<-quit
 		log.Info("shutting down server...")
+		qcRefresherCancel()
 		bridgeHealthCancel()
 		schedulerCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

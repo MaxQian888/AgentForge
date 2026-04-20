@@ -139,6 +139,10 @@ const (
 	ActionQianchuanBindingSync   ActionID = "qianchuan_binding.sync"
 	ActionQianchuanBindingTest   ActionID = "qianchuan_binding.test"
 
+	// Qianchuan OAuth bind flow (Spec 3 §6.5 / Plan 3B). Initiate requires
+	// admin+ because binding governs ad spend.
+	ActionQianchuanBindWrite ActionID = "qianchuan_binding.oauth_bind"
+
 	// Project templates. `save_as_template` is a project-scoped action (gated
 	// via projectGroup + Require). The CRUD actions on /project-templates are
 	// NOT project-scoped — they apply to a user's personal template library —
@@ -267,6 +271,7 @@ var matrix = func() map[ActionID]string {
 		ActionQianchuanBindingDelete: model.ProjectRoleAdmin,
 		ActionQianchuanBindingSync:   model.ProjectRoleEditor,
 		ActionQianchuanBindingTest:   model.ProjectRoleEditor,
+		ActionQianchuanBindWrite:     model.ProjectRoleAdmin,
 
 		// Project templates — save-as-template is admin+ (design decision
 		// #2 in add-project-templates/design.md).

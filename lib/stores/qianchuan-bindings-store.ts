@@ -88,6 +88,26 @@ const fromWire = (w: Wire): QianchuanBinding => ({
   lastSyncedAt: w.last_synced_at,
 });
 
+// WS event handler for adsplatform.auth_expired. Call this from the
+// global WS message dispatcher when type === "adsplatform.auth_expired".
+export function handleAuthExpiredEvent(payload: {
+  binding_id: string;
+  project_id: string;
+  reason: string;
+}) {
+  const state = useQianchuanBindingsStore.getState();
+  const projectBindings = state.byProject[payload.project_id];
+  if (!projectBindings) return;
+  const updated = projectBindings.map((b) =>
+    b.id === payload.binding_id
+      ? { ...b, status: "auth_expired" as QianchuanBindingStatus }
+      : b,
+  );
+  useQianchuanBindingsStore.setState((s) => ({
+    byProject: { ...s.byProject, [payload.project_id]: updated },
+  }));
+}
+
 export const useQianchuanBindingsStore = create<State>()((set, get) => ({
   byProject: {},
   loading: {},

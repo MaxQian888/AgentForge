@@ -26,10 +26,11 @@ type BindingRef struct {
 
 // Tokens is the OAuth token tuple returned by OAuthExchange / RefreshToken.
 type Tokens struct {
-	AccessToken  string
-	RefreshToken string
-	ExpiresAt    time.Time
-	Scopes       []string
+	AccessToken   string
+	RefreshToken  string
+	ExpiresAt     time.Time
+	Scopes        []string
+	AdvertiserIDs []string // populated by OAuthExchange; empty on RefreshToken
 }
 
 // Money holds an integer amount of currency minor units (fen for CNY).
