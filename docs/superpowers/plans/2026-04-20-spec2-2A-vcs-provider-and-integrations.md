@@ -340,7 +340,7 @@
 
 ## Task 4 — `internal/vcs/registry.go` provider registry
 
-- [ ] Step 4.1 — write failing registry test
+- [x] Step 4.1 — write failing registry test
   - File: `src-go/internal/vcs/registry_test.go`
     ```go
     package vcs_test
@@ -417,7 +417,7 @@
     ```
   - Run `rtk go test ./internal/vcs/...` — fails (registry missing).
 
-- [ ] Step 4.2 — implement registry
+- [x] Step 4.2 — implement registry
   - File: `src-go/internal/vcs/registry.go`
     ```go
     package vcs
@@ -481,7 +481,7 @@
     ```
   - Run `rtk go test ./internal/vcs/...` — passes.
 
-- [ ] Step 4.3 — commit: `feat(vcs): provider registry with typed Constructor seam`
+- [x] Step 4.3 — commit: `feat(vcs): provider registry with typed Constructor seam`
 
 ---
 
