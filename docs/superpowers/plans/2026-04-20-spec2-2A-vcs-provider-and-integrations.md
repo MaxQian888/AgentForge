@@ -1394,7 +1394,7 @@
 
 ## Task 9 — `internal/vcs/service.go` integration service (validates + creates webhook)
 
-- [ ] Step 9.1 — write failing service test against the mock provider
+- [x] Step 9.1 — write failing service test against the mock provider
   - File: `src-go/internal/vcs/service_test.go`
     ```go
     package vcs_test
@@ -1527,7 +1527,7 @@
     ```
   - Run `rtk go test ./internal/vcs/...` — fails (Service missing).
 
-- [ ] Step 9.2 — implement service
+- [x] Step 9.2 — implement service
   - File: `src-go/internal/vcs/service.go`
     ```go
     package vcs
@@ -1741,7 +1741,7 @@
     ```
   - Run `rtk go test ./internal/vcs/...` — passes.
 
-- [ ] Step 9.3 — commit: `feat(vcs): integration service with secret-resolved auth probe + webhook lifecycle`
+- [x] Step 9.3 — commit: `feat(vcs): integration service with secret-resolved auth probe + webhook lifecycle`
 
 ---
 
