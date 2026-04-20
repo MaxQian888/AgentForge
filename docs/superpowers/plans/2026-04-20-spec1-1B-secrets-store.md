@@ -942,7 +942,7 @@
 
 ## Task 6 — Template engine extension `secret_resolver.go` with strict whitelist
 
-- [ ] Step 6.1 — write failing resolver tests
+- [x] Step 6.1 — write failing resolver tests
   - File: `src-go/internal/workflow/template/secret_resolver_test.go`
     ```go
     package template_test
@@ -1025,7 +1025,7 @@
     ```
   - Run `rtk go test ./internal/workflow/template/...` — fails (package missing).
 
-- [ ] Step 6.2 — implement the resolver
+- [x] Step 6.2 — implement the resolver
   - File: `src-go/internal/workflow/template/secret_resolver.go`
     ```go
     // Package template extends the workflow template engine with two
@@ -1185,11 +1185,11 @@
     ```
   - Run `rtk go test ./internal/workflow/template/...` — all six tests pass.
 
-- [ ] Step 6.3 — document the contract for 1E
+- [x] Step 6.3 — document the contract for 1E
   - Add a comment block at the top of `src-go/internal/workflow/template/secret_resolver.go` (or a small `doc.go`) noting:
     > **API contract for HTTP node (Plan 1E)**: at execution time, for every header value, every url-query value, and the request body, call `resolver.Render(ctx, projectID, FieldHTTP{Headers,URLQuery,Body}, raw, dataStore)`. For every other config field, call `resolver.Render(ctx, projectID, FieldGeneric, raw, dataStore)`. At save time, call `ValidateNoSecretReferences(field, raw)` once per field; reject the workflow save with HTTP 400 if any field returns `ErrSecretFieldNotAllowed`.
 
-- [ ] Step 6.4 — commit: `feat(workflow): secret_resolver with strict HTTP-node field whitelist`
+- [x] Step 6.4 — commit: `feat(workflow): secret_resolver with strict HTTP-node field whitelist`
 
 ---
 
