@@ -2517,7 +2517,7 @@
 
 ## Task 11 — FE bindings list page + create form
 
-- [ ] Step 11.1 — page route
+- [x] Step 11.1 — page route
   - File: `app/(dashboard)/projects/[id]/qianchuan/bindings/page.tsx`
     ```tsx
     "use client";
@@ -2594,7 +2594,7 @@
     }
     ```
 
-- [ ] Step 11.2 — create-binding dialog with secret-ref dropdown
+- [x] Step 11.2 — create-binding dialog with secret-ref dropdown
   - File: `components/qianchuan/create-binding-dialog.tsx`
     ```tsx
     "use client";
@@ -2704,7 +2704,7 @@
     }
     ```
 
-- [ ] Step 11.3 — failing Jest test for the form
+- [x] Step 11.3 — failing Jest test for the form
   - File: `components/qianchuan/create-binding-dialog.test.tsx`
     ```tsx
     import { render, screen, fireEvent } from "@testing-library/react";
@@ -2728,15 +2728,14 @@
     });
     ```
 
-- [ ] Step 11.4 — add nav link to project sidebar
-  - Edit `components/sidebar.tsx` (or whichever file owns project nav) — search for `qianchuan` / `bindings` insertion point. If a project sub-nav does not yet exist (1B is creating it), add an entry to the new nav schema; otherwise add a NavItem `{ label: "千川绑定", href: \`/projects/${id}/qianchuan/bindings\` }`. Coordinate with 1B.
+- [x] Step 11.4 — add nav link to project sidebar — **DEFERRED**: a project-id-scoped sub-nav layout does not yet exist on master (Plan 1B's `app/(dashboard)/projects/[id]/secrets/page.tsx` ships standalone). Adding to the global sidebar would not be project-aware. The page is reachable by direct URL `/projects/:id/qianchuan/bindings`; nav integration follows once a project sub-nav layout lands.
 
-- [ ] Step 11.5 — verify
+- [x] Step 11.5 — verify
   - `rtk pnpm test components/qianchuan/`
   - `rtk pnpm exec tsc --noEmit`
   - `rtk pnpm lint`
 
-- [ ] Step 11.6 — commit `feat(fe): qianchuan bindings list page + create dialog`
+- [x] Step 11.6 — commit `feat(fe): qianchuan bindings list page + create dialog`
 
 ---
 
