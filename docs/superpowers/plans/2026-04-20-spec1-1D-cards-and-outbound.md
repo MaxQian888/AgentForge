@@ -1062,7 +1062,7 @@
 
 ## Task 9 — Delete old Feishu card builders + re-route every caller (§12)
 
-- [ ] Step 9.1 — enumerate every caller
+- [x] Step 9.1 — enumerate every caller
   - Run: `rtk grep "renderInteractiveCard\|renderStructuredMessage" src-im-bridge/`. Confirmed callers (from initial survey):
     - `src-im-bridge/platform/feishu/live.go:473` — `SendCard(ctx, chatID, *core.Card)`
     - `src-im-bridge/platform/feishu/live.go:481` — `ReplyCard(ctx, replyCtx, *core.Card)`
@@ -1073,7 +1073,7 @@
     - `src-im-bridge/platform/feishu/renderer_test.go` — the snapshot tests
   - Re-grep at the start of this task to catch any new callers added in parallel branches; if found, list them as "additional re-route in this PR".
 
-- [ ] Step 9.2 — replace `SendCard` / `ReplyCard` / `SendStructured` / `ReplyStructured` to go through `core.DispatchCard`
+- [x] Step 9.2 — replace `SendCard` / `ReplyCard` / `SendStructured` / `ReplyStructured` to go through `core.DispatchCard`
   - File: `src-im-bridge/platform/feishu/live.go`
   - The legacy `*core.Card` is a smaller subset (Title + Fields + Buttons) than `ProviderNeutralCard`. Add a private adapter `legacyCardToNeutral(*core.Card) core.ProviderNeutralCard` near the top of `live.go`:
     ```go
@@ -1110,15 +1110,15 @@
     2. Keep StructuredMessage rendering but move the renderer body OUT of the deleted helpers into a NEW file `card_render_structured.go` exposing `renderStructured(message) (string, error)`.
   - Take option 2 — preserve existing functionality. Create `src-im-bridge/platform/feishu/card_render_structured.go` containing the existing `renderStructuredMessage`, `renderStructuredSections`, `renderLegacySections`, `renderFieldsAsColumns`, `fieldToColumn`, `renderButtons`, `feishuCardHeader` bodies (verbatim copy from the existing `renderer.go`), and rename them to `renderStructured*` to avoid collision. Update the four `SendStructured`/`ReplyStructured` call-sites to call `renderStructured(message)`.
 
-- [ ] Step 9.3 — delete the old code
+- [x] Step 9.3 — delete the old code
   - File: `src-im-bridge/platform/feishu/live.go`, delete the function `renderInteractiveCard` (lines 1281-1335).
   - File: `src-im-bridge/platform/feishu/renderer.go` — DELETE the file entirely (its content has been split between `card_render_structured.go` for structured messages and `card_render.go` for the new neutral path).
   - File: `src-im-bridge/platform/feishu/renderer_test.go` — DELETE (replaced by `card_render_test.go` from T4 + a new `card_render_structured_test.go` mirroring the old assertions but pointing at the renamed functions).
 
-- [ ] Step 9.4 — port the structured snapshot tests
+- [x] Step 9.4 — port the structured snapshot tests
   - File: `src-im-bridge/platform/feishu/card_render_structured_test.go` (new) — copy each test from the deleted `renderer_test.go`, change `renderStructuredMessage(...)` → `renderStructured(...)` (or whatever name was chosen in 9.2), keep all fixtures.
 
-- [ ] Step 9.5 — verify cold compile + all tests
+- [x] Step 9.5 — verify cold compile + all tests
   - `rtk go build ./...` from `src-im-bridge/` — must compile with zero unresolved references to `renderInteractiveCard` / `renderStructuredMessage`. If grep still finds either name, fix before proceeding.
   - `rtk go test ./...` from `src-im-bridge/` — every existing test must still pass; the structured-message snapshots assert byte-for-byte the same JSON they did before, since we only renamed the function and split files.
 
@@ -1126,7 +1126,7 @@
 
 ## Task 10 — FE: "回帖失败" badge in execution detail
 
-- [ ] Step 10.1 — failing test for badge rendering
+- [x] Step 10.1 — failing test for badge rendering
   - File: `components/workflow/workflow-execution-view.test.tsx` (new — there isn't one for this component yet)
     ```tsx
     import { render, screen } from "@testing-library/react";
@@ -1137,7 +1137,7 @@
     ```
     Use existing test fixtures in adjacent component tests (e.g. `workflow-runs-tab.test.tsx`) for the boilerplate WS mock.
 
-- [ ] Step 10.2 — extend the component (ADD ONLY)
+- [x] Step 10.2 — extend the component (ADD ONLY)
   - File: `components/workflow/workflow-execution-view.tsx`
   - Inside the `ExecutionView` component (the parent that owns `useEffect` at line 387), add:
     ```tsx
@@ -1172,7 +1172,7 @@
     ```
   - Do NOT remove or refactor any other code in this file (the user's recent edits stay intact).
 
-- [ ] Step 10.3 — verify
+- [x] Step 10.3 — verify
   - `rtk pnpm test components/workflow/workflow-execution-view.test.tsx` — passes.
   - `rtk lint` — clean (no new warnings in the touched file).
 
@@ -1180,7 +1180,7 @@
 
 ## Task 11 — Integration test: dispatcher → mock IM Bridge
 
-- [ ] Step 11.1 — write the integration test
+- [x] Step 11.1 — write the integration test
   - File: `src-go/internal/service/outbound_dispatcher_integration_test.go` (new, build tag `//go:build integration`)
     ```go
     //go:build integration
@@ -1196,14 +1196,14 @@
     //   - dispatcher does NOT post when system_metadata.im_dispatched=true
     ```
 
-- [ ] Step 11.2 — verify
+- [x] Step 11.2 — verify
   - `rtk go test -tags=integration ./internal/service/...` — passes against local PG.
 
 ---
 
 ## Task 12 — E2E smoke fixtures (Trace A + Trace C)
 
-- [ ] Step 12.1 — Trace A fixture
+- [x] Step 12.1 — Trace A fixture
   - File: `src-im-bridge/scripts/smoke/fixtures/feishu-workflow-with-card.json` (new)
     ```json
     {
@@ -1222,7 +1222,7 @@
     ```
     The smoke harness should poll the mock IM Bridge for an inbound `/im/send` whose `card` matches `expect_card` within 10s.
 
-- [ ] Step 12.2 — Trace C fixture
+- [x] Step 12.2 — Trace C fixture
   - File: `src-im-bridge/scripts/smoke/fixtures/feishu-workflow-http-fail.json` (new)
     ```json
     {
@@ -1241,10 +1241,10 @@
     ```
   - For now this fixture is consumed by a future smoke runner extension; document the wire shape so the runner work in 1B (HTTP node) can pick it up. A TODO comment in the fixture's sibling README is fine.
 
-- [ ] Step 12.3 — extend Invoke-StubSmoke.ps1 minimally
+- [x] Step 12.3 — extend Invoke-StubSmoke.ps1 minimally
   - Add a comment block at the top of `src-im-bridge/scripts/smoke/Invoke-StubSmoke.ps1` listing the new fixtures and their `expect_card` field. Implementation of the assertion runner can be a follow-up; the fixture files alone unblock manual smoke until then.
 
-- [ ] Step 12.4 — verify
+- [x] Step 12.4 — verify
   - `rtk pnpm exec tsc --noEmit` — fixtures are pure JSON; no TS impact.
   - Manual: `rtk pwsh src-im-bridge/scripts/smoke/Invoke-StubSmoke.ps1 -Fixture feishu-workflow-with-card` — manual eyeball that the request reaches the bridge.
 
@@ -1252,19 +1252,19 @@
 
 ## Task 13 — Self-review pass
 
-- [ ] Step 13.1 — spec coverage check
+- [x] Step 13.1 — spec coverage check
   - Walk spec §5 (architecture box: outbound_dispatcher), §8 (card schema), §9 Trace A + Trace C, §10 row "outbound_dispatcher 发送失败", §12 (deletion checklist) and tick each off against this plan's tasks. If any row has no task line, add one.
 
-- [ ] Step 13.2 — discriminated-union consistency
+- [x] Step 13.2 — discriminated-union consistency
   - Open `src-im-bridge/core/card_schema.go` and EVERY platform `card_render.go`. Confirm each renderer switches on `a.Type` with both `CardActionTypeURL` and `CardActionTypeCallback` cases. The text fallback's `card_renderer.go` must do the same. `RenderTextFallback` and the four renderers must agree on field names: `correlation_token`, `payload`, `url`, `style`, `id`, `label`. Grep `correlation_token` across `core/` + `platform/` and confirm 1 producer + 4 consumers.
 
-- [ ] Step 13.3 — placeholder sweep
+- [x] Step 13.3 — placeholder sweep
   - `rtk grep -nE "TODO|FIXME|XXX" src-im-bridge/core/card_schema.go src-im-bridge/core/card_renderer.go src-im-bridge/platform/{feishu,slack,dingtalk}/card_render.go src-go/internal/service/outbound_dispatcher.go` — must return zero matches.
 
-- [ ] Step 13.4 — old-code dangling check
+- [x] Step 13.4 — old-code dangling check
   - `rtk grep -n "renderInteractiveCard\|renderStructuredMessage" src-im-bridge/` — must return zero matches outside the renamed `renderStructured*` functions inside `card_render_structured.go`. If anything matches, route it through `core.DispatchCard` before this PR ships (per spec §12 deletion-in-same-PR rule).
 
-- [ ] Step 13.5 — verify everything together
+- [x] Step 13.5 — verify everything together
   - `rtk go build ./...` from both `src-go/` and `src-im-bridge/`.
   - `rtk go test ./...` from both.
   - `rtk pnpm test components/workflow/workflow-execution-view.test.tsx`.
