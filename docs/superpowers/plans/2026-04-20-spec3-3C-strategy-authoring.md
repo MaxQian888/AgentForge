@@ -244,15 +244,15 @@
 
 ## Task 6 — Repository + service
 
-- [ ] Step 6.1 — write failing repo tests
+- [x] Step 6.1 — write failing repo tests
   - File: `src-go/internal/repository/qianchuan_strategy_repo_test.go`
   - Use the existing test DB harness; cases: insert + get-by-id, list-by-project (excludes other projects, includes system NULL-project rows), version bump on (project_id, name) collision
 
-- [ ] Step 6.2 — implement repo
+- [x] Step 6.2 — implement repo
   - File: `src-go/internal/repository/qianchuan_strategy_repo.go`
   - Methods: `Insert`, `GetByID`, `ListByProject(projectID, includeSystem bool)`, `UpdateDraft` (only when current status='draft'), `SetStatus`, `DeleteDraft`, `MaxVersion(projectID, name)`
 
-- [ ] Step 6.3 — write failing service tests
+- [x] Step 6.3 — write failing service tests
   - File: `src-go/internal/service/qianchuan_strategy_service_test.go`
   - Cases:
     - `Create` parses → validates → persists with version=1
@@ -263,12 +263,12 @@
     - `Delete` only allowed for drafts
     - `TestRun(strategy, snapshot)` returns the actions a single eval would emit (dry-run; no persistence, no policy gate); uses `nodetypes.EvaluateExpression` for the condition
 
-- [ ] Step 6.4 — implement service
+- [x] Step 6.4 — implement service
   - File: `src-go/internal/service/qianchuan_strategy_service.go`
   - Wire the repo + parser; surface structured errors (`StrategyParseError`) so the handler can return JSON-shaped 400s
   - `TestRun` walks `ParsedSpec.Rules` evaluating `ConditionRaw` against `{"snapshot": <payload>}` via `nodetypes.EvaluateExpression`; collects emitted actions per matching rule with `ad_id_expr` resolved against the same data store
 
-- [ ] Step 6.5 — green
+- [x] Step 6.5 — green
 
 ---
 
