@@ -3,12 +3,13 @@ package core
 // Card represents a rich message card (e.g. Feishu interactive card).
 type Card struct {
 	Title   string
-	Fields  []CardField
+	Fields  []LegacyCardField
 	Buttons []CardButton
 }
 
-// CardField is a label-value pair displayed in the card body.
-type CardField struct {
+// LegacyCardField is a label-value pair displayed in the legacy Card body.
+// The provider-neutral schema (spec §8) uses CardField for the new shape.
+type LegacyCardField struct {
 	Label string
 	Value string
 }
@@ -28,7 +29,7 @@ func (c *Card) SetTitle(title string) *Card {
 }
 
 func (c *Card) AddField(label, value string) *Card {
-	c.Fields = append(c.Fields, CardField{Label: label, Value: value})
+	c.Fields = append(c.Fields, LegacyCardField{Label: label, Value: value})
 	return c
 }
 

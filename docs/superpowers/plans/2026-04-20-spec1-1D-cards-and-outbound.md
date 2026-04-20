@@ -28,7 +28,7 @@
 
 ## Task 1 — Provider-neutral card schema (`core/card_schema.go`)
 
-- [ ] Step 1.1 — write failing test: schema marshals to spec §8 wire shape
+- [x] Step 1.1 — write failing test: schema marshals to spec §8 wire shape
   - File: `src-im-bridge/core/card_schema_test.go` (new)
     ```go
     package core
@@ -73,7 +73,7 @@
     }
     ```
 
-- [ ] Step 1.2 — implement `card_schema.go`
+- [x] Step 1.2 — implement `card_schema.go`
   - File: `src-im-bridge/core/card_schema.go` (new)
     ```go
     package core
@@ -166,7 +166,7 @@
     ```
   - Add tiny `errFmt` helper (or inline `fmt.Errorf`) — pick one and import accordingly; prefer `fmt.Errorf` to avoid a new helper.
 
-- [ ] Step 1.3 — verify
+- [x] Step 1.3 — verify
   - `rtk go test ./core/...` (within `src-im-bridge/`) — both new tests pass.
 
 ---
