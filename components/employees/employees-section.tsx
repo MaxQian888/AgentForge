@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Plus, Archive, Pause, Play, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -153,6 +154,9 @@ export function EmployeesSection({ projectId }: EmployeesSectionProps) {
                     {new Date(emp.createdAt).toLocaleString()}
                   </TableCell>
                   <TableCell className="text-right">
+                    <Button asChild variant="ghost" size="sm" className="mr-1">
+                      <Link href={`/employees/${emp.id}/runs`}>Runs</Link>
+                    </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="sm">

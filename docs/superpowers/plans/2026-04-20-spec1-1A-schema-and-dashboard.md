@@ -1530,7 +1530,7 @@
 
 ## Task 10 — Add "Runs" entry-point to existing employees section
 
-- [ ] Step 10.1 — write failing test asserting the row gains a Runs link
+- [x] Step 10.1 — write failing test asserting the row gains a Runs link
   - File: `components/employees/employees-section.runs-link.test.tsx` (new)
   - Content:
     ```tsx
@@ -1570,9 +1570,9 @@
     });
     ```
 
-- [ ] Step 10.2 — run `pnpm test -- employees-section.runs-link` — expect failure (no Runs link)
+- [x] Step 10.2 — run `pnpm test -- employees-section.runs-link` — expect failure (no Runs link)
 
-- [ ] Step 10.3 — add the Runs link to the row
+- [x] Step 10.3 — add the Runs link to the row
   - File: `components/employees/employees-section.tsx`
   - Add `Link` to the `next/link` import (add a new import line near the top):
     ```tsx
@@ -1585,9 +1585,9 @@
     </Button>
     ```
 
-- [ ] Step 10.4 — run `pnpm test -- employees-section.runs-link` — expect green
+- [x] Step 10.4 — run `pnpm test -- employees-section.runs-link` — expect green
 
-- [ ] Step 10.5 — run `rtk git add components/employees/employees-section.tsx components/employees/employees-section.runs-link.test.tsx && rtk git commit -m "feat(fe): add per-row Runs link from employees table to /employees/:id/runs"`
+- [x] Step 10.5 — run `rtk git add components/employees/employees-section.tsx components/employees/employees-section.runs-link.test.tsx && rtk git commit -m "feat(fe): add per-row Runs link from employees table to /employees/:id/runs"`
 
 ---
 
