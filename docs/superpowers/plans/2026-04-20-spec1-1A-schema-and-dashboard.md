@@ -987,7 +987,7 @@
 
 ## Task 7 — WS subscription: filter existing workflow + agent events by employee
 
-- [ ] Step 7.1 — write failing test asserting the bridge function exists and forwards by employee
+- [x] Step 7.1 — write failing test asserting the bridge function exists and forwards by employee
   - File: `lib/stores/ws-store.employee-runs.test.ts` (new)
   - Content:
     ```ts
@@ -1049,9 +1049,9 @@
     });
     ```
 
-- [ ] Step 7.2 — run `pnpm test -- ws-store.employee-runs` — expect failure (`forwardRunEventToEmployee` is not exported)
+- [x] Step 7.2 — run `pnpm test -- ws-store.employee-runs` — expect failure (`forwardRunEventToEmployee` is not exported)
 
-- [ ] Step 7.3 — add the forwarder + wire into existing event handlers
+- [x] Step 7.3 — add the forwarder + wire into existing event handlers
   - File: `lib/stores/ws-store.ts`
   - Add this import near the top, after the existing `import { useWorkflowStore } from "./workflow-store";` line:
     ```ts
@@ -1151,9 +1151,9 @@
     }
     ```
 
-- [ ] Step 7.4 — run `pnpm test -- ws-store.employee-runs` — expect green
+- [x] Step 7.4 — run `pnpm test -- ws-store.employee-runs` — expect green
 
-- [ ] Step 7.5 — run `rtk git add lib/stores/ws-store.ts lib/stores/ws-store.employee-runs.test.ts && rtk git commit -m "feat(ws): forward acting_employee_id-tagged workflow + agent events to employee-runs-store"`
+- [x] Step 7.5 — run `rtk git add lib/stores/ws-store.ts lib/stores/ws-store.employee-runs.test.ts && rtk git commit -m "feat(ws): forward acting_employee_id-tagged workflow + agent events to employee-runs-store"`
 
 ---
 

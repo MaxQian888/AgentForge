@@ -15,6 +15,10 @@ import { useTaskCommentStore } from "./task-comment-store";
 import { useTeamStore, normalizeTeam } from "./team-store";
 import { useWorkflowStore } from "./workflow-store";
 import { useLogStore } from "./log-store";
+import {
+  useEmployeeRunsStore,
+  type EmployeeRunRow,
+} from "./employee-runs-store";
 import { emitProjectedDesktopEvent } from "@/lib/platform-runtime";
 import { getPreferredLocale } from "./locale-store";
 import type { Task } from "./task-store";
@@ -95,6 +99,88 @@ interface WSState {
   disconnect: () => void;
   subscribe: (channel: string) => void;
   unsubscribe: (channel: string) => void;
+}
+
+/**
+ * forwardRunEventToEmployee inspects a workflow.* or agent.* payload for
+ * an actingEmployeeId / employeeId tag and, when present, prepends or
+ * upserts a unified run row into the per-employee runs store.
+ *
+ * Filters at the FE because the WS hub broadcasts project-scoped, not
+ * employee-scoped — see Spec 1A coordination notes.
+ */
+export function forwardRunEventToEmployee(eventType: string, raw: unknown): void {
+  if (!raw || typeof raw !== "object") return;
+  const payload = raw as Record<string, unknown>;
+
+  if (eventType.startsWith("workflow.")) {
+    const employeeId =
+      typeof payload.actingEmployeeId === "string"
+        ? payload.actingEmployeeId
+        : null;
+    if (!employeeId) return;
+    const id =
+      typeof payload.executionId === "string"
+        ? payload.executionId
+        : typeof payload.id === "string"
+          ? payload.id
+          : null;
+    if (!id) return;
+    const row: EmployeeRunRow = {
+      kind: "workflow",
+      id,
+      name:
+        (typeof payload.workflowName === "string" && payload.workflowName) ||
+        (typeof payload.name === "string" && payload.name) ||
+        id,
+      status: typeof payload.status === "string" ? payload.status : "running",
+      startedAt:
+        typeof payload.startedAt === "string" ? payload.startedAt : undefined,
+      completedAt:
+        typeof payload.completedAt === "string" ? payload.completedAt : undefined,
+      refUrl: `/workflow/runs/${id}`,
+    };
+    if (row.startedAt && row.completedAt) {
+      const dur =
+        new Date(row.completedAt).getTime() - new Date(row.startedAt).getTime();
+      if (Number.isFinite(dur) && dur >= 0) row.durationMs = dur;
+    }
+    useEmployeeRunsStore.getState().ingestWorkflowEvent(employeeId, row);
+    return;
+  }
+
+  if (eventType.startsWith("agent.")) {
+    const employeeId =
+      typeof payload.employeeId === "string" ? payload.employeeId : null;
+    if (!employeeId) return;
+    const id =
+      typeof payload.agentRunId === "string"
+        ? payload.agentRunId
+        : typeof payload.id === "string"
+          ? payload.id
+          : null;
+    if (!id) return;
+    const row: EmployeeRunRow = {
+      kind: "agent",
+      id,
+      name:
+        (typeof payload.roleId === "string" && payload.roleId) ||
+        (typeof payload.name === "string" && payload.name) ||
+        "agent",
+      status: typeof payload.status === "string" ? payload.status : "running",
+      startedAt:
+        typeof payload.startedAt === "string" ? payload.startedAt : undefined,
+      completedAt:
+        typeof payload.completedAt === "string" ? payload.completedAt : undefined,
+      refUrl: `/agents?run=${id}`,
+    };
+    if (row.startedAt && row.completedAt) {
+      const dur =
+        new Date(row.completedAt).getTime() - new Date(row.startedAt).getTime();
+      if (Number.isFinite(dur) && dur >= 0) row.durationMs = dur;
+    }
+    useEmployeeRunsStore.getState().ingestWorkflowEvent(employeeId, row);
+  }
 }
 
 let client: WSClient | null = null;
@@ -711,6 +797,28 @@ export const useWSStore = create<WSState>()((set) => ({
         resolvedAt: payload.resolved === true ? new Date().toISOString() : null,
       });
     });
+
+    // Fan-in: forward existing workflow.* / agent.* events into the
+    // employee-runs store. The hub broadcasts project-scoped — the bridge
+    // filters by acting_employee_id / employee_id. Spec 1A §9 boundary:
+    // no new event types are introduced.
+    const RUN_EVENT_TYPES = [
+      "workflow.execution.started",
+      "workflow.execution.advanced",
+      "workflow.execution.completed",
+      "workflow.execution.paused",
+      "workflow.node.completed",
+      "workflow.node.waiting",
+      "agent.started",
+      "agent.completed",
+      "agent.failed",
+    ];
+    for (const evt of RUN_EVENT_TYPES) {
+      client.on(evt, (data) => {
+        const payload = extractPayload<Record<string, unknown>>(data);
+        if (payload) forwardRunEventToEmployee(evt, payload);
+      });
+    }
 
     client.connect();
   },
