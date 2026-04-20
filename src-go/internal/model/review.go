@@ -167,6 +167,22 @@ type TriggerReviewRequest struct {
 	ReplyTarget   map[string]any `json:"replyTarget,omitempty"`
 }
 
+// TriggerIncrementalReviewRequest is the input for diff-of-diff re-review
+// on PR head movement. ParentReviewID anchors the diff baseline; ChangedFiles
+// is the file allowlist used to scope plugins (and post-hoc-filter findings
+// from plugins that don't honor file scoping).
+type TriggerIncrementalReviewRequest struct {
+	ParentReviewID   string         `json:"parentReviewId" validate:"required,uuid"`
+	IntegrationID    string         `json:"integrationId" validate:"required,uuid"`
+	PRURL            string         `json:"prUrl" validate:"required"`
+	HeadSHA          string         `json:"headSha" validate:"required"`
+	BaseSHA          string         `json:"baseSha" validate:"required"`
+	ChangedFiles     []string       `json:"changedFiles" validate:"required,min=1,dive,required"`
+	Event            string         `json:"event"`
+	ActingEmployeeID string         `json:"actingEmployeeId,omitempty"`
+	ReplyTarget      map[string]any `json:"replyTarget,omitempty"`
+}
+
 type CIReviewRequest struct {
 	TaskID          string          `json:"taskId,omitempty"`
 	PRURL           string          `json:"prUrl" validate:"required"`

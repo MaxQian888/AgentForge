@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"regexp"
 	"slices"
@@ -64,6 +65,29 @@ func (p *ReviewExecutionPlanner) BuildPlan(ctx context.Context, req *model.Trigg
 		})
 	}
 
+	return plan, nil
+}
+
+// BuildIncrementalPlan is the diff-of-diff variant: it forces ChangedFiles
+// into the plan and returns the same shape as BuildPlan. Plugins with empty
+// FilePatterns are still selected (they run on the diff and we filter their
+// findings post-hoc in the dispatcher); plugins with FilePatterns must
+// intersect ChangedFiles.
+func (p *ReviewExecutionPlanner) BuildIncrementalPlan(ctx context.Context, req *model.TriggerIncrementalReviewRequest) (*model.ReviewExecutionPlan, error) {
+	if req == nil || len(req.ChangedFiles) == 0 {
+		return nil, fmt.Errorf("incremental plan requires ChangedFiles")
+	}
+	adapted := &model.TriggerReviewRequest{
+		PRURL:        req.PRURL,
+		ChangedFiles: append([]string(nil), req.ChangedFiles...),
+		Event:        firstNonEmpty(req.Event, "pull_request.synchronize"),
+		Trigger:      "vcs_webhook",
+	}
+	plan, err := p.BuildPlan(ctx, adapted)
+	if err != nil {
+		return nil, err
+	}
+	plan.TriggerEvent = adapted.Event
 	return plan, nil
 }
 
