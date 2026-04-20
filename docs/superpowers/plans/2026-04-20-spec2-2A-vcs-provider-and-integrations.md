@@ -2040,7 +2040,7 @@
 
 ## Task 12 — Frontend store `lib/stores/vcs-integrations-store.ts`
 
-- [ ] Step 12.1 — write failing store test
+- [x] Step 12.1 — write failing store test
   - File: `lib/stores/vcs-integrations-store.test.ts`
     ```ts
     /** @jest-environment jsdom */
@@ -2097,7 +2097,7 @@
     ```
   - Run `rtk pnpm test -- lib/stores/vcs-integrations-store.test.ts` — fails (store missing).
 
-- [ ] Step 12.2 — implement store
+- [x] Step 12.2 — implement store
   - File: `lib/stores/vcs-integrations-store.ts`
     ```ts
     "use client";
@@ -2258,7 +2258,7 @@
     ```
   - Run `rtk pnpm test -- lib/stores/vcs-integrations-store.test.ts` — passes.
 
-- [ ] Step 12.3 — commit: `feat(fe): vcs-integrations zustand store with CRUD + sync`
+- [x] Step 12.3 — commit: `feat(fe): vcs-integrations zustand store with CRUD + sync`
 
 ---
 
