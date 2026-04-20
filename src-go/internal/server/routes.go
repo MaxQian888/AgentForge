@@ -23,6 +23,7 @@ import (
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
+	"github.com/react-go-quick-starter/server/internal/qianchuan/strategy"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/secrets"
@@ -1301,6 +1302,18 @@ func RegisterRoutes(
 
 	// Bridge-to-registry runtime sync
 	e.POST("/internal/plugins/runtime-state", pluginH.SyncRuntimeState)
+
+	// --- Qianchuan strategy library (Spec 3C) ---
+	// Repo + service backing the strategy library; system seeds run after
+	// migrations so a fresh DB ships with read-only baselines.
+	qianchuanRepo := repository.NewQianchuanStrategyRepository(taskRepo.DB())
+	qianchuanSvc := service.NewQianchuanStrategyService(qianchuanRepo)
+	qianchuanH := handler.NewQianchuanStrategiesHandler(qianchuanSvc)
+	handler.RegisterQianchuanStrategyRoutes(protected, qianchuanH)
+	if err := strategy.SeedSystemStrategies(context.Background(), qianchuanRepo); err != nil {
+		// Non-fatal — strategies can still be authored without seeds.
+		log.WithError(err).Warn("seed qianchuan system strategies")
+	}
 
 	return &RouteServices{
 		TaskProgress: taskProgressSvc,

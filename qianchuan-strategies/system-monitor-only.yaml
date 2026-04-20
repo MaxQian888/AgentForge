@@ -1,0 +1,20 @@
+name: system:monitor-only
+description: Notifies IM on every tick; never adjusts ads. Safe baseline.
+triggers:
+  schedule: 1m
+inputs:
+  - metric: cost
+    dimensions: [ad_id]
+    window: 1m
+  - metric: conversions
+    dimensions: [ad_id]
+    window: 1m
+rules:
+  - name: heartbeat
+    condition: "true"
+    actions:
+      - type: notify_im
+        target: {}
+        params:
+          channel: default
+          template: "qianchuan tick — cost={{snapshot.metrics.cost}}"

@@ -298,7 +298,7 @@
 
 ## Task 8 — System seed strategies
 
-- [ ] Step 8.1 — author seed YAML files
+- [x] Step 8.1 — author seed YAML files
   - File: `qianchuan-strategies/system-monitor-only.yaml`
     ```yaml
     name: system:monitor-only
@@ -351,17 +351,17 @@
     ```
     > NOTE: `nodetypes.EvaluateExpression` is intentionally minimal today (no comparators). Plan 3D either extends the evaluator or wraps the snapshot in a derived-flag layer (e.g. `snapshot.flags.cvr_healthy`). For Plan 3C the seeds must parse cleanly and TestRun must execute end-to-end against the current evaluator semantics — adjust the seeds at implementation time to match whatever evaluator surface 3D commits to. If 3D is not yet decided, simplify the conditions to plain truthy lookups (as above) and TODO-comment the threshold logic.
 
-- [ ] Step 8.2 — write failing seeds-loader test
+- [x] Step 8.2 — write failing seeds-loader test
   - File: `src-go/internal/qianchuan/strategy/seeds_test.go`
   - Cases: loader is idempotent (running twice yields exactly 2 rows); loader rejects malformed seed YAML at startup; seed `project_id` is NULL
 
-- [ ] Step 8.3 — implement loader
+- [x] Step 8.3 — implement loader
   - File: `src-go/internal/qianchuan/strategy/seeds.go`
   - Embed both YAML files via `//go:embed`
   - `SeedSystemStrategies(ctx, repo) error` — for each, parse + (insert if absent by name)
   - Wire the call into server bootstrap (find via `Grep "Migrate" src-go/cmd/server`); seed runs after migrations, before HTTP listen
 
-- [ ] Step 8.4 — green
+- [x] Step 8.4 — green
 
 ---
 

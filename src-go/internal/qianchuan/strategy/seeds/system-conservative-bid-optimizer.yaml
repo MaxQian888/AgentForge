@@ -1,0 +1,27 @@
+name: system:conservative-bid-optimizer
+description: Bumps bid by up to 5% when CVR is healthy; pauses ad if cost-per-conversion degrades.
+triggers:
+  schedule: 1m
+inputs:
+  - metric: cvr
+    dimensions: [ad_id]
+    window: 15m
+  - metric: cost_per_conversion
+    dimensions: [ad_id]
+    window: 15m
+rules:
+  - name: bump-bid-when-cvr-good
+    condition: "snapshot.metrics.cvr"
+    actions:
+      - type: adjust_bid
+        target:
+          ad_id_expr: "snapshot.ad_id"
+        params:
+          pct: 5
+  - name: pause-on-bad-cpa
+    condition: "snapshot.metrics.cost_per_conversion"
+    actions:
+      - type: pause_ad
+        target:
+          ad_id_expr: "snapshot.ad_id"
+        params: {}

@@ -66,7 +66,7 @@ export default function ProjectSecretsPage() {
   const loading = loadingByProject[projectId] ?? false;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader
         title="项目密钥"
         description="管理项目级敏感凭证。值仅在创建/轮换时一次性返回。"
