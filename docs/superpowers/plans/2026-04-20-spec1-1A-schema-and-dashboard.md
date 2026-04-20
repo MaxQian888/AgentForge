@@ -758,7 +758,7 @@
 
 ## Task 6 — Frontend Zustand store: employee-runs-store
 
-- [ ] Step 6.1 — write failing store test
+- [x] Step 6.1 — write failing store test
   - File: `lib/stores/employee-runs-store.test.ts` (new)
   - Content:
     ```ts
@@ -846,9 +846,9 @@
     });
     ```
 
-- [ ] Step 6.2 — run `pnpm test -- employee-runs-store` — expect failure (module not found)
+- [x] Step 6.2 — run `pnpm test -- employee-runs-store` — expect failure (module not found)
 
-- [ ] Step 6.3 — implement the store
+- [x] Step 6.3 — implement the store
   - File: `lib/stores/employee-runs-store.ts` (new)
   - Content:
     ```ts
@@ -979,9 +979,9 @@
     }));
     ```
 
-- [ ] Step 6.4 — run `pnpm test -- employee-runs-store` — expect green
+- [x] Step 6.4 — run `pnpm test -- employee-runs-store` — expect green
 
-- [ ] Step 6.5 — run `rtk git add lib/stores/employee-runs-store.ts lib/stores/employee-runs-store.test.ts && rtk git commit -m "feat(fe): employee-runs-store with fetch + WS-event ingest seam"`
+- [x] Step 6.5 — run `rtk git add lib/stores/employee-runs-store.ts lib/stores/employee-runs-store.test.ts && rtk git commit -m "feat(fe): employee-runs-store with fetch + WS-event ingest seam"`
 
 ---
 
