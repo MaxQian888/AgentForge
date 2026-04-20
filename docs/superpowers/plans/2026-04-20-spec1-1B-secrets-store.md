@@ -1195,7 +1195,7 @@
 
 ## Task 7 — `handler/secrets_handler.go` HTTP CRUD
 
-- [ ] Step 7.1 — write failing handler test
+- [x] Step 7.1 — write failing handler test
   - File: `src-go/internal/handler/secrets_handler_test.go`
     ```go
     package handler_test
@@ -1293,7 +1293,7 @@
     (If a richer JWT extractor exists, follow that pattern instead — search `func TestEmployeeHandler` to confirm.)
   - Run `rtk go test ./internal/handler/... -run Secrets` — fails (no handler).
 
-- [ ] Step 7.2 — implement the handler
+- [x] Step 7.2 — implement the handler
   - File: `src-go/internal/handler/secrets_handler.go`
     ```go
     package handler
@@ -1503,7 +1503,7 @@
     ```
   - Run `rtk go test ./internal/handler/... -run Secrets` — passes.
 
-- [ ] Step 7.3 — commit: `feat(secrets): HTTP CRUD with one-time value response and RBAC gating`
+- [x] Step 7.3 — commit: `feat(secrets): HTTP CRUD with one-time value response and RBAC gating`
 
 ---
 
