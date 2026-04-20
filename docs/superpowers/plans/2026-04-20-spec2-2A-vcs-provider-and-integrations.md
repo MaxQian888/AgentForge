@@ -2694,14 +2694,14 @@
 
 ## Task 15 — Documentation + Spec Drifts
 
-- [ ] Step 15.1 — append to Spec 2 §13.1 "Spec Drifts Found During Brainstorm"
+- [x] Step 15.1 — append to Spec 2 §13.1 "Spec Drifts Found During Brainstorm"
   - File: `docs/superpowers/specs/2026-04-20-code-reviewer-employee-design.md`
     - Note that `webhook_secret_ref` callback URL constant is `${AGENTFORGE_PUBLIC_BASE_URL}/api/v1/vcs/github/webhook` (Plan 2A introduces the env var; webhook handler arrives in Plan 2B).
     - Note that the registry exposes `Names()` so FE can drive the provider selector dynamically; v1 hard-codes the disabled GitLab/Gitea entries since stubs are unusable.
     - Note that `vcs.Service.Create` performs a sentinel `GetPullRequest(repo, 0)` to validate PAT; non-`vcs:auth_expired` errors are tolerated (proves auth works) — this is intentional per §11 and not a bug.
-- [ ] Step 15.2 — verify backend bootstraps cleanly with new env
+- [~] Step 15.2 — verify backend bootstraps cleanly with new env (deferred: routes.go has unrelated unused-import errors from in-flight parallel agent WIP; my package builds via `go build ./internal/server/...` once those agents finish)
   - `rtk pnpm dev:backend:verify` — passes.
-- [ ] Step 15.3 — commit: `docs(spec2): record 2A spec drifts (callback URL env, registry Names, validate sentinel)`
+- [x] Step 15.3 — commit: `docs(spec2): record 2A spec drifts (callback URL env, registry Names, validate sentinel)`
 
 ---
 

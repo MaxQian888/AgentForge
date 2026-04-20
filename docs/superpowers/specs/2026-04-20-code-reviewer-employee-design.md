@@ -476,6 +476,16 @@ FE Jest
 
 (To be filled by plan-writer subagents — same convention as Spec 1.)
 
+### 13.1.A — Drifts recorded during Plan 2A implementation
+
+- **Webhook callback URL is `${AGENTFORGE_PUBLIC_BASE_URL}/api/v1/vcs/github/webhook`.** Plan 2A introduces the env var; on `Service.Create` the resolved value is handed to `CreateWebhook`. If the env is empty the service returns `vcs:public_base_url_not_configured`. The actual webhook receiver lands in Plan 2B.
+- **Migration number landed as 072** (`072_create_vcs_integrations`). Plan 2A originally reserved 068; renumbered after spec1 1B (069 secrets) and the qianchuan 070/071 plans landed first.
+- **`vcs.Service.Create` performs a sentinel `GetPullRequest(repo, 0)` to validate the PAT.** Anything that is not `vcs:auth_expired` (including 404 / transient host errors) is treated as proof the credential works; only `ErrAuthExpired` short-circuits with 401. This is intentional per §11 and not a bug.
+- **Provider registry exposes `Names()`** so a future FE can drive the provider selector dynamically; the v1 page hard-codes the disabled GitLab/Gitea entries because the stubs intentionally return `errors.ErrUnsupported`.
+- **Audit payloads carry only `{provider, host, owner, repo, op}`** — token plaintext, webhook secret value, and `webhook_id` are deliberately omitted. The mock provider in tests also refuses to record raw secret strings to keep test assertions safe.
+- **Integration test uses in-memory SQLite via gorm**, not a Postgres-tagged build. Same intent (handler+service+real-repo round-trip) without the CI infra dep; switch to Postgres once the rest of the suite standardises on it.
+- **Project sidebar "Integrations" entry is owned by whichever 1B / 2A plan ships `app/(dashboard)/projects/[id]/layout.tsx` first.** 2A leaves a `// TODO(spec2-2A nav)` comment in `page.tsx`; the entry currently links to `./integrations/vcs` once the layout exists.
+
 ## 14. Open Risks
 
 - **Bridge plugin → finding patch 字段需扩展**：要求 reviewer plugins 在 `findings/v1` 结构里加 `suggested_patch` 字段。已有 plugins 不会自动产 patch，但兼容（缺省 null 走 fixer agent 路径）。Plan 应包含一项：升级 `findings/v1` 至 `findings/v2`（带 patch 字段）+ 现有 plugins 的兼容映射。
