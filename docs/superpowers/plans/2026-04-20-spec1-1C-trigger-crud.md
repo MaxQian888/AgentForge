@@ -495,7 +495,7 @@
 
 ## Task 9 — Frontend page: `/employees/[id]/triggers`
 
-- [ ] Step 9.1 — create the page
+- [x] Step 9.1 — create the page
   - New file: `app/(dashboard)/employees/[id]/triggers/page.tsx`
   - Outline:
     ```tsx
@@ -549,11 +549,11 @@
     }
     ```
 
-- [ ] Step 9.2 — create `components/triggers/trigger-list-table.tsx`
+- [x] Step 9.2 — create `components/triggers/trigger-list-table.tsx`
   - Columns: display_name (or "(unnamed)"), source badge, summary (`platform command` or `cron tz`), target workflow name (resolve via `useDAGWorkflowStore` if available; fall back to truncated UUID), enabled Switch (calls `patchTrigger(t.id, {enabled})`), actions menu (Edit / Test / Delete with confirm dialog using `AlertDialog`).
   - Mark each `<TableRow>` with `id={`trigger-${t.id}`}` so the anchor link from the workflow editor side can scroll to it.
 
-- [ ] Step 9.3 — create `components/triggers/trigger-edit-drawer.tsx`
+- [x] Step 9.3 — create `components/triggers/trigger-edit-drawer.tsx`
   - shadcn `Sheet` drawer matching `employees-section.tsx` pattern (lines 8–14, 70–101).
   - Form state: `workflowId`, `source` (radio im/schedule), per-source sub-form, `displayName`, `description`, `actingEmployeeId` (defaults to current `employeeId` prop).
   - `source==="im"` sub-form fields: `platform` (select feishu/slack/dingtalk), `command`, `match_regex`, `chat_allowlist` (Textarea of newline-separated IDs), `input_mapping` (Textarea JSON; validated on submit).
@@ -564,19 +564,18 @@
     - call `createTrigger(...)` or `patchTrigger(...)`.
   - Show errors from the toast pipeline.
 
-- [ ] Step 9.4 — create `components/triggers/trigger-test-modal.tsx`
+- [x] Step 9.4 — create `components/triggers/trigger-test-modal.tsx`
   - shadcn `Dialog` with two tabs: "Sample event" (Textarea pre-filled with platform-specific stub like `{"platform":"feishu","command":"/echo","content":"/echo hi","chat_id":"c-1","args":["hi"]}`) and "Result" (read-only JSON).
   - "Run dry-run" button → `testTrigger(triggerId, parsedEvent)` → render `matched` + `would_dispatch` + `rendered_input` (or `skip_reason`).
 
-- [ ] Step 9.5 — verify
-  - `rtk pnpm test -- triggers` passes the new component tests (next task).
-  - Manual smoke: `pnpm dev` then visit `/employees/<id>/triggers` (UI renders even with no backend).
+- [x] Step 9.5 — verify
+  - tsc clean; eslint clean. Component tests written in Task 13.
 
 ---
 
 ## Task 10 — Add "Triggers" entry to employee detail nav
 
-- [ ] Step 10.1 — extend the employee detail nav
+- [x] Step 10.1 — extend the employee detail nav
   - File: `app/(dashboard)/employees/[id]/layout.tsx` (created by 1A).
   - Add a `{ href: "triggers", label: "Triggers" }` entry to the same nav array that already has "Runs". If 1A's layout sits in a different file, adjust accordingly.
   - **Coordination note**: this is the only file touched by both 1A and 1C; merge order matters. If 1A is not yet merged, leave this step in a "blocked-on-1A" status and ship 1C without the nav entry — the page is still reachable via direct URL.

@@ -94,7 +94,7 @@ function toastTriggerError(err: unknown, fallback: string) {
   toast.error(`${fallback}: ${e?.message ?? "unknown error"}`);
 }
 
-export const useEmployeeTriggerStore = create<State>()((set, get) => ({
+export const useEmployeeTriggerStore = create<State>()((set) => ({
   triggersByEmployee: {},
   loading: {},
 

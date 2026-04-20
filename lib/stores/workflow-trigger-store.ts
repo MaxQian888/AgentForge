@@ -10,6 +10,15 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 export type TriggerSource = "im" | "schedule";
 export type TriggerTargetKind = "dag" | "plugin";
 
+/**
+ * Discriminates how a workflow_triggers row was authored (Spec 1C §6.2).
+ *  - "dag_node": materialized by the registrar from a DAG trigger node;
+ *    re-saved on workflow save and NOT editable via the trigger CRUD API.
+ *  - "manual":   authored via POST /api/v1/triggers; survives DAG re-saves
+ *    and is the only origin the FE can delete or fully edit.
+ */
+export type TriggerCreatedVia = "dag_node" | "manual";
+
 export interface WorkflowTrigger {
   id: string;
   workflowId?: string;
@@ -23,6 +32,9 @@ export interface WorkflowTrigger {
   dedupeWindowSeconds: number;
   enabled: boolean;
   disabledReason?: string;
+  createdVia?: TriggerCreatedVia;
+  displayName?: string;
+  description?: string;
   /**
    * Optional Digital Employee id that the trigger attributes its dispatched
    * runs to (run-level acting-employee default). See change

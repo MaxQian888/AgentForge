@@ -18,7 +18,7 @@ interface NavTab {
 
 const TABS: NavTab[] = [
   { slug: "runs", label: "Runs" },
-  // 1C will append: { slug: "triggers", label: "Triggers" }
+  { slug: "triggers", label: "Triggers" },
   // 1D will append: { slug: "secrets",  label: "Secrets"  }
 ];
 
