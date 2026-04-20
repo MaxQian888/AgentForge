@@ -284,7 +284,6 @@ var operatorIntentCatalog = []IntentCandidate{
 	{Intent: "project_list", Command: "/project list", Summary: "查看项目列表", Keywords: []string{"项目", "project", "workspace"}},
 	{Intent: "sprint_status", Command: "/sprint status", Summary: "查看当前 sprint", Keywords: []string{"sprint", "迭代", "进度", "状态"}},
 	{Intent: "review", Command: "/review", Summary: "触发代码审查", Keywords: []string{"review", "审查", "pr", "pull request"}},
-	{Intent: "review_followup_tasks", Command: "/review", Summary: "审查并生成后续任务建议", Keywords: []string{"review", "follow-up", "后续任务", "issues", "修复项"}},
 	{Intent: "queue_list", Command: "/queue list", Summary: "查看 Agent 队列", Keywords: []string{"队列", "queue", "排队"}},
 	{Intent: "team_list", Command: "/team list", Summary: "查看团队成员摘要", Keywords: []string{"团队", "成员", "team"}},
 	{Intent: "memory_search", Command: "/memory search <query>", Summary: "搜索项目记忆", Keywords: []string{"记忆", "memory", "知识"}},

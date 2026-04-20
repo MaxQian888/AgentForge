@@ -55,7 +55,6 @@ type fakeIMActionReviewer struct {
 	getCalls            int
 	approveCalls        int
 	requestChangesCalls int
-	routeFixCalls       int
 	review              *model.Review
 	approvedReview      *model.Review
 	changesReview       *model.Review
@@ -81,11 +80,6 @@ func (f *fakeIMActionReviewer) RequestChangesReview(ctx context.Context, id uuid
 	f.lastActor = actor
 	f.lastRequestComment = comment
 	return f.changesReview, nil
-}
-
-func (f *fakeIMActionReviewer) RouteFixRequest(ctx context.Context, id uuid.UUID) error {
-	f.routeFixCalls++
-	return nil
 }
 
 type fakeIMActionTaskCreator struct {
@@ -279,9 +273,6 @@ func TestBackendIMActionExecutor_RequestChangesBlocksStaleCompletedReview(t *tes
 	if reviewer.requestChangesCalls != 0 {
 		t.Fatalf("requestChangesCalls = %d, want 0", reviewer.requestChangesCalls)
 	}
-	if reviewer.routeFixCalls != 0 {
-		t.Fatalf("routeFixCalls = %d, want 0", reviewer.routeFixCalls)
-	}
 	if resp.Status != model.IMActionStatusBlocked {
 		t.Fatalf("status = %q", resp.Status)
 	}
@@ -408,9 +399,6 @@ func TestBackendIMActionExecutor_RequestChangesUsesTransitionMethod(t *testing.T
 	}
 	if reviewer.lastRequestComment != "Please tighten validation" {
 		t.Fatalf("comment = %q, want request-changes comment", reviewer.lastRequestComment)
-	}
-	if reviewer.routeFixCalls != 1 {
-		t.Fatalf("routeFixCalls = %d, want 1", reviewer.routeFixCalls)
 	}
 	if resp.Review == nil || resp.Review.Recommendation != model.ReviewRecommendationRequestChanges {
 		t.Fatalf("review = %+v", resp.Review)

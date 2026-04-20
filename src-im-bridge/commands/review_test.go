@@ -233,7 +233,7 @@ func TestReviewCommand_StatusFailure(t *testing.T) {
 	}
 }
 
-func TestReviewCommand_StatusSuggestsFollowUpTasksFromFindings(t *testing.T) {
+func TestReviewCommand_StatusReturnsBasicInfo(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(&client.Review{
@@ -264,7 +264,7 @@ func TestReviewCommand_StatusSuggestsFollowUpTasksFromFindings(t *testing.T) {
 	if len(platform.replies) != 1 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
-	for _, want := range []string{"后续任务建议", "/task create 修复审查问题", "Missing auth guard"} {
+	for _, want := range []string{"代码审查", "request_changes"} {
 		if !strings.Contains(platform.replies[0], want) {
 			t.Fatalf("reply = %q, want substring %q", platform.replies[0], want)
 		}
@@ -432,28 +432,3 @@ func TestBuildReviewCard_OmitsEmptyOptionalFields(t *testing.T) {
 	}
 }
 
-func TestBuildReviewCard_IncludesFollowUpTaskSuggestionsForCompletedFindings(t *testing.T) {
-	card := buildReviewCard(&client.Review{
-		ID:             "review-12345678",
-		PRURL:          "https://example.test/pr/1",
-		Status:         "completed",
-		RiskLevel:      "high",
-		Recommendation: "request_changes",
-		Findings: []client.ReviewFinding{
-			{Severity: "high", Message: "Missing auth guard"},
-		},
-	})
-
-	found := false
-	for _, field := range card.Fields {
-		if field.Label == "后续任务" {
-			found = true
-			if !strings.Contains(field.Value, "/task create 修复审查问题") {
-				t.Fatalf("field.Value = %q", field.Value)
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("fields = %+v", card.Fields)
-	}
-}

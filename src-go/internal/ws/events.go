@@ -30,7 +30,6 @@ const (
 	EventReviewCompleted             = "review.completed"
 	EventReviewUpdated               = "review.updated"
 	EventReviewPendingHuman          = "review.pending_human"
-	EventReviewFixRequested          = "review.fix_requested"
 	EventNotification                = "notification"
 	EventBudgetWarning               = "budget.warning"
 	EventBudgetExceeded              = "budget.exceeded"

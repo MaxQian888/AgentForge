@@ -28,7 +28,6 @@ type ReviewService interface {
 	ListAll(ctx context.Context, status, riskLevel string, limit int) ([]*model.Review, error)
 	IngestCIResult(ctx context.Context, req *model.CIReviewRequest) (*model.Review, error)
 	RequestHumanApproval(ctx context.Context, id uuid.UUID) error
-	RouteFixRequest(ctx context.Context, id uuid.UUID) error
 }
 
 type ReviewHandler struct {
@@ -202,10 +201,6 @@ func (h *ReviewHandler) RequestChanges(c echo.Context) error {
 	review, err := h.service.RequestChangesReview(c.Request().Context(), id, resolveReviewActor(c), req.Comment)
 	if err != nil {
 		return h.handleServiceError(c, err)
-	}
-
-	if routeErr := h.service.RouteFixRequest(c.Request().Context(), id); routeErr != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: routeErr.Error()})
 	}
 
 	return c.JSON(http.StatusOK, review.ToDTO())

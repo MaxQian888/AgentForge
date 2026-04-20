@@ -665,37 +665,6 @@ func (s *ReviewService) RequestHumanApproval(ctx context.Context, reviewID uuid.
 	return nil
 }
 
-// RouteFixRequest broadcasts an event with review findings formatted as fix
-// instructions for an active agent to pick up.
-func (s *ReviewService) RouteFixRequest(ctx context.Context, reviewID uuid.UUID) error {
-	review, err := s.reviews.GetByID(ctx, reviewID)
-	if err != nil {
-		return ErrReviewNotFound
-	}
-	if review.TaskID == uuid.Nil {
-		return nil
-	}
-
-	task, err := s.tasks.GetByID(ctx, review.TaskID)
-	if err != nil {
-		return ErrReviewTaskNotFound
-	}
-
-	fixPayload := map[string]any{
-		"reviewId":       review.ID.String(),
-		"taskId":         task.ID.String(),
-		"recommendation": review.Recommendation,
-		"findings":       review.Findings,
-		"summary":        review.Summary,
-	}
-
-	fields := reviewLogFields(review, task)
-	log.WithFields(fields).Info("routing fix request to agent")
-
-	s.broadcast(ctx, ws.EventReviewFixRequested, task.ProjectID.String(), fixPayload)
-
-	return nil
-}
 
 var _ interface {
 	Trigger(context.Context, *model.TriggerReviewRequest) (*model.Review, error)
@@ -711,7 +680,6 @@ var _ interface {
 	ListAll(context.Context, string, string, int) ([]*model.Review, error)
 	IngestCIResult(context.Context, *model.CIReviewRequest) (*model.Review, error)
 	RequestHumanApproval(context.Context, uuid.UUID) error
-	RouteFixRequest(context.Context, uuid.UUID) error
 } = (*ReviewService)(nil)
 
 func (s *ReviewService) ApproveReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error) {

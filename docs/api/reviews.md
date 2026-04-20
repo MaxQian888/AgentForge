@@ -154,8 +154,7 @@ Request body:
 }
 ```
 
-This endpoint also calls `RouteFixRequest`, which is the repair handoff back
-into the task/agent pipeline.
+Findings flagged by the request-changes flow surface in the review's findings list; auto-fix proposals are emitted by the automation rule on EventReviewCompleted (see Spec 2D).
 
 ### `POST /api/v1/reviews/:id/false-positive`
 

@@ -35,7 +35,6 @@ type IMActionReviewer interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error)
 	ApproveReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error)
 	RequestChangesReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error)
-	RouteFixRequest(ctx context.Context, id uuid.UUID) error
 }
 
 type IMActionTaskCreator interface {
@@ -402,19 +401,6 @@ func (e *BackendIMActionExecutor) executeReviewAction(ctx context.Context, req *
 		updated, err = e.reviewer.ApproveReview(ctx, reviewID, actor, firstMetadataValue(req.Metadata, "comment", "notes"))
 	case model.ReviewRecommendationRequestChanges:
 		updated, err = e.reviewer.RequestChangesReview(ctx, reviewID, actor, firstMetadataValue(req.Metadata, "comment", "notes"))
-		if err == nil {
-			if routeErr := e.reviewer.RouteFixRequest(ctx, reviewID); routeErr != nil {
-				metadata := cloneStringMap(req.Metadata)
-				metadata["route_fix_error"] = routeErr.Error()
-				resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Review %s marked as request_changes, but fix routing failed: %s", reviewID.String(), routeErr.Error()), true)
-				resp.Metadata = metadata
-				if updated != nil {
-					dto := updated.ToDTO()
-					resp.Review = &dto
-				}
-				return resp
-			}
-		}
 	default:
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unsupported review action: %s", recommendation), false)
 	}

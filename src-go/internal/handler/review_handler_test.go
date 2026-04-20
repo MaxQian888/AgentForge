@@ -3,7 +3,6 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,8 +40,6 @@ type reviewServiceMock struct {
 	falsePositiveIDs      []string
 	falsePositiveReason   string
 	ciRequest             *model.CIReviewRequest
-	routeFixID            uuid.UUID
-	routeFixErr           error
 	review                *model.Review
 	reviews               []*model.Review
 }
@@ -120,11 +117,6 @@ func (m *reviewServiceMock) IngestCIResult(_ context.Context, req *model.CIRevie
 
 func (m *reviewServiceMock) RequestHumanApproval(_ context.Context, _ uuid.UUID) error {
 	return nil
-}
-
-func (m *reviewServiceMock) RouteFixRequest(_ context.Context, id uuid.UUID) error {
-	m.routeFixID = id
-	return m.routeFixErr
 }
 
 type reviewValidator struct {
@@ -381,8 +373,8 @@ func TestReviewHandlerCRUDAndWorkflowEndpoints(t *testing.T) {
 	if err := h.RequestChanges(requestChangesCtx); err != nil {
 		t.Fatalf("RequestChanges() error = %v", err)
 	}
-	if requestChangesRec.Code != http.StatusOK || svc.requestChangesComment != "needs tests" || svc.routeFixID != review.ID {
-		t.Fatalf("RequestChanges() captured = %q / %s", svc.requestChangesComment, svc.routeFixID)
+	if requestChangesRec.Code != http.StatusOK || svc.requestChangesComment != "needs tests" {
+		t.Fatalf("RequestChanges() captured = %q", svc.requestChangesComment)
 	}
 
 	falsePositiveReq := httptest.NewRequest(http.MethodPost, "/api/v1/reviews/"+review.ID.String()+"/false-positive", strings.NewReader(`{"findingIds":["f-1","f-2"],"reason":"expected behavior"}`))
@@ -401,24 +393,3 @@ func TestReviewHandlerCRUDAndWorkflowEndpoints(t *testing.T) {
 	}
 }
 
-func TestReviewHandlerRequestChangesReturnsInternalErrorWhenRouteFixFails(t *testing.T) {
-	e := echo.New()
-	e.Validator = &reviewValidator{validator: validator.New()}
-	review := sampleReviewForHandlerTests()
-	svc := &reviewServiceMock{review: review, routeFixErr: errors.New("route fix failed")}
-	h := handler.NewReviewHandler(svc)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/reviews/"+review.ID.String()+"/request-changes", strings.NewReader(`{"comment":"needs work"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/v1/reviews/:id/request-changes")
-	c.SetParamNames("id")
-	c.SetParamValues(review.ID.String())
-	if err := h.RequestChanges(c); err != nil {
-		t.Fatalf("RequestChanges() error = %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
-	}
-}
