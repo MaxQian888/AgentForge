@@ -102,7 +102,7 @@
 
 ## Task 2 — `internal/secrets/cipher.go` AES-256-GCM wrapper
 
-- [ ] Step 2.1 — write failing cipher tests
+- [x] Step 2.1 — write failing cipher tests
   - File: `src-go/internal/secrets/cipher_test.go`
     ```go
     package secrets_test
@@ -174,7 +174,7 @@
     ```
   - Run `rtk go test ./internal/secrets/...` — fails (no package).
 
-- [ ] Step 2.2 — implement the cipher
+- [x] Step 2.2 — implement the cipher
   - File: `src-go/internal/secrets/cipher.go`
     ```go
     // Package secrets implements project-scoped encrypted credential storage.
@@ -272,7 +272,7 @@
     ```
   - Run `rtk go test ./internal/secrets/...` — all five tests pass.
 
-- [ ] Step 2.3 — commit: `feat(secrets): add AES-256-GCM cipher with key_version handshake`
+- [x] Step 2.3 — commit: `feat(secrets): add AES-256-GCM cipher with key_version handshake`
 
 ---
 
