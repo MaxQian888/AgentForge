@@ -678,7 +678,7 @@
 
 ## Task 5 — Wire handler into routes.go
 
-- [ ] Step 5.1 — write failing route test
+- [x] Step 5.1 — write failing route test
   - File: `src-go/internal/server/employee_runs_route_test.go` (new)
   - Content:
     ```go
@@ -728,9 +728,9 @@
     }
     ```
 
-- [ ] Step 5.2 — run `cd src-go && go test ./internal/server/ -run TestEmployeeRunsRouteRegistered` — expect failure (route not yet wired)
+- [x] Step 5.2 — run `cd src-go && go test ./internal/server/ -run TestEmployeeRunsRouteRegistered` — expect failure (route not yet wired)
 
-- [ ] Step 5.3 — wire the route
+- [x] Step 5.3 — wire the route
   - File: `src-go/internal/server/routes.go`
   - Locate the existing employee mounting (around line 1037):
     ```go
@@ -750,9 +750,9 @@
     ```
   - Note: the `db` symbol is the `*gorm.DB` that the surrounding code uses to construct other repositories — confirm by searching for `repository.NewWorkflowExecutionRepository(` in the same file and reusing that exact identifier name.
 
-- [ ] Step 5.4 — run `cd src-go && go test ./internal/server/ -run TestEmployeeRunsRouteRegistered && cd src-go && go build ./...` — expect both green
+- [x] Step 5.4 — run `cd src-go && go test ./internal/server/ -run TestEmployeeRunsRouteRegistered && cd src-go && go build ./...` — expect both green
 
-- [ ] Step 5.5 — run `rtk git add src-go/internal/server/routes.go src-go/internal/server/employee_runs_route_test.go src-go/internal/server/source_helpers_test.go && rtk git commit -m "feat(server): mount /api/v1/employees/:id/runs route (spec1 §7 S5)"`
+- [x] Step 5.5 — run `rtk git add src-go/internal/server/routes.go src-go/internal/server/employee_runs_route_test.go src-go/internal/server/source_helpers_test.go && rtk git commit -m "feat(server): mount /api/v1/employees/:id/runs route (spec1 §7 S5)"`
 
 ---
 

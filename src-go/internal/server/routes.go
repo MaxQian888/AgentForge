@@ -1037,6 +1037,15 @@ func RegisterRoutes(
 	employeeH := handler.NewEmployeeHandler(employeeSvc)
 	employeeH.Register(projectGroup)
 
+	// Per-employee unified runs feed (workflow_executions ∪ agent_runs).
+	// Route is global (not project-scoped) because the employee id is
+	// self-disambiguating and the FE drills down from the employee detail
+	// shell, not from a project picker. Project RBAC is enforced by the
+	// existing JWT middleware on `protected`.
+	employeeRunsRepo := repository.NewEmployeeRunsRepository(taskRepo.DB())
+	employeeRunsH := handler.NewEmployeeRunsHandler(employeeRunsRepo)
+	protected.GET("/employees/:id/runs", employeeRunsH.List)
+
 		// Workflow templates
 		protected.GET("/workflow-templates", workflowH.ListTemplates)
 		protected.POST("/workflows/:id/publish-template", workflowH.PublishTemplate)
