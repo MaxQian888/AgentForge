@@ -278,7 +278,7 @@
 
 ## Task 3 — `internal/secrets/repo.go` persistence layer
 
-- [ ] Step 3.1 — write failing repo unit test
+- [x] Step 3.1 — write failing repo unit test
   - File: `src-go/internal/secrets/repo_test.go`
     ```go
     package secrets_test
@@ -354,7 +354,7 @@
     ```
   - Run `rtk go test ./internal/secrets/...` — fails (`secrets.Record`, `Repository`, `ErrNotFound`, `ErrNameConflict` undefined).
 
-- [ ] Step 3.2 — implement record + repo interface + GORM impl
+- [x] Step 3.2 — implement record + repo interface + GORM impl
   - File: `src-go/internal/secrets/repo.go`
     ```go
     package secrets
@@ -533,7 +533,7 @@
     ```
   - Run `rtk go test ./internal/secrets/...` — passes (mem repo satisfies the interface; GORM impl is exercised by integration test in Task 9).
 
-- [ ] Step 3.3 — commit: `feat(secrets): persist records via GORM repo with name-conflict mapping`
+- [x] Step 3.3 — commit: `feat(secrets): persist records via GORM repo with name-conflict mapping`
 
 ---
 
