@@ -86,7 +86,7 @@
     ```
   - Note: the CHECK list **must** include every previously valid resource_type. If Plan 1B did not yet land `secret`, drop it from the list above and add `secret` separately when 1B lands. Coordinate via the migration number ordering.
 
-- [ ] Step 1.3 — write the down migration
+- [x] Step 1.3 — write the down migration
   - File: `src-go/migrations/MIG_create_qianchuan_bindings.down.sql`
     ```sql
     DROP TRIGGER IF EXISTS set_qianchuan_bindings_updated_at ON qianchuan_bindings;
@@ -105,21 +105,21 @@
         ));
     ```
 
-- [ ] Step 1.4 — extend `internal/model/audit_event.go`
+- [x] Step 1.4 — extend `internal/model/audit_event.go`
   - Add `AuditResourceTypeQianchuanBinding = "qianchuan_binding"`
   - Append it to the validity match in `IsValidAuditResourceType`.
 
-- [ ] Step 1.5 — verify
+- [x] Step 1.5 — verify
   - `rtk go test ./internal/model/...`
   - `rtk pnpm dev:backend:restart go-orchestrator` and confirm migration applied.
 
-- [ ] Step 1.6 — commit `feat(qianchuan): add qianchuan_bindings table + audit resource_type`
+- [x] Step 1.6 — commit `feat(qianchuan): add qianchuan_bindings table + audit resource_type`
 
 ---
 
 ## Task 2 — `internal/adsplatform` interface + types + registry (TDD)
 
-- [ ] Step 2.1 — write failing registry test
+- [x] Step 2.1 — write failing registry test
   - File: `src-go/internal/adsplatform/registry_test.go`
     ```go
     package adsplatform_test
@@ -199,7 +199,7 @@
     ```
   - Run `rtk go test ./internal/adsplatform/...` — fails (package missing).
 
-- [ ] Step 2.2 — implement provider interface + types
+- [x] Step 2.2 — implement provider interface + types
   - File: `src-go/internal/adsplatform/types.go`
     ```go
     // Package adsplatform defines the provider-neutral interface AgentForge uses
@@ -385,7 +385,7 @@
     ```
   - Run `rtk go test ./internal/adsplatform/...` — three tests pass.
 
-- [ ] Step 2.3 — commit `feat(adsplatform): add provider interface + registry + neutral types`
+- [x] Step 2.3 — commit `feat(adsplatform): add provider interface + registry + neutral types`
 
 ---
 
