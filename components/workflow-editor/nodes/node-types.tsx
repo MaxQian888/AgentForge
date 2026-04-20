@@ -17,6 +17,8 @@ import {
   UserCheck,
   Webhook,
   Workflow,
+  Globe,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NODE_STYLES } from "./node-styles";
@@ -42,6 +44,8 @@ const NODE_ICONS: Record<string, React.ElementType> = {
   human_review: UserCheck,
   wait_event: Webhook,
   sub_workflow: Workflow,
+  http_call: Globe,
+  im_send: MessageSquare,
 };
 
 function BaseWorkflowNode({
@@ -253,6 +257,26 @@ export const SubWorkflowNode = memo(function SubWorkflowNode(props: NodeProps) {
   );
 });
 
+export const HTTPCallNode = memo(function HTTPCallNode(props: NodeProps) {
+  return (
+    <BaseWorkflowNode
+      data={props.data as unknown as WorkflowNodeBase}
+      nodeType="http_call"
+      selected={props.selected}
+    />
+  );
+});
+
+export const IMSendNode = memo(function IMSendNode(props: NodeProps) {
+  return (
+    <BaseWorkflowNode
+      data={props.data as unknown as WorkflowNodeBase}
+      nodeType="im_send"
+      selected={props.selected}
+    />
+  );
+});
+
 export const workflowNodeTypes = {
   trigger: TriggerNode,
   condition: ConditionNode,
@@ -268,6 +292,8 @@ export const workflowNodeTypes = {
   human_review: HumanReviewNode,
   wait_event: WaitEventNode,
   sub_workflow: SubWorkflowNode,
+  http_call: HTTPCallNode,
+  im_send: IMSendNode,
 };
 
 export const NODE_TYPE_LABELS: Record<string, string> = {
@@ -285,4 +311,6 @@ export const NODE_TYPE_LABELS: Record<string, string> = {
   human_review: "Human Review",
   wait_event: "Wait Event",
   sub_workflow: "Sub-Workflow",
+  http_call: "HTTP Call",
+  im_send: "IM Send",
 };

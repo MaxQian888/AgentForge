@@ -123,6 +123,8 @@ const (
 	NodeTypeWaitEvent        = "wait_event"
 	NodeTypeLoop             = "loop"
 	NodeTypeSubWorkflow      = "sub_workflow"
+	NodeTypeHTTPCall         = "http_call"
+	NodeTypeIMSend           = "im_send"
 )
 
 // Workflow node execution status constants.

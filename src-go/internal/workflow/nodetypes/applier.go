@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -72,6 +73,40 @@ type ReviewRepo interface {
 	Create(ctx context.Context, review *model.WorkflowPendingReview) error
 }
 
+// SecretResolver renders {{secrets.X}} templates on http_call config strings.
+type SecretResolver interface {
+	Resolve(ctx context.Context, projectID uuid.UUID, name string) (string, error)
+}
+
+// IMSendDispatcher posts the rendered card to IM Bridge /im/send.
+type IMSendDispatcher interface {
+	Send(ctx context.Context, replyTarget map[string]any, card json.RawMessage) (messageID string, err error)
+}
+
+// CorrelationsCreator mints card_action_correlations rows.
+type CorrelationsCreator interface {
+	Create(ctx context.Context, in *CorrelationCreateInput) (uuid.UUID, error)
+}
+
+// CorrelationCreateInput carries the data for creating a correlation row.
+type CorrelationCreateInput struct {
+	ExecutionID uuid.UUID
+	NodeID      string
+	ActionID    string
+	Payload     map[string]any
+	ExpiresAt   time.Time
+}
+
+// ExecutionMetaWriter merges keys into system_metadata.
+type ExecutionMetaWriter interface {
+	MergeSystemMetadata(ctx context.Context, executionID uuid.UUID, patch map[string]any) error
+}
+
+// AuditRecorder records audit events.
+type AuditRecorder interface {
+	Record(ctx context.Context, kind string, payload map[string]any) error
+}
+
 // ── EffectApplier ───────────────────────────────────────────────────────
 
 // EffectApplier executes the structured effects returned by node handlers.
@@ -96,6 +131,31 @@ type EffectApplier struct {
 	SubWorkflowEngines *SubWorkflowEngineRegistry
 	SubWorkflowLinks   SubWorkflowLinkRepo
 	SubWorkflowGuard   *RecursionGuard
+
+	// SecretResolver renders {{secrets.X}} templates on http_call config
+	// strings. Wired in production by 1B's *secrets.Service. Nil disables
+	// http_call (applier returns a structured error at dispatch time).
+	SecretResolver SecretResolver
+
+	// DataStoreMerger writes node results into the parent execution's
+	// dataStore. Reuses WaitEventDataStoreAdapter so the http_call applier
+	// and the wait_event resumer share one merge implementation.
+	DataStoreMerger WaitEventDataStoreMerger
+
+	// IMSendDispatcher posts the rendered card to IM Bridge /im/send.
+	// Wired by the IM Bridge HTTP client at startup. Nil disables im_send.
+	IMSendDispatcher IMSendDispatcher
+
+	// CorrelationsCreator mints card_action_correlations rows for each
+	// callback action on an im_send card.
+	CorrelationsCreator CorrelationsCreator
+
+	// ExecutionMetaWriter merges system_metadata.im_dispatched=true after a
+	// successful im_send.
+	ExecutionMetaWriter ExecutionMetaWriter
+
+	// AuditSink records applier-level audit events (e.g. http_call executions).
+	AuditSink AuditRecorder
 }
 
 // Apply iterates effects in order and executes each one.
@@ -147,6 +207,16 @@ func (a *EffectApplier) Apply(
 				return false, fmt.Errorf("invoke_sub_workflow: %w", err)
 			}
 			return true, nil
+
+		case EffectExecuteHTTPCall:
+			if err := a.applyExecuteHTTPCall(ctx, exec, node, e.Payload); err != nil {
+				return false, fmt.Errorf("execute_http_call: %w", err)
+			}
+
+		case EffectExecuteIMSend:
+			if err := a.applyExecuteIMSend(ctx, exec, node, e.Payload); err != nil {
+				return false, fmt.Errorf("execute_im_send: %w", err)
+			}
 
 		default:
 			return false, fmt.Errorf("unknown effect kind %q", e.Kind)

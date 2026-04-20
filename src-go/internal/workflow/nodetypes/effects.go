@@ -13,6 +13,8 @@ const (
 	EffectBroadcastEvent    EffectKind = "broadcast_event"
 	EffectUpdateTaskStatus  EffectKind = "update_task_status"
 	EffectResetNodes        EffectKind = "reset_nodes"
+	EffectExecuteHTTPCall   EffectKind = "execute_http_call"
+	EffectExecuteIMSend     EffectKind = "execute_im_send"
 )
 
 // IsPark reports whether the effect parks the node (node enters `waiting` state).
@@ -99,4 +101,37 @@ type ResetNodesPayload struct {
 	NodeIDs      []string `json:"nodeIds"`
 	CounterKey   string   `json:"counterKey,omitempty"`
 	CounterValue float64  `json:"counterValue,omitempty"`
+}
+
+// ExecuteHTTPCallPayload carries everything the applier needs to dial an
+// external HTTP endpoint. Templates like {{secrets.X}} are resolved by the
+// applier at execution time via SecretResolver.
+type ExecuteHTTPCallPayload struct {
+	Method         string            `json:"method"`
+	URL            string            `json:"url"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	URLQuery       map[string]string `json:"urlQuery,omitempty"`
+	Body           string            `json:"body,omitempty"`
+	TimeoutSeconds int               `json:"timeoutSeconds"`
+	TreatAsSuccess []int             `json:"treatAsSuccess,omitempty"`
+	// ProjectID is duplicated into the payload so the applier can resolve
+	// {{secrets.X}} templates without reaching back into the execution.
+	ProjectID string `json:"projectId"`
+}
+
+// ExecuteIMSendPayload carries the templated card and dispatch parameters.
+type ExecuteIMSendPayload struct {
+	// RawCard is the templated ProviderNeutralCard JSON (camelCase tags
+	// matching src-im-bridge/core/card_schema.ts). The applier renders
+	// correlation tokens for each callback action before dispatching.
+	RawCard       json.RawMessage `json:"rawCard"`
+	Target        string          `json:"target"` // "reply_to_trigger" | "explicit"
+	ExplicitChat  *IMSendExplicit `json:"explicit,omitempty"`
+	TokenLifetime string          `json:"tokenLifetime,omitempty"` // Go duration; default 168h (7d)
+}
+
+type IMSendExplicit struct {
+	Provider string `json:"provider"`
+	ChatID   string `json:"chatId"`
+	ThreadID string `json:"threadId,omitempty"`
 }

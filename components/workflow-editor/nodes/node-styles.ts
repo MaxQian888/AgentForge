@@ -75,6 +75,16 @@ export const NODE_STYLES: Record<string, NodeStyle> = {
     border: "border-violet-400 dark:border-violet-600",
     iconColor: "text-violet-600 dark:text-violet-400",
   },
+  http_call: {
+    bg: "bg-sky-50 dark:bg-sky-950",
+    border: "border-sky-400 dark:border-sky-600",
+    iconColor: "text-sky-600 dark:text-sky-400",
+  },
+  im_send: {
+    bg: "bg-teal-50 dark:bg-teal-950",
+    border: "border-teal-400 dark:border-teal-600",
+    iconColor: "text-teal-600 dark:text-teal-400",
+  },
 };
 
 export const MINIMAP_COLORS: Record<string, string> = {
@@ -92,4 +102,6 @@ export const MINIMAP_COLORS: Record<string, string> = {
   human_review: "#10b981",   // emerald-500
   wait_event: "#64748b",     // slate-500
   sub_workflow: "#8b5cf6",   // violet-500
+  http_call: "#0ea5e9",      // sky-500
+  im_send: "#14b8a6",        // teal-500
 };

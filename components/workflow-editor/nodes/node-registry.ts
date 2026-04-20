@@ -13,6 +13,8 @@ import {
   UserCheck,
   Webhook,
   Workflow,
+  Globe,
+  MessageSquare,
 } from "lucide-react";
 import type { NodeCategory, NodeTypeMeta } from "../types";
 
@@ -371,6 +373,26 @@ export const NODE_REGISTRY: NodeTypeMeta[] = [
       },
     ],
     defaultConfig: {},
+  },
+  {
+    type: "http_call",
+    label: "HTTP Call",
+    category: "action",
+    icon: Globe,
+    color: "#0ea5e9",
+    description: "Call an external HTTP API; supports {{secrets.X}} in url, headers, query, body",
+    configSchema: [],
+    defaultConfig: { method: "GET", timeout_seconds: 30 },
+  },
+  {
+    type: "im_send",
+    label: "IM Send",
+    category: "action",
+    icon: MessageSquare,
+    color: "#14b8a6",
+    description: "Send a rich card with action buttons that can resume wait_event nodes",
+    configSchema: [],
+    defaultConfig: { target: "reply_to_trigger", card: { title: "" } },
   },
 ];
 

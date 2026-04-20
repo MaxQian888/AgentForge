@@ -30,6 +30,8 @@ import { DataFlowPreview } from "./data-flow-preview";
 import { LlmAgentConfig } from "./node-configs/llm-agent-config";
 import { ConditionConfig } from "./node-configs/condition-config";
 import { SubWorkflowConfig } from "./node-configs/sub-workflow-config";
+import { HTTPCallConfig } from "./node-configs/http-call-config";
+import { IMSendConfig } from "./node-configs/im-send-config";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -194,7 +196,9 @@ export function NodeConfigPanel() {
   const hasCustomOverride =
     node.type === "llm_agent" ||
     node.type === "condition" ||
-    node.type === "sub_workflow";
+    node.type === "sub_workflow" ||
+    node.type === "http_call" ||
+    node.type === "im_send";
 
   // Grouped schema fields (used when there is no custom override)
   const fieldGroups = groupFields(meta?.configSchema ?? []);
@@ -302,6 +306,18 @@ export function NodeConfigPanel() {
                   )}
                   {node.type === "sub_workflow" && (
                     <SubWorkflowConfig
+                      config={config}
+                      onChange={handleConfigChange}
+                    />
+                  )}
+                  {node.type === "http_call" && (
+                    <HTTPCallConfig
+                      config={config}
+                      onChange={handleConfigChange}
+                    />
+                  )}
+                  {node.type === "im_send" && (
+                    <IMSendConfig
                       config={config}
                       onChange={handleConfigChange}
                     />

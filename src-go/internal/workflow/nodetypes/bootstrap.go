@@ -37,6 +37,8 @@ func RegisterBuiltins(r *NodeTypeRegistry, deps BuiltinDeps) error {
 		{"agent_dispatch", AgentDispatchHandler{}},
 		{"human_review", HumanReviewHandler{}},
 		{"wait_event", WaitEventHandler{}},
+		{"http_call", HTTPCallHandler{}},
+		{"im_send", IMSendHandler{}},
 	}
 
 	for _, e := range entries {
