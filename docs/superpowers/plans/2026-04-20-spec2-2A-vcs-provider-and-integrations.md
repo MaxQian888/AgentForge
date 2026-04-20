@@ -487,7 +487,7 @@
 
 ## Task 5 — `internal/vcs/mock` recording provider for tests
 
-- [ ] Step 5.1 — write failing recording test
+- [x] Step 5.1 — write failing recording test
   - File: `src-go/internal/vcs/mock/provider_test.go`
     ```go
     package mock_test
@@ -535,7 +535,7 @@
     ```
   - Run `rtk go test ./internal/vcs/mock/...` — fails (package missing).
 
-- [ ] Step 5.2 — implement mock provider
+- [x] Step 5.2 — implement mock provider
   - File: `src-go/internal/vcs/mock/provider.go`
     ```go
     // Package mock supplies a recording vcs.Provider for tests. Every
@@ -696,7 +696,7 @@
     ```
   - Run `rtk go test ./internal/vcs/mock/...` — passes.
 
-- [ ] Step 5.3 — commit: `feat(vcs): mock recording provider for tests`
+- [x] Step 5.3 — commit: `feat(vcs): mock recording provider for tests`
 
 ---
 
