@@ -165,3 +165,26 @@ func (r *ReviewRepository) UpdateResult(ctx context.Context, review *model.Revie
 	}
 	return nil
 }
+
+// GetLatestByIntegrationAndPR returns the most recent completed review for a
+// given integration + PR number, or nil if none exists.
+func (r *ReviewRepository) GetLatestByIntegrationAndPR(ctx context.Context, integrationID uuid.UUID, prNumber int) (*model.Review, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	var record reviewRecord
+	err := r.db.WithContext(ctx).
+		Where("integration_id = ? AND pr_number = ? AND last_reviewed_sha != ''", integrationID, prNumber).
+		Order("created_at DESC").
+		Take(&record).Error
+	if err != nil {
+		return nil, fmt.Errorf("get latest review by integration and pr: %w", normalizeRepositoryError(err))
+	}
+
+	review, err := record.toModel()
+	if err != nil {
+		return nil, fmt.Errorf("get latest review by integration and pr: %w", err)
+	}
+	return review, nil
+}

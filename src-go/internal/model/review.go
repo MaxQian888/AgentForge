@@ -58,12 +58,13 @@ type ReviewDecision struct {
 }
 
 type ReviewExecutionMetadata struct {
-	TriggerEvent string                  `json:"triggerEvent,omitempty"`
-	ProjectID    string                  `json:"projectId,omitempty"`
-	ChangedFiles []string                `json:"changedFiles,omitempty"`
-	Dimensions   []string                `json:"dimensions,omitempty"`
-	Results      []ReviewExecutionResult `json:"results,omitempty"`
-	Decisions    []ReviewDecision        `json:"decisions,omitempty"`
+	TriggerEvent    string                  `json:"triggerEvent,omitempty"`
+	ProjectID       string                  `json:"projectId,omitempty"`
+	ChangedFiles    []string                `json:"changedFiles,omitempty"`
+	NoFindingsFiles []string                `json:"noFindingsFiles,omitempty"`
+	Dimensions      []string                `json:"dimensions,omitempty"`
+	Results         []ReviewExecutionResult `json:"results,omitempty"`
+	Decisions       []ReviewDecision        `json:"decisions,omitempty"`
 }
 
 type Review struct {

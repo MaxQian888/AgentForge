@@ -1107,22 +1107,28 @@ func (r *logRecord) toModel() *model.Log {
 }
 
 type reviewRecord struct {
-	ID                uuid.UUID  `gorm:"column:id;primaryKey"`
-	TaskID            uuid.UUID  `gorm:"column:task_id"`
-	PRURL             string     `gorm:"column:pr_url"`
-	PRNumber          int        `gorm:"column:pr_number"`
-	Layer             int        `gorm:"column:layer"`
-	Status            string     `gorm:"column:status"`
-	RiskLevel         string     `gorm:"column:risk_level"`
-	Findings          rawJSON    `gorm:"column:findings;type:jsonb"`
-	ExecutionMetadata rawJSON    `gorm:"column:execution_metadata;type:jsonb"`
-	Summary           string     `gorm:"column:summary"`
-	Recommendation    string     `gorm:"column:recommendation"`
-	CostUSD           float64    `gorm:"column:cost_usd"`
-	ParentReviewID    *uuid.UUID `gorm:"column:parent_review_id"`
-	ExecutionID       *uuid.UUID `gorm:"column:execution_id"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at"`
+	ID                 uuid.UUID  `gorm:"column:id;primaryKey"`
+	TaskID             uuid.UUID  `gorm:"column:task_id"`
+	PRURL              string     `gorm:"column:pr_url"`
+	PRNumber           int        `gorm:"column:pr_number"`
+	Layer              int        `gorm:"column:layer"`
+	Status             string     `gorm:"column:status"`
+	RiskLevel          string     `gorm:"column:risk_level"`
+	Findings           rawJSON    `gorm:"column:findings;type:jsonb"`
+	ExecutionMetadata  rawJSON    `gorm:"column:execution_metadata;type:jsonb"`
+	Summary            string     `gorm:"column:summary"`
+	Recommendation     string     `gorm:"column:recommendation"`
+	CostUSD            float64    `gorm:"column:cost_usd"`
+	IntegrationID      *uuid.UUID `gorm:"column:integration_id"`
+	HeadSHA            string     `gorm:"column:head_sha"`
+	BaseSHA            string     `gorm:"column:base_sha"`
+	LastReviewedSHA    string     `gorm:"column:last_reviewed_sha"`
+	SummaryCommentID   string     `gorm:"column:summary_comment_id"`
+	AutomationDecision string     `gorm:"column:automation_decision"`
+	ParentReviewID     *uuid.UUID `gorm:"column:parent_review_id"`
+	ExecutionID        *uuid.UUID `gorm:"column:execution_id"`
+	CreatedAt          time.Time  `gorm:"column:created_at"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at"`
 }
 
 func (reviewRecord) TableName() string { return "reviews" }
@@ -1146,22 +1152,28 @@ func newReviewRecord(review *model.Review) (*reviewRecord, error) {
 		}
 	}
 	return &reviewRecord{
-		ID:                review.ID,
-		TaskID:            review.TaskID,
-		PRURL:             review.PRURL,
-		PRNumber:          review.PRNumber,
-		Layer:             review.Layer,
-		Status:            review.Status,
-		RiskLevel:         review.RiskLevel,
-		Findings:          newRawJSON(findingsJSON, "[]"),
-		ExecutionMetadata: newRawJSON(executionMetadataJSON, "{}"),
-		Summary:           review.Summary,
-		Recommendation:    review.Recommendation,
-		CostUSD:           review.CostUSD,
-		ParentReviewID:    review.ParentReviewID,
-		ExecutionID:       review.ExecutionID,
-		CreatedAt:         review.CreatedAt,
-		UpdatedAt:         review.UpdatedAt,
+		ID:                 review.ID,
+		TaskID:             review.TaskID,
+		PRURL:              review.PRURL,
+		PRNumber:           review.PRNumber,
+		Layer:              review.Layer,
+		Status:             review.Status,
+		RiskLevel:          review.RiskLevel,
+		Findings:           newRawJSON(findingsJSON, "[]"),
+		ExecutionMetadata:  newRawJSON(executionMetadataJSON, "{}"),
+		Summary:            review.Summary,
+		Recommendation:     review.Recommendation,
+		CostUSD:            review.CostUSD,
+		IntegrationID:      review.IntegrationID,
+		HeadSHA:            review.HeadSHA,
+		BaseSHA:            review.BaseSHA,
+		LastReviewedSHA:    review.LastReviewedSHA,
+		SummaryCommentID:   review.SummaryCommentID,
+		AutomationDecision: review.AutomationDecision,
+		ParentReviewID:     review.ParentReviewID,
+		ExecutionID:        review.ExecutionID,
+		CreatedAt:          review.CreatedAt,
+		UpdatedAt:          review.UpdatedAt,
 	}, nil
 }
 
@@ -1170,20 +1182,26 @@ func (r *reviewRecord) toModel() (*model.Review, error) {
 		return nil, nil
 	}
 	review := &model.Review{
-		ID:             r.ID,
-		TaskID:         r.TaskID,
-		PRURL:          r.PRURL,
-		PRNumber:       r.PRNumber,
-		Layer:          r.Layer,
-		Status:         r.Status,
-		RiskLevel:      r.RiskLevel,
-		Summary:        r.Summary,
-		Recommendation: r.Recommendation,
-		CostUSD:        r.CostUSD,
-		ParentReviewID: r.ParentReviewID,
-		ExecutionID:    r.ExecutionID,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
+		ID:                 r.ID,
+		TaskID:             r.TaskID,
+		PRURL:              r.PRURL,
+		PRNumber:           r.PRNumber,
+		Layer:              r.Layer,
+		Status:             r.Status,
+		RiskLevel:          r.RiskLevel,
+		Summary:            r.Summary,
+		Recommendation:     r.Recommendation,
+		CostUSD:            r.CostUSD,
+		IntegrationID:      r.IntegrationID,
+		HeadSHA:            r.HeadSHA,
+		BaseSHA:            r.BaseSHA,
+		LastReviewedSHA:    r.LastReviewedSHA,
+		SummaryCommentID:   r.SummaryCommentID,
+		AutomationDecision: r.AutomationDecision,
+		ParentReviewID:     r.ParentReviewID,
+		ExecutionID:        r.ExecutionID,
+		CreatedAt:          r.CreatedAt,
+		UpdatedAt:          r.UpdatedAt,
 	}
 	if findingsRaw := r.Findings.Bytes("[]"); len(findingsRaw) > 0 {
 		if err := json.Unmarshal(findingsRaw, &review.Findings); err != nil {
