@@ -11,9 +11,9 @@ tear down at runtime without a server restart.
 plugins/
 ├── builtin-bundle.yaml           # bundle index (which plugins ship with a release)
 ├── integrations/                 # IntegrationPlugin — event ingestion / outbound
-│   ├── feishu-adapter/
+│   ├── sample-integration-plugin/
 │   │   ├── manifest.yaml
-│   │   └── dist/feishu.wasm      # compiled WASM module
+│   │   └── dist/sample.wasm      # compiled WASM module
 │   └── qianchuan-ads/
 │       └── manifest.yaml         # firstparty-inproc — ships inside the Go binary
 ├── reviews/                      # ReviewPlugin — MCP reviewers invoked by the bridge

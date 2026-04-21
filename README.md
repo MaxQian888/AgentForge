@@ -299,10 +299,10 @@ Useful root commands:
 - `pnpm test:tauri`
 - `pnpm test:tauri:coverage`
 - `pnpm create-plugin -- --type tool --name echo-tool`
-- `pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
-- `pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health`
+- `pnpm plugin:build -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml`
+- `pnpm plugin:debug -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml --operation health`
 - `pnpm plugin:dev`
-- `pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
+- `pnpm plugin:verify -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml`
 
 Note: `next.config.ts` currently enables `output: "export"`. `pnpm build` generates the deployable static site in `out/`, while `pnpm start` remains a legacy Next server entrypoint rather than the primary production path for this checkout.
 
@@ -515,9 +515,9 @@ The generated starters are repo-local templates:
 For the maintained Go WASM sample plugin, the repo also keeps a supported root-level loop:
 
 ```bash
-pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
-pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health
-pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+pnpm plugin:build -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml
+pnpm plugin:debug -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml --operation health
+pnpm plugin:verify -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml
 ```
 
 Notes:

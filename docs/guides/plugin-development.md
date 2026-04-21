@@ -20,7 +20,7 @@ Use the repo-local scaffold:
 pnpm create-plugin -- --type tool --name echo-tool
 pnpm create-plugin -- --type review --name architecture-check
 pnpm create-plugin -- --type workflow --name standard-dev-flow
-pnpm create-plugin -- --type integration --name feishu-adapter
+pnpm create-plugin -- --type integration --name sample-integration-plugin
 ```
 
 Generated locations:

@@ -60,7 +60,7 @@ through the plugin SDK runtime wrapper.
 ## Build And Debug Loop
 
 ```bash
-pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
-pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health
-pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+pnpm plugin:build -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml
+pnpm plugin:debug -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml --operation health
+pnpm plugin:verify -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml
 ```
