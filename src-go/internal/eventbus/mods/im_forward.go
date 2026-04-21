@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	eb "github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/imconfig"
-	"github.com/react-go-quick-starter/server/internal/model"
+	eb "github.com/agentforge/server/internal/eventbus"
+	"github.com/agentforge/server/internal/imconfig"
+	"github.com/agentforge/server/internal/model"
 	log "github.com/sirupsen/logrus"
 )
 

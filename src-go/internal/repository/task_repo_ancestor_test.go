@@ -8,7 +8,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
-	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/agentforge/server/internal/model"
 )
 
 // newMinimalTaskRecord creates a taskRecord with only the required fields set.
