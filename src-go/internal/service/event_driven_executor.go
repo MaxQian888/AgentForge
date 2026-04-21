@@ -6,8 +6,10 @@ import (
 	"fmt"
 
 	"github.com/agentforge/server/internal/eventbus"
+	applog "github.com/agentforge/server/internal/log"
 	"github.com/agentforge/server/internal/model"
 	"github.com/agentforge/server/internal/plugin"
+	log "github.com/sirupsen/logrus"
 )
 
 // EventDrivenExecutor is a persistent EventBus subscriber. It watches for
@@ -100,6 +102,10 @@ func (e *EventDrivenExecutor) dispatch(
 	outCh chan<- plugin.WorkflowEvent,
 ) {
 	defer func() { <-sem }()
+	if applog.TraceID(ctx) == "" {
+		ctx = applog.WithTrace(ctx, applog.NewTraceID())
+		log.WithFields(log.Fields{"trace_id": applog.TraceID(ctx), "origin": "eventbus.subscriber"}).Info("trace.generated_for_background_job")
+	}
 
 	stepID := fmt.Sprintf("event:%s:%s", trigger.Event, trigger.Role)
 	outCh <- plugin.WorkflowEvent{Type: "step_started", StepID: stepID}

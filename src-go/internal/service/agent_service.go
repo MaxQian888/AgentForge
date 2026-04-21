@@ -14,6 +14,7 @@ import (
 	bridgeclient "github.com/agentforge/server/internal/bridge"
 	"github.com/agentforge/server/internal/employee"
 	eventbus "github.com/agentforge/server/internal/eventbus"
+	applog "github.com/agentforge/server/internal/log"
 	"github.com/agentforge/server/internal/model"
 	"github.com/agentforge/server/internal/pool"
 	"github.com/agentforge/server/internal/repository"
@@ -580,12 +581,16 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 			}
 		}
 		if run.TeamID != nil && s.teamSvc != nil {
-			go s.teamSvc.ProcessRunCompletion(context.Background(), run)
+			bgCtx := applog.WithTrace(context.Background(), applog.NewTraceID())
+			log.WithFields(log.Fields{"trace_id": applog.TraceID(bgCtx), "origin": "agent.run_completion"}).Info("trace.generated_for_background_job")
+			go s.teamSvc.ProcessRunCompletion(bgCtx, run)
 		}
 		// Route to DAG workflow engine if agent run is workflow-mapped
 		if s.dagWorkflowSvc != nil {
+			bgCtx := applog.WithTrace(context.Background(), applog.NewTraceID())
+			log.WithFields(log.Fields{"trace_id": applog.TraceID(bgCtx), "origin": "agent.dag_completion"}).Info("trace.generated_for_background_job")
 			go func() {
-				_ = s.dagWorkflowSvc.HandleAgentRunCompletion(context.Background(), run.ID, run.StructuredOutput, string(run.Status))
+				_ = s.dagWorkflowSvc.HandleAgentRunCompletion(bgCtx, run.ID, run.StructuredOutput, string(run.Status))
 			}()
 		}
 		s.promoteQueuedAdmission(ctx, run)
