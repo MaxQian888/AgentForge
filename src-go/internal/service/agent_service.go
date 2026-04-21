@@ -581,17 +581,39 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 			}
 		}
 		if run.TeamID != nil && s.teamSvc != nil {
-			bgCtx := applog.WithTrace(context.Background(), applog.NewTraceID())
-			log.WithFields(log.Fields{"trace_id": applog.TraceID(bgCtx), "origin": "agent.run_completion"}).Info("trace.generated_for_background_job")
-			go s.teamSvc.ProcessRunCompletion(bgCtx, run)
+			go func(parentTrace string) {
+				bgCtx := context.Background()
+				if parentTrace != "" {
+					// inherit the parent trace so background work stays discoverable
+					bgCtx = applog.WithTrace(bgCtx, parentTrace)
+				} else {
+					// no parent — generate a fresh one and log it as a new background trace
+					bgCtx = applog.WithTrace(bgCtx, applog.NewTraceID())
+					log.WithFields(log.Fields{
+						"trace_id": applog.TraceID(bgCtx),
+						"origin":   "agent.run_completion",
+					}).Info("trace.generated_for_background_job")
+				}
+				s.teamSvc.ProcessRunCompletion(bgCtx, run)
+			}(applog.TraceID(ctx))
 		}
 		// Route to DAG workflow engine if agent run is workflow-mapped
 		if s.dagWorkflowSvc != nil {
-			bgCtx := applog.WithTrace(context.Background(), applog.NewTraceID())
-			log.WithFields(log.Fields{"trace_id": applog.TraceID(bgCtx), "origin": "agent.dag_completion"}).Info("trace.generated_for_background_job")
-			go func() {
+			go func(parentTrace string) {
+				bgCtx := context.Background()
+				if parentTrace != "" {
+					// inherit the parent trace so background work stays discoverable
+					bgCtx = applog.WithTrace(bgCtx, parentTrace)
+				} else {
+					// no parent — generate a fresh one and log it as a new background trace
+					bgCtx = applog.WithTrace(bgCtx, applog.NewTraceID())
+					log.WithFields(log.Fields{
+						"trace_id": applog.TraceID(bgCtx),
+						"origin":   "agent.dag_completion",
+					}).Info("trace.generated_for_background_job")
+				}
 				_ = s.dagWorkflowSvc.HandleAgentRunCompletion(bgCtx, run.ID, run.StructuredOutput, string(run.Status))
-			}()
+			}(applog.TraceID(ctx))
 		}
 		s.promoteQueuedAdmission(ctx, run)
 		if projectID := s.lookupProjectID(ctx, run.TaskID); projectID != "" {
