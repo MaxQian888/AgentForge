@@ -174,6 +174,29 @@ func (a webhookAuditAdapter) RecordEvent(ctx context.Context, e *model.AuditEven
 	return a.svc.RecordEvent(ctx, e)
 }
 
+// integrationPluginInvokerAdapter satisfies handler.IntegrationPluginInvoker
+// by delegating to PluginService.Invoke. Constraint: PluginService.Invoke
+// only accepts integration WASM plugins, which is exactly what the
+// /api/v1/integrations/:id/webhook endpoint targets.
+type integrationPluginInvokerAdapter struct{ svc *service.PluginService }
+
+func (a integrationPluginInvokerAdapter) InvokeIntegrationPlugin(
+	ctx context.Context, pluginID, operation string, payload map[string]any,
+) (map[string]any, error) {
+	return a.svc.Invoke(ctx, pluginID, operation, payload)
+}
+
+// webhookEventPublisherAdapter wraps eventbus.Bus.Publish to accept the
+// raw eventType+payload shape integration plugins return. The Source is
+// fixed to integration:<plugin-id>; Target defaults to system:broadcast
+// because integration webhooks aren't project-scoped at ingestion time
+// (downstream observers attach project scope from the payload).
+type webhookEventPublisherAdapter struct{ bus *eventbus.Bus }
+
+func (a webhookEventPublisherAdapter) PublishRaw(ctx context.Context, eventType string, payload map[string]any) error {
+	return eventbus.PublishLegacy(ctx, a.bus, eventType, "", payload)
+}
+
 type bridgeIntentAdapter struct {
 	client *bridge.Client
 }
@@ -1230,6 +1253,16 @@ func RegisterRoutes(
 		webhookAuditAdapter{svc: auditSvc},
 	)
 	v1.POST("/vcs/github/webhook", vcsWebhookHandler.HandleGitHubWebhook, appMiddleware.CaptureRawBody())
+
+	// Integration webhook ingestion. Public endpoint (no JWT) — the routed
+	// integration plugin is responsible for any signature/HMAC validation.
+	// The plugin returns an event envelope ({event_type, payload}); the
+	// handler publishes that to the EventBus for downstream observers.
+	integrationWebhookH := handler.NewIntegrationWebhookHandler(
+		integrationPluginInvokerAdapter{svc: pluginSvc},
+		webhookEventPublisherAdapter{bus: bus},
+	)
+	v1.POST("/integrations/:id/webhook", integrationWebhookH.Handle)
 
 	// VCS outbound dispatcher (spec2 §5 S2-B): subscribes to EventReviewCompleted
 	// and posts summary + inline comments to the VCS provider.
