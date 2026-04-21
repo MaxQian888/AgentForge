@@ -88,7 +88,7 @@ func TestMergeConfigOverlaysOverrides(t *testing.T) {
 }
 
 func TestMainDebugHealthOutputsStructuredResult(t *testing.T) {
-	manifestPath := filepath.Join("..", "..", "..", "plugins", "integrations", "feishu-adapter", "manifest.yaml")
+	manifestPath := filepath.Join("..", "..", "..", "plugins", "integrations", "sample-integration-plugin", "manifest.yaml")
 	if _, err := os.Stat(manifestPath); err != nil {
 		t.Fatalf("manifest not available: %v", err)
 	}
