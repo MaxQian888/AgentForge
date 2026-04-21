@@ -18,8 +18,8 @@ func TestDescribeExposesIntegrationMetadata(t *testing.T) {
 	if descriptor.Kind != "IntegrationPlugin" {
 		t.Fatalf("descriptor.Kind = %q, want %q", descriptor.Kind, "IntegrationPlugin")
 	}
-	if descriptor.ID != "feishu-adapter" {
-		t.Fatalf("descriptor.ID = %q, want %q", descriptor.ID, "feishu-adapter")
+	if descriptor.ID != "sample-integration-plugin" {
+		t.Fatalf("descriptor.ID = %q, want %q", descriptor.ID, "sample-integration-plugin")
 	}
 	if descriptor.Runtime != "wasm" {
 		t.Fatalf("descriptor.Runtime = %q, want %q", descriptor.Runtime, "wasm")
@@ -52,23 +52,16 @@ func TestInitHealthAndInvokeCoverHappyPathAndUnsupportedOperation(t *testing.T) 
 	}
 
 	result, err := plugin.Invoke(ctx, pluginsdk.Invocation{
-		Operation: "send_message",
+		Operation: "echo",
 		Payload: map[string]any{
-			"chat_id": "chat-1",
-			"content": "hello",
+			"key": "value",
 		},
 	})
 	if err != nil {
-		t.Fatalf("Invoke(send_message) error = %v", err)
+		t.Fatalf("Invoke(echo) error = %v", err)
 	}
-	if result.Data["status"] != "sent" {
-		t.Fatalf("Invoke(send_message).Data[status] = %v, want sent", result.Data["status"])
-	}
-	if result.Data["chat_id"] != "chat-1" {
-		t.Fatalf("Invoke(send_message).Data[chat_id] = %v, want chat-1", result.Data["chat_id"])
-	}
-	if result.Data["content"] != "hello" {
-		t.Fatalf("Invoke(send_message).Data[content] = %v, want hello", result.Data["content"])
+	if result.Data["key"] != "value" {
+		t.Fatalf("Invoke(echo).Data[key] = %v, want value", result.Data["key"])
 	}
 
 	_, err = plugin.Invoke(ctx, pluginsdk.Invocation{Operation: "unsupported"})

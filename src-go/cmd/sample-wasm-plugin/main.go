@@ -13,15 +13,15 @@ func (samplePlugin) Describe(ctx *pluginsdk.Context) (*pluginsdk.Descriptor, err
 	return &pluginsdk.Descriptor{
 		APIVersion:  "agentforge/v1",
 		Kind:        "IntegrationPlugin",
-		ID:          "feishu-adapter",
-		Name:        "Feishu Adapter",
+		ID:          "sample-integration-plugin",
+		Name:        "Sample Integration Plugin",
 		Version:     "0.1.0",
 		Runtime:     "wasm",
 		ABIVersion:  pluginsdk.ABIVersion,
-		Description: "Built-in Go integration plugin example for IM event ingestion and outbound delivery.",
+		Description: "Built-in Go integration plugin example demonstrating the AgentForge plugin ABI.",
 		Capabilities: []pluginsdk.Capability{
 			{Name: "health", Description: "Report plugin health and current mode"},
-			{Name: "send_message", Description: "Send a message payload to a chat target"},
+			{Name: "echo", Description: "Return the request payload verbatim"},
 		},
 	}, nil
 }
@@ -40,13 +40,8 @@ func (samplePlugin) Health(ctx *pluginsdk.Context) (*pluginsdk.Result, error) {
 
 func (samplePlugin) Invoke(ctx *pluginsdk.Context, invocation pluginsdk.Invocation) (*pluginsdk.Result, error) {
 	switch invocation.Operation {
-	case "send_message":
-		return pluginsdk.Success(map[string]any{
-			"status":  "sent",
-			"chat_id": invocation.Payload["chat_id"],
-			"content": invocation.Payload["content"],
-			"mode":    ctx.ConfigString("mode"),
-		}), nil
+	case "echo":
+		return pluginsdk.Success(invocation.Payload), nil
 	default:
 		return nil, pluginsdk.NewRuntimeError("unsupported_operation", fmt.Sprintf("unsupported operation %s", invocation.Operation)).
 			WithDetail("operation", invocation.Operation)
