@@ -1,3 +1,6 @@
+> **Status: Superseded by [`docs/superpowers/specs/2026-04-21-bridge-acp-client-integration.md`](../../../superpowers/specs/2026-04-21-bridge-acp-client-integration.md).**
+> Kept for historical reference. Do not edit; do not cite as source of truth.
+
 # Bridge ACP Client Integration — Spec (draft-2)
 
 - **ID**: `2026-04-16-bridge-acp-client-integration`

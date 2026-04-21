@@ -1,3 +1,5 @@
+> **Status: Superseded.** This plan was written against draft-2 of the ACP integration spec, which has been superseded by [`docs/superpowers/specs/2026-04-21-bridge-acp-client-integration.md`](../../../superpowers/specs/2026-04-21-bridge-acp-client-integration.md). A new implementation plan will be generated from the 2026-04-21 spec via superpowers:writing-plans. Do not execute this plan.
+
 # Bridge ACP Client Integration Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

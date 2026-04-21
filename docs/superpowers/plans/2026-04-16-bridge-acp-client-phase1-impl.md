@@ -1,3 +1,5 @@
+> **Status: Superseded.** This plan was written against draft-1 of the ACP integration spec. The authoritative spec is now [`docs/superpowers/specs/2026-04-21-bridge-acp-client-integration.md`](../../../superpowers/specs/2026-04-21-bridge-acp-client-integration.md). A new implementation plan will be generated from it via superpowers:writing-plans. Do not execute this plan.
+
 # Bridge ACP Client — Phase 1 Implementation Plan
 
 - **ID**: `2026-04-16-bridge-acp-client-phase1-impl`
