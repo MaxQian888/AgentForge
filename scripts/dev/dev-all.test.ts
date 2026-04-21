@@ -916,4 +916,28 @@ describe("dev-all workflow contract", () => {
       }
     }
   });
+
+  test("shouldRequirePreparedSidecars only fires on Windows without explicit opt-out", () => {
+    const { shouldRequirePreparedSidecars } = require("./dev-all.js");
+
+    expect(shouldRequirePreparedSidecars({ platform: "win32", allowSourceServices: undefined })).toBe(true);
+    expect(shouldRequirePreparedSidecars({ platform: "win32", allowSourceServices: "1" })).toBe(false);
+    expect(shouldRequirePreparedSidecars({ platform: "linux", allowSourceServices: undefined })).toBe(false);
+    expect(shouldRequirePreparedSidecars({ platform: "darwin", allowSourceServices: undefined })).toBe(false);
+  });
+
+  test("getMissingPreparedSidecars reports application services whose binaries are absent", () => {
+    const { createDevBackendServiceDefinitions, getMissingPreparedSidecars } = require("./dev-all.js");
+
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dev-all-prep-"));
+    try {
+      const services = createDevBackendServiceDefinitions({ repoRoot });
+      const missing = getMissingPreparedSidecars(services, { repoRoot });
+      // Pristine temp dir has no prepared sidecar binaries at all.
+      expect(missing.length).toBeGreaterThan(0);
+      expect(missing).toEqual(expect.arrayContaining(["go-orchestrator"]));
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
 });

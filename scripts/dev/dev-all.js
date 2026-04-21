@@ -5,7 +5,7 @@
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const { setTimeout: delay } = require("node:timers/promises");
 const { getRepoRoot } = require("../plugin/plugin-dev-targets.js");
 const {
@@ -135,6 +135,54 @@ function getPreparedSidecarBinaryPath({ repoRoot = getRepoRoot(), serviceName } 
   );
 
   return fs.existsSync(candidate) ? candidate : null;
+}
+
+function shouldRequirePreparedSidecars({
+  platform = process.platform,
+  allowSourceServices = process.env.AGENTFORGE_DEV_ALLOW_SOURCE_SERVICES,
+} = {}) {
+  // Source-mode `go run` startup is unreliable on Windows (antivirus, long
+  // paths, pnpm filter fan-out). Require pre-built sidecars unless the
+  // operator explicitly opts out.
+  return platform === "win32" && allowSourceServices !== "1";
+}
+
+function getMissingPreparedSidecars(serviceDefinitions, { repoRoot = getRepoRoot() } = {}) {
+  return serviceDefinitions
+    .filter((service) => service.kind === "application")
+    .filter((service) => getPreparedSidecarBinaryName(service.name))
+    .filter((service) => !getPreparedSidecarBinaryPath({ repoRoot, serviceName: service.name }))
+    .map((service) => service.name);
+}
+
+function runDesktopDevPrepare({ repoRoot = getRepoRoot(), progress = () => {} } = {}) {
+  const useCmd = process.platform === "win32";
+  const command = useCmd ? "cmd.exe" : "pnpm";
+  const args = useCmd
+    ? ["/d", "/s", "/c", "pnpm desktop:dev:prepare"]
+    : ["desktop:dev:prepare"];
+
+  progress(`preparing sidecars via \`${useCmd ? "cmd.exe /d /s /c " : ""}pnpm desktop:dev:prepare\``);
+  progress("building Go orchestrator, TS bridge, and IM bridge once before startup (this can take ~1 min)");
+
+  const result = spawnSync(command, args, {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      detail:
+        result.error?.message ||
+        `pnpm desktop:dev:prepare failed with exit code ${result.status ?? "unknown"}`,
+    };
+  }
+
+  progress("prepared sidecar build completed");
+  return { ok: true };
 }
 
 function applyPreparedSidecarOverrides(service, { repoRoot = getRepoRoot(), preferPreparedSidecars = false } = {}) {
@@ -1531,6 +1579,52 @@ function parseWorkflowCommand(argv = []) {
   };
 }
 
+async function ensureSidecarsPreparedIfRequired({
+  workflowProfile,
+  repoRoot = getRepoRoot(),
+  stdout = (message) => console.log(message),
+} = {}) {
+  if (!shouldRequirePreparedSidecars()) {
+    return { ok: true, required: false, preferPreparedSidecars: false };
+  }
+
+  const serviceDefinitions = createServiceDefinitionsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+    preferPreparedSidecars: true,
+  });
+  const missing = getMissingPreparedSidecars(serviceDefinitions, { repoRoot });
+
+  if (missing.length === 0) {
+    stdout(`${colorDim("[dev-all]")} prepared sidecars present for: ${missing.length === 0 ? "all registered services" : missing.join(", ")}`);
+    return { ok: true, required: true, preferPreparedSidecars: true };
+  }
+
+  stdout(
+    `${colorYellow("WARN")} missing prepared sidecar binaries on Windows: ${missing.join(", ")}`,
+  );
+  stdout(
+    `      set AGENTFORGE_DEV_ALLOW_SOURCE_SERVICES=1 to opt out and run via \`go run\` / \`tsx\`.`,
+  );
+
+  const prepare = runDesktopDevPrepare({
+    repoRoot,
+    progress: (message) => stdout(`${colorDim("[dev-all]")} ${message}`),
+  });
+
+  if (!prepare.ok) {
+    return {
+      ok: false,
+      reason: "sidecar_prepare_failed",
+      detail: prepare.detail,
+      required: true,
+      preferPreparedSidecars: false,
+    };
+  }
+
+  return { ok: true, required: true, preferPreparedSidecars: true };
+}
+
 async function main(argv = process.argv.slice(2)) {
   const { workflowProfile, command, extra } = parseWorkflowCommand(argv);
 
@@ -1543,18 +1637,30 @@ async function main(argv = process.argv.slice(2)) {
       );
       console.warn(`      Falling back to \`go run\` (no hot-reload).`);
     }
+    const prep = await ensureSidecarsPreparedIfRequired({ workflowProfile });
+    if (!prep.ok) {
+      console.error(`${colorRed("FAIL")} ${prep.detail}`);
+      return 1;
+    }
     return printStartResult(
       await runWorkflowStart({
         profile: workflowProfile.profile,
+        preferPreparedSidecars: prep.preferPreparedSidecars,
       }),
       workflowProfile,
     );
   }
 
   if (command === "start") {
+    const prep = await ensureSidecarsPreparedIfRequired({ workflowProfile });
+    if (!prep.ok) {
+      console.error(`${colorRed("FAIL")} ${prep.detail}`);
+      return 1;
+    }
     return printStartResult(
       await runWorkflowStart({
         profile: workflowProfile.profile,
+        preferPreparedSidecars: prep.preferPreparedSidecars,
       }),
       workflowProfile,
     );
@@ -1626,9 +1732,12 @@ if (require.main === module) {
 module.exports = {
   createDevBackendServiceDefinitions,
   createDevAllServiceDefinitions,
+  ensureSidecarsPreparedIfRequired,
   getDevBackendPaths,
   getDevAllPaths,
+  getMissingPreparedSidecars,
   main,
+  runDesktopDevPrepare,
   runDevBackendLogs,
   runDevBackendStart,
   runDevBackendVerify,
@@ -1639,4 +1748,5 @@ module.exports = {
   runDevAllStatus,
   runDevAllStop,
   runWorkflowRestart,
+  shouldRequirePreparedSidecars,
 };
