@@ -776,6 +776,13 @@ func main() {
 					for _, b := range bindings {
 						b.Engine.SetTenantResolver(tResult.Resolver, tResult.Default)
 					}
+					// Redistribute refreshed tenant IDs to each activeProvider so the next
+					// reregister() call reports the current tenant set (fixes latent drift
+					// between tenants.yaml and orchestrator inventory after SIGHUP).
+					refreshedTenantIDs := tResult.Registry.IDs()
+					for _, p := range activeProviders {
+						p.Tenants = append([]string(nil), refreshedTenantIDs...)
+					}
 					log.WithField("component", "main").Info("Tenant registry reloaded on SIGHUP")
 					reregister()
 				} else if terr != nil {

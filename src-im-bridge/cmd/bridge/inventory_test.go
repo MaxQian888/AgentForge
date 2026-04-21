@@ -112,6 +112,37 @@ func TestBuildRegistrationInventory_WireShape(t *testing.T) {
 	}
 }
 
+// TestBuildRegistrationInventory_ReflectsTenantUpdates verifies that
+// buildRegistrationInventory reads p.Tenants as it stands at call time, so
+// the SIGHUP redistribution wiring (which writes refreshed IDs back to each
+// activeProvider.Tenants before calling reregister) is correctly reflected in
+// the registration payload sent to the orchestrator.
+func TestBuildRegistrationInventory_ReflectsTenantUpdates(t *testing.T) {
+	provider := &activeProvider{
+		Descriptor: providerDescriptor{
+			ID:       "feishu",
+			Metadata: core.PlatformMetadata{Source: "feishu"},
+		},
+		Platform:      &fakePlatform{name: "feishu"},
+		TransportMode: core.TransportModeLive,
+		Tenants:       []string{"acme"},
+	}
+
+	inv1 := buildRegistrationInventory([]*activeProvider{provider}, nil)
+	if len(inv1.Providers[0].Tenants) != 1 || inv1.Providers[0].Tenants[0] != "acme" {
+		t.Fatalf("initial Tenants = %v, want [acme]", inv1.Providers[0].Tenants)
+	}
+
+	// Simulate SIGHUP tenant refresh: redistribute the new tenant set to the
+	// activeProvider (mirrors the fix in the SIGHUP handler).
+	provider.Tenants = []string{"acme", "beta"}
+
+	inv2 := buildRegistrationInventory([]*activeProvider{provider}, nil)
+	if len(inv2.Providers[0].Tenants) != 2 || inv2.Providers[0].Tenants[1] != "beta" {
+		t.Errorf("post-refresh Tenants = %v, want [acme beta]", inv2.Providers[0].Tenants)
+	}
+}
+
 // fakePlatform is a minimal core.Platform test double. It provides just
 // the methods buildRegistrationInventory exercises; unused methods return
 // zero values.
