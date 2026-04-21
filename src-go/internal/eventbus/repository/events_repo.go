@@ -77,3 +77,36 @@ func (r *EventsRepository) FindByID(ctx context.Context, id string) (*eb.Event, 
 	}
 	return e, nil
 }
+
+// ListByTraceID returns all events whose metadata JSONB has "trace_id" equal to traceID.
+// Ordered by occurred_at ASC. Returns at most limit rows (defaults to 10000 when <= 0).
+func (r *EventsRepository) ListByTraceID(ctx context.Context, traceID string, limit int) ([]*eb.Event, error) {
+	if limit <= 0 {
+		limit = 10000
+	}
+	var rows []eventRow
+	if err := r.db.WithContext(ctx).
+		Where("metadata->>'trace_id' = ?", traceID).
+		Order("occurred_at ASC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list events by trace: %w", err)
+	}
+	out := make([]*eb.Event, len(rows))
+	for i := range rows {
+		e := &eb.Event{
+			ID:         rows[i].ID,
+			Type:       rows[i].Type,
+			Source:     rows[i].Source,
+			Target:     rows[i].Target,
+			Visibility: eb.Visibility(rows[i].Visibility),
+			Payload:    json.RawMessage(rows[i].Payload),
+			Timestamp:  rows[i].OccurredAt,
+		}
+		if len(rows[i].Metadata) > 0 {
+			_ = json.Unmarshal(rows[i].Metadata, &e.Metadata)
+		}
+		out[i] = e
+	}
+	return out, nil
+}

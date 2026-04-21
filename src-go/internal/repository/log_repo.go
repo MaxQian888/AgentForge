@@ -29,6 +29,30 @@ func (r *LogRepository) Create(ctx context.Context, log *model.Log) error {
 	return nil
 }
 
+// ListByTraceID returns all logs whose detail JSONB has "trace_id" equal to traceID.
+// Ordered by created_at ASC. Returns at most limit rows (defaults to 10000 when <= 0).
+func (r *LogRepository) ListByTraceID(ctx context.Context, traceID string, limit int) ([]*model.Log, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	if limit <= 0 {
+		limit = 10000
+	}
+	var records []logRecord
+	if err := r.db.WithContext(ctx).
+		Where("detail->>'trace_id' = ?", traceID).
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list logs by trace: %w", err)
+	}
+	out := make([]*model.Log, len(records))
+	for i := range records {
+		out[i] = records[i].toModel()
+	}
+	return out, nil
+}
+
 // List returns a paginated list of log entries matching the given filters.
 func (r *LogRepository) List(ctx context.Context, req model.LogListRequest) ([]model.Log, int64, error) {
 	if r.db == nil {
