@@ -192,6 +192,12 @@ func (r *Registry) ReloadAll() error {
 // StartWatcher spawns a polling goroutine that refreshes the registry
 // every `interval`. fsnotify is deferred; polling is correct and portable.
 func (r *Registry) StartWatcher(ctx context.Context, interval time.Duration) {
+	r.StartWatcherWithCallback(ctx, interval, nil)
+}
+
+// StartWatcherWithCallback is identical to StartWatcher but invokes fn
+// after every successful ReloadAll. fn may be nil.
+func (r *Registry) StartWatcherWithCallback(ctx context.Context, interval time.Duration, fn func()) {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
@@ -203,7 +209,9 @@ func (r *Registry) StartWatcher(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				_ = r.ReloadAll()
+				if err := r.ReloadAll(); err == nil && fn != nil {
+					fn()
+				}
 			}
 		}
 	}()
@@ -219,6 +227,31 @@ func (r *Registry) Plugins() []*Loaded {
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Manifest.ID < out[j].Manifest.ID })
+	return out
+}
+
+// Snapshot returns a stable-ordered inventory of every loaded manifest.
+// Intended for control-plane reporting (bridge inventory snapshot). The
+// returned slice and its string slices are deep copies — callers may
+// mutate freely without affecting the registry.
+func (r *Registry) Snapshot() []IMBridgeCommandPlugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]IMBridgeCommandPlugin, 0, len(r.plugins))
+	for _, p := range r.plugins {
+		commands := make([]string, 0, len(p.Manifest.Commands))
+		for _, c := range p.Manifest.Commands {
+			commands = append(commands, c.Slash)
+		}
+		out = append(out, IMBridgeCommandPlugin{
+			ID:         p.Manifest.ID,
+			Version:    p.Manifest.Version,
+			Commands:   commands,
+			Tenants:    append([]string(nil), p.Manifest.Tenants...),
+			SourcePath: p.Path,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 

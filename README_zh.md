@@ -283,10 +283,10 @@ pnpm dev
 - `pnpm test:tauri`
 - `pnpm test:tauri:coverage`
 - `pnpm create-plugin -- --type tool --name echo-tool`
-- `pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
-- `pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health`
+- `pnpm plugin:build -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml`
+- `pnpm plugin:debug -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml --operation health`
 - `pnpm plugin:dev`
-- `pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
+- `pnpm plugin:verify -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml`
 
 注意：当前 `next.config.ts` 已启用 `output: "export"`。`pnpm build` 会生成可部署的静态产物 `out/`，而 `pnpm start` 只是保留的 Next 服务器脚本，不是这个 checkout 的主生产路径。
 
@@ -404,9 +404,9 @@ pnpm create-plugin -- --type workflow --name release-train
 针对当前维护中的 Go WASM 样例插件，仓库也保留一条受支持的根级循环：
 
 ```bash
-pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
-pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health
-pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+pnpm plugin:build -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml
+pnpm plugin:debug -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml --operation health
+pnpm plugin:verify -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml
 ```
 
 说明：

@@ -81,8 +81,8 @@ const storeState = {
       apiVersion: "plugin.agentforge.dev/v1",
       kind: "IntegrationPlugin",
       metadata: {
-        id: "feishu-adapter",
-        name: "Feishu Adapter",
+        id: "sample-integration-plugin",
+        name: "Sample Integration Plugin",
         version: "1.0.0",
         description: "Built-in Feishu adapter",
       },
@@ -94,7 +94,7 @@ const storeState = {
       permissions: {},
       source: {
         type: "builtin",
-        path: "/plugins/feishu-adapter/manifest.yaml",
+        path: "/plugins/sample-integration-plugin/manifest.yaml",
       },
       lifecycle_state: "installed",
       runtime_host: "go-orchestrator",
@@ -244,8 +244,8 @@ describe("PluginsPage", () => {
         apiVersion: "plugin.agentforge.dev/v1",
         kind: "IntegrationPlugin",
         metadata: {
-          id: "feishu-adapter",
-          name: "Feishu Adapter",
+          id: "sample-integration-plugin",
+          name: "Sample Integration Plugin",
           version: "1.0.0",
           description: "Built-in Feishu adapter",
         },
@@ -257,7 +257,7 @@ describe("PluginsPage", () => {
         permissions: {},
         source: {
           type: "builtin",
-          path: "/plugins/feishu-adapter/manifest.yaml",
+          path: "/plugins/sample-integration-plugin/manifest.yaml",
         },
         lifecycle_state: "installed",
         runtime_host: "go-orchestrator",
@@ -526,10 +526,10 @@ describe("PluginsPage", () => {
 
   it("shows built-in plugins in the built-in tab", async () => {
     storeState.viewCategory = "builtin";
-    storeState.selectedMarketplaceId = "feishu-adapter";
+    storeState.selectedMarketplaceId = "sample-integration-plugin";
     render(<PluginsPage />);
 
-    expect(screen.getByText("Feishu Adapter")).toBeInTheDocument();
+    expect(screen.getByText("Sample Integration Plugin")).toBeInTheDocument();
   });
 
   it("installs built-in availability entries through the explicit catalog flow", async () => {
@@ -538,7 +538,7 @@ describe("PluginsPage", () => {
     render(<PluginsPage />);
     await user.click(screen.getByRole("button", { name: "Install" }));
 
-    expect(installFromCatalog).toHaveBeenCalledWith("feishu-adapter");
+    expect(installFromCatalog).toHaveBeenCalledWith("sample-integration-plugin");
     expect(installLocal).not.toHaveBeenCalled();
   });
 

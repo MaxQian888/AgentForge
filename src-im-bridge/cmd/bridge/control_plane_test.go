@@ -174,6 +174,17 @@ func TestBridgeRuntimeControl_StartProcessesDeliveriesAndStopsCleanly(t *testing
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	testCfg := &config{
+		APIBase:       server.URL,
+		ProjectID:     "proj-1",
+		TransportMode: "stub",
+	}
+
+	// Registration is now a single process-level call (not part of Start).
+	if err := registerBridgeInventory(context.Background(), apiClient, "bridge-1", testCfg, []*activeProvider{provider}, nil); err != nil {
+		t.Fatalf("registerBridgeInventory error: %v", err)
+	}
+
 	if err := control.Start(ctx); err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -206,6 +217,11 @@ func TestBridgeRuntimeControl_StartProcessesDeliveriesAndStopsCleanly(t *testing
 
 	if err := control.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop error: %v", err)
+	}
+
+	// Unregistration is now a single process-level call (not part of Stop).
+	if err := apiClient.UnregisterBridge(context.Background(), "bridge-1"); err != nil {
+		t.Fatalf("UnregisterBridge error: %v", err)
 	}
 
 	seen.mu.Lock()
@@ -330,14 +346,12 @@ func TestBridgeRuntimeControl_ApplyDeliveryUsesDeferredNativeUpdateForFeishuProg
 }
 
 func TestBridgeRuntimeControl_StartIncludesWeComCallbackPathInRegistration(t *testing.T) {
-	upgrader := websocket.Upgrader{}
 	type counts struct {
 		mu         sync.Mutex
 		lastReg    client.BridgeRegistration
 		registered bool
 	}
 	var seen counts
-	ackCh := make(chan client.ControlDeliveryAck, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -353,34 +367,6 @@ func TestBridgeRuntimeControl_StartIncludesWeComCallbackPathInRegistration(t *te
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(client.BridgeInstance{BridgeID: req.BridgeID, Status: "online"})
-		case "/api/v1/im/bridge/heartbeat":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(client.BridgeHeartbeat{BridgeID: "bridge-wecom-1", Status: "online"})
-		case "/api/v1/im/bridge/unregister":
-			w.WriteHeader(http.StatusOK)
-		case "/ws/im-bridge":
-			conn, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				t.Fatalf("Upgrade error: %v", err)
-			}
-			defer conn.Close()
-			delivery := client.ControlDelivery{
-				Cursor:         1,
-				DeliveryID:     "delivery-1",
-				TargetBridgeID: "bridge-wecom-1",
-				Platform:       "wecom",
-				Kind:           "task.progress",
-				Content:        "hello",
-				TargetChatID:   "chat-1",
-				Timestamp:      "2026-03-26T00:00:00Z",
-			}
-			if err := conn.WriteJSON(delivery); err != nil {
-				t.Fatalf("WriteJSON error: %v", err)
-			}
-			var ack client.ControlDeliveryAck
-			if err := conn.ReadJSON(&ack); err == nil {
-				ackCh <- ack
-			}
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -397,24 +383,15 @@ func TestBridgeRuntimeControl_StartIncludesWeComCallbackPathInRegistration(t *te
 		Platform:      platform,
 		TransportMode: "live",
 	}
-	control := newBridgeRuntimeControl(&config{
-		APIBase:               server.URL,
-		ProjectID:             "proj-1",
-		TransportMode:         "live",
-		HeartbeatInterval:     10 * time.Millisecond,
-		ControlReconnectDelay: 10 * time.Millisecond,
-	}, "bridge-wecom-1", provider, apiClient)
+	testCfg := &config{
+		APIBase:       server.URL,
+		ProjectID:     "proj-1",
+		TransportMode: "live",
+	}
 
-	if err := control.Start(context.Background()); err != nil {
-		t.Fatalf("Start error: %v", err)
-	}
-	select {
-	case <-ackCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for ack")
-	}
-	if err := control.Stop(context.Background()); err != nil {
-		t.Fatalf("Stop error: %v", err)
+	// Registration is now a single process-level call via registerBridgeInventory.
+	if err := registerBridgeInventory(context.Background(), apiClient, "bridge-wecom-1", testCfg, []*activeProvider{provider}, nil); err != nil {
+		t.Fatalf("registerBridgeInventory error: %v", err)
 	}
 
 	seen.mu.Lock()
@@ -486,14 +463,12 @@ func TestBridgeRuntimeControl_ApplyDeliveryUsesWeComResponseURLReplyTarget(t *te
 }
 
 func TestBridgeRuntimeControl_StartIncludesQQBotCallbackPathInRegistration(t *testing.T) {
-	upgrader := websocket.Upgrader{}
 	type counts struct {
 		mu         sync.Mutex
 		lastReg    client.BridgeRegistration
 		registered bool
 	}
 	var seen counts
-	ackCh := make(chan client.ControlDeliveryAck, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -509,34 +484,6 @@ func TestBridgeRuntimeControl_StartIncludesQQBotCallbackPathInRegistration(t *te
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(client.BridgeInstance{BridgeID: req.BridgeID, Status: "online"})
-		case "/api/v1/im/bridge/heartbeat":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(client.BridgeHeartbeat{BridgeID: "bridge-qqbot-1", Status: "online"})
-		case "/api/v1/im/bridge/unregister":
-			w.WriteHeader(http.StatusOK)
-		case "/ws/im-bridge":
-			conn, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				t.Fatalf("Upgrade error: %v", err)
-			}
-			defer conn.Close()
-			delivery := client.ControlDelivery{
-				Cursor:         1,
-				DeliveryID:     "delivery-1",
-				TargetBridgeID: "bridge-qqbot-1",
-				Platform:       "qqbot",
-				Kind:           "task.progress",
-				Content:        "hello",
-				TargetChatID:   "group-openid",
-				Timestamp:      "2026-03-28T00:00:00Z",
-			}
-			if err := conn.WriteJSON(delivery); err != nil {
-				t.Fatalf("WriteJSON error: %v", err)
-			}
-			var ack client.ControlDeliveryAck
-			if err := conn.ReadJSON(&ack); err == nil {
-				ackCh <- ack
-			}
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -553,24 +500,15 @@ func TestBridgeRuntimeControl_StartIncludesQQBotCallbackPathInRegistration(t *te
 		Platform:      platform,
 		TransportMode: "live",
 	}
-	control := newBridgeRuntimeControl(&config{
-		APIBase:               server.URL,
-		ProjectID:             "proj-1",
-		TransportMode:         "live",
-		HeartbeatInterval:     10 * time.Millisecond,
-		ControlReconnectDelay: 10 * time.Millisecond,
-	}, "bridge-qqbot-1", provider, apiClient)
+	testCfg := &config{
+		APIBase:       server.URL,
+		ProjectID:     "proj-1",
+		TransportMode: "live",
+	}
 
-	if err := control.Start(context.Background()); err != nil {
-		t.Fatalf("Start error: %v", err)
-	}
-	select {
-	case <-ackCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for ack")
-	}
-	if err := control.Stop(context.Background()); err != nil {
-		t.Fatalf("Stop error: %v", err)
+	// Registration is now a single process-level call via registerBridgeInventory.
+	if err := registerBridgeInventory(context.Background(), apiClient, "bridge-qqbot-1", testCfg, []*activeProvider{provider}, nil); err != nil {
+		t.Fatalf("registerBridgeInventory error: %v", err)
 	}
 
 	seen.mu.Lock()
@@ -602,14 +540,12 @@ func TestBridgeRuntimeControl_StartIncludesQQBotCallbackPathInRegistration(t *te
 }
 
 func TestBridgeRuntimeControl_StartIncludesQQCapabilityMatrixInRegistration(t *testing.T) {
-	upgrader := websocket.Upgrader{}
 	type counts struct {
 		mu         sync.Mutex
 		lastReg    client.BridgeRegistration
 		registered bool
 	}
 	var seen counts
-	ackCh := make(chan client.ControlDeliveryAck, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -625,34 +561,6 @@ func TestBridgeRuntimeControl_StartIncludesQQCapabilityMatrixInRegistration(t *t
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(client.BridgeInstance{BridgeID: req.BridgeID, Status: "online"})
-		case "/api/v1/im/bridge/heartbeat":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(client.BridgeHeartbeat{BridgeID: "bridge-qq-1", Status: "online"})
-		case "/api/v1/im/bridge/unregister":
-			w.WriteHeader(http.StatusOK)
-		case "/ws/im-bridge":
-			conn, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				t.Fatalf("Upgrade error: %v", err)
-			}
-			defer conn.Close()
-			delivery := client.ControlDelivery{
-				Cursor:         1,
-				DeliveryID:     "delivery-1",
-				TargetBridgeID: "bridge-qq-1",
-				Platform:       "qq",
-				Kind:           "task.progress",
-				Content:        "hello",
-				TargetChatID:   "chat-1",
-				Timestamp:      "2026-03-28T00:00:00Z",
-			}
-			if err := conn.WriteJSON(delivery); err != nil {
-				t.Fatalf("WriteJSON error: %v", err)
-			}
-			var ack client.ControlDeliveryAck
-			if err := conn.ReadJSON(&ack); err == nil {
-				ackCh <- ack
-			}
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -669,24 +577,15 @@ func TestBridgeRuntimeControl_StartIncludesQQCapabilityMatrixInRegistration(t *t
 		Platform:      platform,
 		TransportMode: "live",
 	}
-	control := newBridgeRuntimeControl(&config{
-		APIBase:               server.URL,
-		ProjectID:             "proj-1",
-		TransportMode:         "live",
-		HeartbeatInterval:     10 * time.Millisecond,
-		ControlReconnectDelay: 10 * time.Millisecond,
-	}, "bridge-qq-1", provider, apiClient)
+	testCfg := &config{
+		APIBase:       server.URL,
+		ProjectID:     "proj-1",
+		TransportMode: "live",
+	}
 
-	if err := control.Start(context.Background()); err != nil {
-		t.Fatalf("Start error: %v", err)
-	}
-	select {
-	case <-ackCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for ack")
-	}
-	if err := control.Stop(context.Background()); err != nil {
-		t.Fatalf("Stop error: %v", err)
+	// Registration is now a single process-level call via registerBridgeInventory.
+	if err := registerBridgeInventory(context.Background(), apiClient, "bridge-qq-1", testCfg, []*activeProvider{provider}, nil); err != nil {
+		t.Fatalf("registerBridgeInventory error: %v", err)
 	}
 
 	seen.mu.Lock()

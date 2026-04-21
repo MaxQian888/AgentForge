@@ -180,8 +180,30 @@ func (s *IMControlPlane) RegisterBridge(_ context.Context, req *IMBridgeRegister
 		Metadata:         cloneStringMap(req.Metadata),
 		Tenants:          dedupeStrings(req.Tenants),
 		TenantManifest:   cloneTenantManifest(req.TenantManifest),
+		Providers:        cloneProviders(req.Providers),
+		CommandPlugins:   cloneCommandPlugins(req.CommandPlugins),
 		Status:           "online",
 	}
+
+	// Legacy bridge compat: an older Bridge that registers without a
+	// Providers slice gets a single-entry synthesis from its top-level
+	// fields so downstream consumers see a uniform shape.
+	if len(record.Providers) == 0 && record.Platform != "" {
+		readiness := ""
+		if record.Metadata != nil {
+			readiness = strings.TrimSpace(record.Metadata["readiness_tier"])
+		}
+		record.Providers = []model.IMBridgeProvider{{
+			ID:               record.Platform,
+			Transport:        record.Transport,
+			ReadinessTier:    readiness,
+			CapabilityMatrix: cloneAnyMap(record.CapabilityMatrix),
+			CallbackPaths:    append([]string(nil), record.CallbackPaths...),
+			Tenants:          append([]string(nil), record.Tenants...),
+			MetadataSource:   "builtin",
+		}}
+	}
+
 	s.applyHeartbeat(record)
 	s.instances[record.BridgeID] = &bridgeInstanceState{record: record}
 	log.WithFields(imBridgeFields(record)).Info("IM control plane bridge registered")
@@ -445,6 +467,17 @@ func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStat
 	if settledLatencyCount > 0 {
 		averageLatencyMs = settledLatencyTotal / settledLatencyCount
 	}
+
+	// Populate the per-bridge summary used by the frontend inventory panel.
+	bridges := make([]model.IMBridgeInstance, 0, len(s.instances))
+	for _, instance := range s.instances {
+		if instance == nil || instance.record == nil {
+			continue
+		}
+		bridges = append(bridges, *cloneBridgeInstance(instance.record))
+	}
+	sort.Slice(bridges, func(i, j int) bool { return bridges[i].BridgeID < bridges[j].BridgeID })
+
 	return &model.IMBridgeStatus{
 		Registered:        registered,
 		LastHeartbeat:     heartbeat,
@@ -455,6 +488,7 @@ func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStat
 		RecentFailures:    recentFailures,
 		RecentDowngrades:  recentDowngrades,
 		AverageLatencyMs:  averageLatencyMs,
+		Bridges:           bridges,
 	}, nil
 }
 
@@ -1120,7 +1154,45 @@ func cloneBridgeInstance(record *model.IMBridgeInstance) *model.IMBridgeInstance
 	clone.Metadata = cloneStringMap(record.Metadata)
 	clone.Tenants = append([]string(nil), record.Tenants...)
 	clone.TenantManifest = cloneTenantManifest(record.TenantManifest)
+	clone.Providers = cloneProviders(record.Providers)
+	clone.CommandPlugins = cloneCommandPlugins(record.CommandPlugins)
 	return &clone
+}
+
+func cloneProviders(in []model.IMBridgeProvider) []model.IMBridgeProvider {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]model.IMBridgeProvider, len(in))
+	for i, p := range in {
+		out[i] = model.IMBridgeProvider{
+			ID:               p.ID,
+			Transport:        p.Transport,
+			ReadinessTier:    p.ReadinessTier,
+			CapabilityMatrix: cloneAnyMap(p.CapabilityMatrix),
+			CallbackPaths:    dedupeStrings(p.CallbackPaths),
+			Tenants:          dedupeStrings(p.Tenants),
+			MetadataSource:   p.MetadataSource,
+		}
+	}
+	return out
+}
+
+func cloneCommandPlugins(in []model.IMBridgeCommandPlugin) []model.IMBridgeCommandPlugin {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]model.IMBridgeCommandPlugin, len(in))
+	for i, p := range in {
+		out[i] = model.IMBridgeCommandPlugin{
+			ID:         p.ID,
+			Version:    p.Version,
+			Commands:   append([]string(nil), p.Commands...),
+			Tenants:    append([]string(nil), p.Tenants...),
+			SourcePath: p.SourcePath,
+		}
+	}
+	return out
 }
 
 func cloneDelivery(delivery *model.IMControlDelivery) *model.IMControlDelivery {

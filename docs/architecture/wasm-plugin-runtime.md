@@ -27,7 +27,7 @@
 - 工作流样例：`src-go/cmd/standard-dev-flow`
 - 脚手架入口：`scripts/plugin/create-plugin.js`
 - built-in bundle：`plugins/builtin-bundle.yaml`
-- 内置示例 manifest：`plugins/integrations/feishu-adapter/manifest.yaml`
+- 内置示例 manifest：`plugins/integrations/sample-integration-plugin/manifest.yaml`
 - 内置工作流 manifest：`plugins/workflows/standard-dev-flow/manifest.yaml`
 - 构建脚本：`scripts/plugin/build-go-wasm-plugin.js`
 - 调试脚本：`scripts/plugin/debug-go-wasm-plugin.js`
@@ -80,13 +80,13 @@ func (samplePlugin) Describe(ctx *pluginsdk.Context) (*pluginsdk.Descriptor, err
 	return &pluginsdk.Descriptor{
 		APIVersion: "agentforge/v1",
 		Kind:       "IntegrationPlugin",
-		ID:         "feishu-adapter",
-		Name:       "Feishu Adapter",
+		ID:         "sample-integration-plugin",
+		Name:       "Sample Integration Plugin",
 		Runtime:    "wasm",
 		ABIVersion: pluginsdk.ABIVersion,
 		Capabilities: []pluginsdk.Capability{
 			{Name: "health"},
-			{Name: "send_message"},
+			{Name: "echo"},
 		},
 	}, nil
 }
@@ -137,7 +137,7 @@ func main() { pluginsdk.Autorun(runtime) }
 当前 built-in bundle 语义：
 
 - `plugins/builtin-bundle.yaml` 是官方 built-ins 的权威清单
-- 当前 bundle 至少覆盖 `feishu-adapter` 和 `standard-dev-flow` 两个 Go-hosted WASM 目标
+- 当前 bundle 至少覆盖 `sample-integration-plugin` 和 `standard-dev-flow` 两个 Go-hosted WASM 目标
 - bundle 还会同时声明 ToolPlugin / ReviewPlugin / WorkflowPlugin 的最小验证要求，避免“文档里有、仓库里没有”的漂移
 
 ## 本地构建
@@ -157,13 +157,13 @@ pnpm build:plugin:wasm
 并生成：
 
 ```text
-plugins/integrations/feishu-adapter/dist/feishu.wasm
+plugins/integrations/sample-integration-plugin/dist/sample.wasm
 ```
 
 如需走更接近作者工作流的构建路径，也可以显式传入 manifest/source/output：
 
 ```bash
-pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+pnpm plugin:build -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml
 pnpm plugin:build -- --manifest path/to/manifest.yaml --source ./cmd/sample-wasm-plugin
 pnpm plugin:build -- --manifest path/to/manifest.yaml --source ./cmd/sample-wasm-plugin --output dist/custom.wasm
 ```
@@ -182,8 +182,8 @@ pnpm plugin:build -- --manifest path/to/manifest.yaml --source ./cmd/sample-wasm
 在仓库根目录执行：
 
 ```bash
-pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health
-pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation send_message --payload "{\"chat_id\":\"chat-1\",\"content\":\"hello\"}"
+pnpm plugin:debug -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml --operation health
+pnpm plugin:debug -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml --operation echo --payload "{\"message\":\"hello\"}"
 ```
 
 调试脚本会：
@@ -217,7 +217,7 @@ pnpm plugin:dev
 
 ```bash
 pnpm exec jest --runInBand scripts/plugin/build-go-wasm-plugin.test.ts scripts/plugin/debug-go-wasm-plugin.test.ts scripts/plugin/run-plugin-dev-stack.test.ts scripts/plugin/verify-plugin-dev-workflow.test.ts scripts/plugin/verify-built-in-plugin-bundle.test.ts
-pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+pnpm plugin:verify -- --manifest plugins/integrations/sample-integration-plugin/manifest.yaml
 pnpm plugin:verify:builtins
 cd src-go
 go test ./plugin-sdk-go -count=1

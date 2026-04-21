@@ -30,7 +30,7 @@ describe("verify-built-in-plugin-bundle", () => {
         "task-control",
         "review-control",
         "workflow-control",
-        "feishu-adapter",
+        "sample-integration-plugin",
         "architecture-check",
         "performance-check",
         "standard-dev-flow",
@@ -66,7 +66,7 @@ describe("verify-built-in-plugin-bundle", () => {
     expect(summary["standard-dev-flow"]).toEqual(["build", "debug-health"]);
     expect(summary["task-delivery-flow"]).toEqual(["build", "debug-health"]);
     expect(summary["review-escalation-flow"]).toEqual(["build", "debug-health"]);
-    expect(summary["feishu-adapter"]).toEqual(["build", "debug-health"]);
+    expect(summary["sample-integration-plugin"]).toEqual(["build", "debug-health"]);
 
     const standardDevFlow = plan.find(
       (item: { pluginId: string }) => item.pluginId === "standard-dev-flow",

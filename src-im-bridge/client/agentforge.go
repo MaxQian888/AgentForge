@@ -1875,6 +1875,27 @@ type AgentLogEntry struct {
 	Content   string `json:"content"`
 }
 
+// BridgeProvider describes one IM provider active on this Bridge process.
+// Serialization is identical to the backend model.IMBridgeProvider.
+type BridgeProvider struct {
+	ID               string         `json:"id"`
+	Transport        string         `json:"transport"`
+	ReadinessTier    string         `json:"readinessTier,omitempty"`
+	CapabilityMatrix map[string]any `json:"capabilityMatrix,omitempty"`
+	CallbackPaths    []string       `json:"callbackPaths,omitempty"`
+	Tenants          []string       `json:"tenants,omitempty"`
+	MetadataSource   string         `json:"metadataSource"`
+}
+
+// BridgeCommandPlugin mirrors a Bridge-side core/plugin manifest.
+type BridgeCommandPlugin struct {
+	ID         string   `json:"id"`
+	Version    string   `json:"version"`
+	Commands   []string `json:"commands"`
+	Tenants    []string `json:"tenants,omitempty"`
+	SourcePath string   `json:"sourcePath,omitempty"`
+}
+
 type BridgeRegistration struct {
 	BridgeID         string            `json:"bridgeId"`
 	Platform         string            `json:"platform"`
@@ -1891,7 +1912,9 @@ type BridgeRegistration struct {
 	// TenantManifest enumerates every tenant declared on this bridge with
 	// its backend projectId so the control plane can index by (bridgeId,
 	// providerId, tenantId) without a separate lookup.
-	TenantManifest []TenantBinding `json:"tenantManifest,omitempty"`
+	TenantManifest []TenantBinding     `json:"tenantManifest,omitempty"`
+	Providers      []BridgeProvider      `json:"providers,omitempty"`
+	CommandPlugins []BridgeCommandPlugin `json:"commandPlugins,omitempty"`
 }
 
 // TenantBinding is the registration-time declaration of a tenant hosted
@@ -1902,13 +1925,15 @@ type TenantBinding struct {
 }
 
 type BridgeInstance struct {
-	BridgeID         string         `json:"bridgeId"`
-	Platform         string         `json:"platform"`
-	Transport        string         `json:"transport"`
-	CapabilityMatrix map[string]any `json:"capabilityMatrix,omitempty"`
-	LastSeenAt       string         `json:"lastSeenAt"`
-	ExpiresAt        string         `json:"expiresAt"`
-	Status           string         `json:"status"`
+	BridgeID         string            `json:"bridgeId"`
+	Platform         string            `json:"platform"`
+	Transport        string            `json:"transport"`
+	CapabilityMatrix map[string]any    `json:"capabilityMatrix,omitempty"`
+	LastSeenAt       string            `json:"lastSeenAt"`
+	ExpiresAt        string            `json:"expiresAt"`
+	Status           string            `json:"status"`
+	Providers      []BridgeProvider      `json:"providers,omitempty"`
+	CommandPlugins []BridgeCommandPlugin `json:"commandPlugins,omitempty"`
 }
 
 type BridgeHeartbeat struct {

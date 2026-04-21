@@ -184,32 +184,20 @@
       }
     },
     {
-      "id": "feishu-adapter",
+      "id": "sample-integration-plugin",
       "kind": "IntegrationPlugin",
-      "manifest": "integrations/feishu-adapter/manifest.yaml",
-      "docsRef": "docs/GO_WASM_PLUGIN_RUNTIME.md",
+      "manifest": "integrations/sample-integration-plugin/manifest.yaml",
+      "docsRef": "docs/guides/plugin-wasm.md",
       "verificationProfile": "go-wasm",
       "readiness": {
-        "readyMessage": "Feishu Adapter is ready for install.",
-        "blockedMessage": "Requires Feishu application credentials before live activation.",
-        "nextStep": "Set FEISHU_APP_ID and FEISHU_APP_SECRET before activation.",
-        "installable": true,
-        "configuration": [
-          {
-            "kind": "env",
-            "value": "FEISHU_APP_ID",
-            "label": "FEISHU_APP_ID"
-          },
-          {
-            "kind": "env",
-            "value": "FEISHU_APP_SECRET",
-            "label": "FEISHU_APP_SECRET"
-          }
-        ]
+        "readyMessage": "Sample Integration Plugin is ready for install.",
+        "blockedMessage": "Requires the bridge host to support the Go WASM runtime.",
+        "nextStep": "Install the built-in and confirm the WASM runtime is ready.",
+        "installable": true
       },
       "availability": {
-        "status": "requires_configuration",
-        "message": "Requires Feishu application credentials before live activation."
+        "status": "ready",
+        "message": "Bundled reference WASM integration plugin."
       }
     },
     {

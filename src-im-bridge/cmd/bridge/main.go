@@ -22,6 +22,18 @@ import (
 	"github.com/agentforge/im-bridge/core/state"
 	"github.com/agentforge/im-bridge/notify"
 	"github.com/google/uuid"
+
+	// Register all built-in IM providers. Each import's init() calls core.RegisterProvider.
+	_ "github.com/agentforge/im-bridge/platform/dingtalk"
+	_ "github.com/agentforge/im-bridge/platform/discord"
+	_ "github.com/agentforge/im-bridge/platform/email"
+	_ "github.com/agentforge/im-bridge/platform/feishu"
+	_ "github.com/agentforge/im-bridge/platform/qq"
+	_ "github.com/agentforge/im-bridge/platform/qqbot"
+	_ "github.com/agentforge/im-bridge/platform/slack"
+	_ "github.com/agentforge/im-bridge/platform/telegram"
+	_ "github.com/agentforge/im-bridge/platform/wechat"
+	_ "github.com/agentforge/im-bridge/platform/wecom"
 )
 
 // reactionSinkAdapter bridges notify.ReactionSink to the AgentForge backend
@@ -616,24 +628,56 @@ func main() {
 		staging = s
 	}
 
+	// bridgeCtx is the process-level context that backs registration and plugin
+	// watcher lifetime. It is cancelled on shutdown so all long-lived goroutines
+	// tied to it drain cleanly.
+	bridgeCtx, bridgeCancel := context.WithCancel(context.Background())
+	defer bridgeCancel()
+
+	// reregister re-sends the full bridge inventory to the orchestrator. It is
+	// idempotent (the orchestrator treats it as an upsert) and is invoked on
+	// SIGHUP tenant reload, plugin-registry reload, and successful reconcile so
+	// the orchestrator's capability matrix stays current. Failures are Warn only
+	// — a mid-run re-registration failure must not kill the process.
+	//
+	// pluginRegistry is declared here (before reregister) so the closure
+	// captures the variable by reference; it will be non-nil once the plugin
+	// block below runs.
+	var pluginRegistry *plugin.Registry
+	activeProviders := extractActiveProviders(bindings)
+	reregister := func() {
+		if err := registerBridgeInventory(bridgeCtx, apiClient, bridgeID, cfg, activeProviders, pluginRegistry); err != nil {
+			log.WithField("component", "main").WithError(err).Warn("re-registration failed")
+		}
+	}
+
 	// Command plugin registry: when IM_BRIDGE_PLUGIN_DIR is set, load
 	// plugin.yaml manifests from that dir and install the registry's
 	// dispatch as a fallback for unknown commands. Missing dir disables
 	// the feature — built-in commands still work as before.
-	var pluginRegistry *plugin.Registry
 	if cfg.PluginDir != "" {
 		pluginRegistry = plugin.NewRegistry(cfg.PluginDir)
 		if err := pluginRegistry.ReloadAll(); err != nil {
 			log.WithField("component", "main").WithError(err).Warn("plugin reload failed; continuing without plugins")
 		}
-		pluginCtx, pluginCancel := context.WithCancel(context.Background())
+		pluginCtx, pluginCancel := context.WithCancel(bridgeCtx)
 		defer pluginCancel()
-		pluginRegistry.StartWatcher(pluginCtx, 30*time.Second)
+		// Re-register inventory after every successful plugin reload so the
+		// orchestrator's CommandPlugins list stays up to date.
+		pluginRegistry.StartWatcherWithCallback(pluginCtx, 30*time.Second, reregister)
 		log.WithFields(log.Fields{
 			"component":    "main",
 			"plugin_count": len(pluginRegistry.Plugins()),
 			"plugin_dir":   cfg.PluginDir,
 		}).Info("Plugin registry loaded")
+	}
+
+	// Register the Bridge process with the orchestrator once, carrying the
+	// full multi-provider + command-plugin inventory. Must happen before the
+	// per-provider heartbeat / WS goroutines start so the control plane has
+	// the up-to-date capability matrix for delivery routing.
+	if err := registerBridgeInventory(bridgeCtx, apiClient, bridgeID, cfg, activeProviders, pluginRegistry); err != nil {
+		log.WithField("component", "main").WithError(err).Fatal("Bridge registration failed")
 	}
 
 	// Wire each provider binding. Each gets its own engine / notify receiver /
@@ -724,24 +768,37 @@ func main() {
 				}
 			}
 
-			// Reload tenants if path is set.
+			// Reload tenants if path is set. Re-register inventory on success so
+			// the orchestrator sees the refreshed Tenants-per-provider map.
 			if newCfg.TenantsConfigPath != "" {
 				if tResult, terr := core.LoadTenantsConfig(newCfg.TenantsConfigPath); terr == nil && tResult.Registry != nil {
 					clientFactory.SetTenantRegistry(tResult.Registry)
 					for _, b := range bindings {
 						b.Engine.SetTenantResolver(tResult.Resolver, tResult.Default)
 					}
+					// Redistribute refreshed tenant IDs to each activeProvider so the next
+					// reregister() call reports the current tenant set (fixes latent drift
+					// between tenants.yaml and orchestrator inventory after SIGHUP).
+					refreshedTenantIDs := tResult.Registry.IDs()
+					for _, p := range activeProviders {
+						p.Tenants = append([]string(nil), refreshedTenantIDs...)
+					}
 					log.WithField("component", "main").Info("Tenant registry reloaded on SIGHUP")
+					reregister()
 				} else if terr != nil {
 					log.WithField("component", "main").WithError(terr).Warn("Tenant reload failed; keeping previous registry")
 				}
 			}
 
 			creds := collectProviderCredentials(newCfg)
+			var anyApplied bool
 			for _, b := range bindings {
 				platform := b.Provider.Platform
 				if reloader, ok := platform.(core.HotReloader); ok {
 					result := reloader.Reconcile(context.Background(), core.ReconcileConfig{Credentials: creds})
+					if len(result.Applied) > 0 {
+						anyApplied = true
+					}
 					fields := log.Fields{
 						"component": "main",
 						"provider":  b.Provider.Descriptor.ID,
@@ -764,6 +821,12 @@ func main() {
 						"provider":  b.Provider.Descriptor.ID,
 					}).Warn("SIGHUP ignored: manual_restart_required")
 				}
+			}
+			// Re-register once after the reconcile loop if any provider applied
+			// changes — provider capabilities may have shifted. If tenants also
+			// reloaded above, this call is harmlessly redundant (idempotent upsert).
+			if anyApplied {
+				reregister()
 			}
 		}
 	}()
@@ -800,6 +863,8 @@ func main() {
 	case <-time.After(10 * time.Second):
 		log.WithField("component", "main").Warn("Shutdown deadline exceeded; some providers still draining")
 	}
+
+	_ = apiClient.UnregisterBridge(context.Background(), bridgeID)
 
 	if stateStore != nil {
 		_ = stateStore.Close()
@@ -891,6 +956,16 @@ func buildTenantManifest(res *core.TenantLoadResult) []client.TenantBinding {
 	out := make([]client.TenantBinding, 0, len(all))
 	for _, t := range all {
 		out = append(out, client.TenantBinding{ID: t.ID, ProjectID: t.ProjectID})
+	}
+	return out
+}
+
+// extractActiveProviders returns the activeProvider for each binding.
+// Used to pass the full provider list to registerBridgeInventory.
+func extractActiveProviders(bindings []*providerBinding) []*activeProvider {
+	out := make([]*activeProvider, 0, len(bindings))
+	for _, b := range bindings {
+		out = append(out, b.Provider)
 	}
 	return out
 }

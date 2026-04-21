@@ -10,15 +10,15 @@ jest.mock("./plugin-dev-targets.js", () => ({
   getRepoRoot: () => process.cwd(),
   resolveBuildTarget: ({ manifestPath }: { manifestPath: string }) => ({
     manifestPath,
-    pluginId: "feishu-adapter",
-    modulePath: `${process.cwd()}\\plugins\\integrations\\feishu-adapter\\dist\\feishu.wasm`,
+    pluginId: "sample-integration-plugin",
+    modulePath: `${process.cwd()}\\plugins\\integrations\\sample-integration-plugin\\dist\\sample-integration.wasm`,
     sourcePath: "./cmd/sample-wasm-plugin",
   }),
 }));
 
 describe("debug-go-wasm-plugin runtime envelope", () => {
   const manifestPath =
-    "D:\\Project\\AgentForge\\plugins\\integrations\\feishu-adapter\\manifest.yaml";
+    "D:\\Project\\AgentForge\\plugins\\integrations\\sample-integration-plugin\\manifest.yaml";
 
   beforeEach(() => {
     jest.resetModules();

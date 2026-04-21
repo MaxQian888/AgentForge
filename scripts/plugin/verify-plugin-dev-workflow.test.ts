@@ -12,7 +12,7 @@ describe("verify-plugin-dev-workflow stage plan", () => {
 
     expect(
       createVerificationStages({
-        manifestPath: "plugins/integrations/feishu-adapter/manifest.yaml",
+        manifestPath: "plugins/integrations/sample-integration-plugin/manifest.yaml",
       }).map((stage: { name: string }) => stage.name),
     ).toEqual([
       "build",
@@ -21,7 +21,7 @@ describe("verify-plugin-dev-workflow stage plan", () => {
 
     expect(
       createVerificationStages({
-        manifestPath: "plugins/integrations/feishu-adapter/manifest.yaml",
+        manifestPath: "plugins/integrations/sample-integration-plugin/manifest.yaml",
       }).map((stage: { script: string }) => stage.script),
     ).toEqual([
       "scripts/plugin/build-go-wasm-plugin.js",

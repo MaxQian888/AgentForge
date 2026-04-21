@@ -67,53 +67,6 @@ func (c *bridgeRuntimeControl) Start(ctx context.Context) error {
 	if c == nil || c.client == nil || c.provider == nil || c.provider.Platform == nil {
 		return nil
 	}
-	metadata := c.provider.Metadata()
-
-	c.tenantsMu.RLock()
-	tenantIDs := append([]string(nil), c.tenantIDs...)
-	tenantManifest := append([]client.TenantBinding(nil), c.tenantManifest...)
-	c.tenantsMu.RUnlock()
-
-	registration := client.BridgeRegistration{
-		BridgeID:       c.bridgeID,
-		Platform:       metadata.Source,
-		Transport:      c.provider.TransportMode,
-		ProjectIDs:     []string{strings.TrimSpace(c.cfg.ProjectID)},
-		Tenants:        tenantIDs,
-		TenantManifest: tenantManifest,
-		Capabilities: map[string]bool{
-			"supports_deferred_reply":  metadata.Capabilities.SupportsDeferredReply,
-			"supports_rich_messages":   metadata.Capabilities.SupportsRichMessages,
-			"requires_public_callback": metadata.Capabilities.RequiresPublicCallback,
-			"supports_mentions":        metadata.Capabilities.SupportsMentions,
-			"supports_slash_commands":  metadata.Capabilities.SupportsSlashCommands,
-		},
-		CapabilityMatrix: metadata.Capabilities.Matrix(),
-		CallbackPaths:    []string{"/im/notify", "/im/send"},
-		Metadata: map[string]string{
-			"platform_name":  c.provider.Platform.Name(),
-			"provider_id":    c.provider.Descriptor.ID,
-			"readiness_tier": string(metadata.Capabilities.ReadinessTier),
-		},
-	}
-	if preferredMode := string(metadata.Capabilities.PreferredAsyncUpdateMode); preferredMode != "" {
-		registration.Metadata["preferred_async_update_mode"] = preferredMode
-	}
-	if fallbackMode := string(metadata.Capabilities.FallbackAsyncUpdateMode); fallbackMode != "" {
-		registration.Metadata["fallback_async_update_mode"] = fallbackMode
-	}
-	if provider, ok := c.provider.Platform.(callbackPathProvider); ok {
-		for _, path := range provider.CallbackPaths() {
-			trimmed := strings.TrimSpace(path)
-			if trimmed == "" {
-				continue
-			}
-			registration.CallbackPaths = append(registration.CallbackPaths, trimmed)
-		}
-	}
-	if _, err := c.client.RegisterBridge(ctx, registration); err != nil {
-		return fmt.Errorf("register bridge runtime: %w", err)
-	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
@@ -138,9 +91,6 @@ func (c *bridgeRuntimeControl) Stop(ctx context.Context) error {
 		c.cancel()
 	}
 	c.wg.Wait()
-	if c.client != nil {
-		return c.client.UnregisterBridge(ctx, c.bridgeID)
-	}
 	return nil
 }
 
@@ -351,28 +301,9 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (c *bridgeRuntimeControl) runtimeMetadata() map[string]string {
-	if c == nil || c.provider == nil {
-		return nil
-	}
-	metadata := map[string]string{
-		"platform_name":  c.provider.Platform.Name(),
-		"provider_id":    c.provider.Descriptor.ID,
-		"transport_mode": c.provider.TransportMode,
-	}
-	if capability := string(c.provider.Metadata().Capabilities.ActionCallbackMode); capability != "" {
-		metadata["action_callback_mode"] = capability
-	}
-	if surface := string(c.provider.Metadata().Capabilities.StructuredSurface); surface != "" {
-		metadata["structured_surface"] = surface
-	}
-	if readinessTier := string(c.provider.Metadata().Capabilities.ReadinessTier); readinessTier != "" {
-		metadata["readiness_tier"] = readinessTier
-	}
-	if preferredMode := string(c.provider.Metadata().Capabilities.PreferredAsyncUpdateMode); preferredMode != "" {
-		metadata["preferred_async_update_mode"] = preferredMode
-	}
-	if fallbackMode := string(c.provider.Metadata().Capabilities.FallbackAsyncUpdateMode); fallbackMode != "" {
-		metadata["fallback_async_update_mode"] = fallbackMode
-	}
-	return metadata
+	// Only emit bridge-wide facts here. Per-provider state lives in
+	// IMBridgeInstance.Providers[] from registration; overwriting Metadata
+	// on every heartbeat with per-provider values would flap between
+	// heartbeat ticks in multi-provider deployments (fixed 2026-04-21 in C6).
+	return map[string]string{}
 }

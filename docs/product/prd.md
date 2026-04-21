@@ -2804,7 +2804,7 @@ func (e *Engine) handleNaturalLanguage(p core.Platform, msg *core.Message) {
 
 **飞书 (Feishu) -- P0 首选：**
 
-飞书是 AgentForge MVP 的首选 IM 平台，原因：WebSocket 长连接（无需公网 IP）、支持交互卡片（可嵌入按钮、表单）、支持 Thread 隔离、国内企业使用率高、cc-connect 的飞书适配器最成熟。
+飞书是 AgentForge MVP 的首选 IM 平台，原因：WebSocket 长连接（无需公网 IP）、支持交互卡片（可嵌入按钮、表单）、支持 Thread 隔离、国内企业使用率高。IM 平台传输（飞书、钉钉、企业微信等）由 IM Bridge（`src-im-bridge/`）负责，插件系统不提供 IM 平台适配器。
 
 ```go
 // 飞书交互卡片示例
@@ -3240,7 +3240,7 @@ flowchart TD
 {
   "event_id": "evt_abc123",
   "type": "integration.im.message_received",
-  "source": "feishu-adapter",
+  "source": "im-bridge",
   "timestamp": "2026-03-23T10:00:00Z",
   "payload": {
     "channel_id": "oc_xxx",
@@ -4209,39 +4209,30 @@ message OutboundMessage {
 }
 ```
 
-#### 4.8.4 IM 适配器示例
+#### 4.8.4 集成插件参考示例
+
+> **注意**：IM 平台传输（飞书、钉钉、企业微信、Slack、Discord 等）由 IM Bridge（`src-im-bridge/`）统一负责，不通过 IntegrationPlugin 实现。插件系统随仓库附带的集成插件是 `sample-integration-plugin`，它是一个 echo 风格的演示，不与任何 IM 平台通信。
 
 ```yaml
-# plugins/integrations/feishu-adapter/manifest.yaml
+# plugins/integrations/sample-integration-plugin/manifest.yaml
 apiVersion: agentforge/v1
 kind: IntegrationPlugin
 metadata:
-  id: "feishu-adapter"
-  name: "飞书集成"
+  id: "sample-integration-plugin"
+  name: "Sample Integration Plugin"
   version: "1.0.0"
 
 spec:
-  runtime: "go-plugin"
-  binary: "./feishu-adapter"     # 编译后的 Go 二进制
-  type: "im"
-
-  config:
-    app_id: "${FEISHU_APP_ID}"
-    app_secret: "${FEISHU_APP_SECRET}"
-
-  events:
-    inbound:
-      - "im.message.receive_v1"
-      - "im.message.reaction.create_v1"
-    outbound:
-      - "send_text"
-      - "send_card"
-      - "send_markdown"
+  runtime: "wasm"
+  module: "./dist/sample.wasm"
+  abiVersion: v1
+  capabilities:
+    - health
+    - echo
 
   permissions:
     network:
-      required: true
-      domains: ["*.feishu.cn", "*.larksuite.com"]
+      required: false
 ```
 
 #### 4.8.5 跨语言插件方案对比（来自技术调研）
@@ -4739,6 +4730,8 @@ await server.connect(transport);
 
 #### 4.14.4 Go Integration Plugin SDK 示例
 
+以下示例来自仓库内置的 `sample-integration-plugin`（`src-go/cmd/sample-wasm-plugin`）。它是一个 echo 风格的参考实现，不与任何外部系统或 IM 平台通信。IM 平台传输由 IM Bridge（`src-im-bridge/`）负责，不在插件系统范围内。
+
 ```go
 // main.go
 package main
@@ -4749,44 +4742,44 @@ import (
     sdk "github.com/agentforge/plugin-sdk-go"
 )
 
-type FeishuAdapter struct{}
+type samplePlugin struct{}
 
-func (f *FeishuAdapter) Describe(ctx *sdk.Context) (*sdk.Descriptor, error) {
+func (s *samplePlugin) Describe(ctx *sdk.Context) (*sdk.Descriptor, error) {
     return &sdk.Descriptor{
         APIVersion: "agentforge/v1",
         Kind:       "IntegrationPlugin",
-        ID:         "feishu-adapter",
-        Name:       "飞书集成",
+        ID:         "sample-integration-plugin",
+        Name:       "Sample Integration Plugin",
         Version:    "1.0.0",
         Runtime:    "wasm",
         ABIVersion: sdk.ABIVersion,
         Capabilities: []sdk.Capability{
             {Name: "health"},
-            {Name: "send_message"},
+            {Name: "echo"},
         },
     }, nil
 }
 
-func (f *FeishuAdapter) Init(ctx *sdk.Context) error {
+func (s *samplePlugin) Init(ctx *sdk.Context) error {
     return nil
 }
 
-func (f *FeishuAdapter) Health(ctx *sdk.Context) (*sdk.Result, error) {
+func (s *samplePlugin) Health(ctx *sdk.Context) (*sdk.Result, error) {
     return sdk.Success(map[string]any{
         "status": "ok",
     }), nil
 }
 
-func (f *FeishuAdapter) Invoke(ctx *sdk.Context, invocation sdk.Invocation) (*sdk.Result, error) {
-    if invocation.Operation != "send_message" {
+func (s *samplePlugin) Invoke(ctx *sdk.Context, invocation sdk.Invocation) (*sdk.Result, error) {
+    if invocation.Operation != "echo" {
         return nil, sdk.NewRuntimeError("unsupported_operation", fmt.Sprintf("unsupported operation %s", invocation.Operation))
     }
     return sdk.Success(map[string]any{
-        "status": "sent",
+        "echo": invocation.Payload,
     }), nil
 }
 
-var runtime = sdk.NewRuntime(&FeishuAdapter{})
+var runtime = sdk.NewRuntime(&samplePlugin{})
 
 //go:wasmexport agentforge_abi_version
 func agentforgeABIVersion() uint64 { return sdk.ExportABIVersion(runtime) }

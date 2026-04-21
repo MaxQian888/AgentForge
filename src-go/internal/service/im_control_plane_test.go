@@ -872,6 +872,103 @@ func TestIMControlPlane_QueueDeliveryPreservesTypedPayloadAndFallbackMetadata(t 
 	}
 }
 
+func TestRegisterBridge_MultiProviderInventory(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL: time.Minute,
+	})
+
+	req := &IMBridgeRegisterRequest{
+		BridgeID:  "bridge-multi",
+		Platform:  "feishu",
+		Transport: "live",
+		Providers: []model.IMBridgeProvider{
+			{
+				ID:             "feishu",
+				Transport:      "live",
+				ReadinessTier:  "full_native_lifecycle",
+				Tenants:        []string{"acme"},
+				MetadataSource: "builtin",
+			},
+			{
+				ID:             "slack",
+				Transport:      "stub",
+				Tenants:        []string{"beta"},
+				MetadataSource: "builtin",
+			},
+		},
+		CommandPlugins: []model.IMBridgeCommandPlugin{
+			{
+				ID:       "@acme/jira",
+				Version:  "1.0.0",
+				Commands: []string{"/jira"},
+				Tenants:  []string{"acme"},
+			},
+		},
+	}
+
+	if _, err := control.RegisterBridge(context.Background(), req); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	status, err := control.GetBridgeStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetBridgeStatus error: %v", err)
+	}
+	if len(status.Bridges) != 1 {
+		t.Fatalf("Bridges len = %d, want 1", len(status.Bridges))
+	}
+	bridge := status.Bridges[0]
+	if len(bridge.Providers) != 2 {
+		t.Fatalf("Providers len = %d, want 2", len(bridge.Providers))
+	}
+	if bridge.Providers[0].ID != "feishu" || bridge.Providers[1].ID != "slack" {
+		t.Errorf("provider ids = %q, %q", bridge.Providers[0].ID, bridge.Providers[1].ID)
+	}
+	if len(bridge.CommandPlugins) != 1 || bridge.CommandPlugins[0].ID != "@acme/jira" {
+		t.Errorf("command plugins = %v", bridge.CommandPlugins)
+	}
+}
+
+func TestGetBridgeStatus_LegacyBridgeSynthesizesProvider(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL: time.Minute,
+	})
+
+	req := &IMBridgeRegisterRequest{
+		BridgeID:         "bridge-legacy",
+		Platform:         "slack",
+		Transport:        "live",
+		CapabilityMatrix: map[string]any{"supportsRichMessages": true},
+		CallbackPaths:    []string{"/im/notify", "/im/send"},
+		Tenants:          []string{"acme"},
+		Metadata:         map[string]string{"readiness_tier": "native_send_with_fallback"},
+	}
+	if _, err := control.RegisterBridge(context.Background(), req); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	status, err := control.GetBridgeStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetBridgeStatus error: %v", err)
+	}
+	if len(status.Bridges) != 1 {
+		t.Fatalf("Bridges len = %d", len(status.Bridges))
+	}
+	providers := status.Bridges[0].Providers
+	if len(providers) != 1 {
+		t.Fatalf("synthesized Providers len = %d, want 1", len(providers))
+	}
+	if providers[0].ID != "slack" || providers[0].Transport != "live" {
+		t.Errorf("synthesized provider = %+v", providers[0])
+	}
+	if providers[0].ReadinessTier != "native_send_with_fallback" {
+		t.Errorf("synthesized ReadinessTier = %q", providers[0].ReadinessTier)
+	}
+	if providers[0].MetadataSource != "builtin" {
+		t.Errorf("synthesized MetadataSource = %q, want builtin", providers[0].MetadataSource)
+	}
+}
+
 func TestIMControlPlane_BoundProgressPreservesStructuredPayload(t *testing.T) {
 	now := time.Now().UTC()
 	control := NewIMControlPlane(IMControlPlaneConfig{

@@ -391,13 +391,12 @@ Frontend (独立部署):
 ```json
 {
   "event_id": "evt_abc123",
-  "type": "integration.im.message_received",
-  "source": "feishu-adapter",
+  "type": "integration.echo.message_received",
+  "source": "sample-integration-plugin",
   "timestamp": "2026-03-23T10:00:00Z",
   "payload": {
-    "channel_id": "oc_xxx",
-    "sender": "user_123",
-    "text": "@AgentForge 修复 issue #42"
+    "message": "test message",
+    "sender": "user_123"
   },
   "metadata": {
     "project_id": "proj_xxx",
@@ -1204,39 +1203,33 @@ message OutboundMessage {
 }
 ```
 
-### 7.3 IM 适配器示例
+### 7.3 集成插件示例 (sample-integration-plugin)
+
+本示例展示一个通用的 WASM 集成插件架构。IM 平台传输（飞书/Slack/DingTalk/Discord/Telegram/WeChat/WeCom/QQ/QQBot/Email）由专属的 IM Bridge (`src-im-bridge/`) 拥有和管理，并通过事件网关与插件系统集成。
 
 ```yaml
-# plugins/integrations/feishu-adapter/manifest.yaml
+# plugins/integrations/sample-integration/manifest.yaml
 apiVersion: agentforge/v1
 kind: IntegrationPlugin
 metadata:
-  id: "feishu-adapter"
-  name: "飞书集成"
+  id: "sample-integration-plugin"
+  name: "Sample Integration Plugin"
   version: "1.0.0"
 
 spec:
-  runtime: "go-plugin"
-  binary: "./feishu-adapter"     # 编译后的 Go 二进制
-  type: "im"
-
-  config:
-    app_id: "${FEISHU_APP_ID}"
-    app_secret: "${FEISHU_APP_SECRET}"
+  runtime: "wasm"
+  binary: "./sample-integration.wasm"     # 编译后的 WASM 二进制
+  type: "integration"
 
   events:
     inbound:
-      - "im.message.receive_v1"
-      - "im.message.reaction.create_v1"
+      - "integration.echo.message_received"
     outbound:
-      - "send_text"
-      - "send_card"
-      - "send_markdown"
+      - "echo"
 
   permissions:
     network:
-      required: true
-      domains: ["*.feishu.cn", "*.larksuite.com"]
+      required: false
 ```
 
 ---
@@ -1718,44 +1711,45 @@ import (
     sdk "github.com/agentforge/plugin-sdk-go"
 )
 
-type FeishuAdapter struct{}
+type SampleIntegrationPlugin struct{}
 
-func (f *FeishuAdapter) Describe(ctx *sdk.Context) (*sdk.Descriptor, error) {
+func (s *SampleIntegrationPlugin) Describe(ctx *sdk.Context) (*sdk.Descriptor, error) {
     return &sdk.Descriptor{
         APIVersion: "agentforge/v1",
         Kind:       "IntegrationPlugin",
-        ID:         "feishu-adapter",
-        Name:       "飞书集成",
+        ID:         "sample-integration-plugin",
+        Name:       "Sample Integration Plugin",
         Version:    "1.0.0",
         Runtime:    "wasm",
         ABIVersion: sdk.ABIVersion,
         Capabilities: []sdk.Capability{
             {Name: "health"},
-            {Name: "send_message"},
+            {Name: "echo"},
         },
     }, nil
 }
 
-func (f *FeishuAdapter) Init(ctx *sdk.Context) error {
+func (s *SampleIntegrationPlugin) Init(ctx *sdk.Context) error {
     return nil
 }
 
-func (f *FeishuAdapter) Health(ctx *sdk.Context) (*sdk.Result, error) {
+func (s *SampleIntegrationPlugin) Health(ctx *sdk.Context) (*sdk.Result, error) {
     return sdk.Success(map[string]any{
         "status": "ok",
     }), nil
 }
 
-func (f *FeishuAdapter) Invoke(ctx *sdk.Context, invocation sdk.Invocation) (*sdk.Result, error) {
-    if invocation.Operation != "send_message" {
+func (s *SampleIntegrationPlugin) Invoke(ctx *sdk.Context, invocation sdk.Invocation) (*sdk.Result, error) {
+    if invocation.Operation != "echo" {
         return nil, sdk.NewRuntimeError("unsupported_operation", fmt.Sprintf("unsupported operation %s", invocation.Operation))
     }
+    // Echo plugin simply echoes back the input payload
     return sdk.Success(map[string]any{
-        "status": "sent",
+        "echoed": invocation.Payload,
     }), nil
 }
 
-var runtime = sdk.NewRuntime(&FeishuAdapter{})
+var runtime = sdk.NewRuntime(&SampleIntegrationPlugin{})
 
 //go:wasmexport agentforge_abi_version
 func agentforgeABIVersion() uint64 { return sdk.ExportABIVersion(runtime) }
