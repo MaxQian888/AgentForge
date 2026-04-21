@@ -5,6 +5,7 @@ import (
 	"context"
 	"sync"
 
+	applog "github.com/agentforge/server/internal/log"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -43,6 +44,12 @@ func (b *Bus) ensurePipeline() {
 
 func (b *Bus) Publish(ctx context.Context, e *Event) error {
 	b.ensurePipeline()
+	if tid := applog.TraceID(ctx); tid != "" {
+		ensureMeta(e)
+		if _, set := e.Metadata[MetaTraceID]; !set {
+			e.Metadata[MetaTraceID] = tid
+		}
+	}
 	return b.publishInternal(ctx, e)
 }
 
