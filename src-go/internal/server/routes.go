@@ -1190,6 +1190,18 @@ func RegisterRoutes(
 	_ = documentH
 	projectGroup.GET("/logs", logH.List, appMiddleware.Require(appMiddleware.ActionLogRead))
 	projectGroup.POST("/logs", logH.Create, appMiddleware.Require(appMiddleware.ActionLogWrite))
+
+	// Internal ingest endpoint — bridge/agent sidecars POST structured log
+	// entries here without going through project-scoped auth. Rate-limited at
+	// 100 req/s (burst 200) per remote IP to prevent runaway emitters from
+	// overwhelming the log store.
+	// NOTE: this route is intentionally open (no jwtMw). It is reachable only
+	// from localhost in the sidecar topology (Go+Bridge share the same host);
+	// a follow-up task should add a shared-secret or mTLS guard.
+	ingestH := handler.NewIngestHandler(logSvc)
+	internalGroup := e.Group("/api/v1/internal", appMiddleware.IngestRateLimit(100, 200))
+	internalGroup.POST("/logs/ingest", ingestH.Ingest)
+
 	if dispatchPreflightH != nil {
 		projectGroup.GET("/dispatch/preflight", dispatchPreflightH.Get, appMiddleware.Require(appMiddleware.ActionTaskRead))
 	}

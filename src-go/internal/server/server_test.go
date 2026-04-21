@@ -728,6 +728,50 @@ func TestRegisterRoutes_WSWithoutToken(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutes_IngestRoutePresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodPost + " /api/v1/internal/logs/ingest": {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected ingest route to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_IngestRouteReachable(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	// A well-formed payload; the handler will fail at the DB layer (nil repo)
+	// but the route must be reached — 404 means the route was not wired.
+	body := `{"projectId":"00000000-0000-0000-0000-000000000001","level":"info","message":"hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/logs/ingest", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusNotFound {
+		t.Errorf("POST /api/v1/internal/logs/ingest: got 404 — route not wired")
+	}
+}
+
 func TestRegisterRoutes_NotFound(t *testing.T) {
 	cfg := testConfig()
 	cache := repository.NewCacheRepository(nil)
