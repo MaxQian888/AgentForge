@@ -4,12 +4,8 @@ import type { Context } from "hono";
 import { AgentRuntime } from "./runtime/agent-runtime.js";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
 import { EventStreamer } from "./ws/event-stream.js";
-import { handleExecute } from "./handlers/execute.js";
-import { buildRuntimeSnapshot, persistRuntimeSnapshot } from "./handlers/claude-runtime.js";
+import { handleExecute, buildRuntimeSnapshot, persistRuntimeSnapshot } from "./handlers/execute.js";
 import type { CommandRuntimeRunner } from "./handlers/command-runtime.js";
-import type { CodexAuthStatusProvider, CodexRuntimeRunner } from "./handlers/codex-runtime.js";
-import type { OpenCodeEventRunner } from "./handlers/opencode-runtime.js";
-import type { QueryRunner } from "./handlers/claude-runtime.js";
 import {
   type AgentRuntimeRegistry,
   createRuntimeRegistry,
@@ -53,8 +49,8 @@ import { MCPClientHub } from "./mcp/client-hub.js";
 import {
   createOpenCodeTransport,
   type OpenCodeTransport,
-} from "./opencode/transport.js";
-import { OpenCodePendingInteractionStore } from "./opencode/pending-interactions.js";
+} from "./runtime/opencode-transport.js";
+import { OpenCodePendingInteractionStore } from "./session/pending-interactions.js";
 import { BunSchedulerAdapter } from "./scheduler/bun-cron-adapter.js";
 import { HookCallbackManager } from "./runtime/hook-callback-manager.js";
 import { UnsupportedOperationError } from "./runtime/errors.js";
@@ -66,16 +62,12 @@ interface AppDeps {
   startTime?: number;
   connectStreamer?: boolean;
   awaitExecution?: boolean;
-  queryRunner?: QueryRunner;
   commandRuntimeRunner?: CommandRuntimeRunner;
-  codexRuntimeRunner?: CodexRuntimeRunner;
   sessionManager?: SessionManager;
   now?: () => number;
   executableLookup?: (command: string) => string | null;
   envLookup?: (name: string) => string | undefined;
-  codexAuthStatusProvider?: CodexAuthStatusProvider;
   opencodeTransport?: OpenCodeTransport;
-  opencodeEventRunner?: OpenCodeEventRunner;
   decomposeTask?: DecomposeTaskExecutor;
   pluginManager?: ToolPluginManager;
   schedulerAdapter?: Pick<BunSchedulerAdapter, "start" | "stop">;
@@ -338,15 +330,6 @@ export function createApp(deps: AppDeps = {}): Hono {
     });
   const opencodePendingInteractions =
     deps.opencodePendingInteractions ?? new OpenCodePendingInteractionStore();
-  const opencodeRuntimePendingInteractions =
-    opencodePendingInteractions.createPermissionRequest
-      ? {
-          createPermissionRequest:
-            opencodePendingInteractions.createPermissionRequest.bind(
-              opencodePendingInteractions,
-            ),
-        }
-      : undefined;
 
   // Wire heartbeat status provider if streamer supports it
   if ("setStatusProvider" in streamer && typeof streamer.setStatusProvider === "function") {
@@ -365,16 +348,11 @@ export function createApp(deps: AppDeps = {}): Hono {
       return deps.runtimeRegistry;
     }
     return createRuntimeRegistry({
-      queryRunner: deps.queryRunner,
       commandRuntimeRunner: deps.commandRuntimeRunner,
-      codexRuntimeRunner: deps.codexRuntimeRunner,
       executableLookup: deps.executableLookup,
       envLookup: deps.envLookup,
-      codexAuthStatusProvider: deps.codexAuthStatusProvider,
       opencodeTransport,
-      opencodeEventRunner: deps.opencodeEventRunner,
       now,
-      opencodePendingInteractions: opencodeRuntimePendingInteractions,
     });
   }
 
@@ -511,20 +489,15 @@ function resolveRuntimeForBridgeControl(taskId: string):
       }
       const result = await handleExecute(pool, streamer, parsed.data, {
         awaitCompletion: deps.awaitExecution,
-        queryRunner: deps.queryRunner,
         commandRuntimeRunner: deps.commandRuntimeRunner,
-        codexRuntimeRunner: deps.codexRuntimeRunner,
         sessionManager,
         executableLookup: deps.executableLookup,
         envLookup: deps.envLookup,
         now,
-        codexAuthStatusProvider: deps.codexAuthStatusProvider,
         opencodeTransport,
-        opencodeEventRunner: deps.opencodeEventRunner,
         runtimeRegistry: deps.runtimeRegistry,
         hookCallbackManager,
         pluginManager,
-        opencodePendingInteractions: opencodeRuntimePendingInteractions,
       });
       return c.json(result, 200);
     } catch (err: unknown) {
@@ -1176,19 +1149,14 @@ function resolveRuntimeForBridgeControl(taskId: string):
       const result = await handleExecute(pool, streamer, snapshot.request, {
         awaitCompletion: deps.awaitExecution,
         continuity: snapshot.continuity,
-        queryRunner: deps.queryRunner,
         commandRuntimeRunner: deps.commandRuntimeRunner,
-        codexRuntimeRunner: deps.codexRuntimeRunner,
         sessionManager,
         executableLookup: deps.executableLookup,
         envLookup: deps.envLookup,
         now,
-        codexAuthStatusProvider: deps.codexAuthStatusProvider,
         opencodeTransport,
-        opencodeEventRunner: deps.opencodeEventRunner,
         hookCallbackManager,
         pluginManager,
-        opencodePendingInteractions: opencodeRuntimePendingInteractions,
       });
 
       return c.json({ session_id: result.session_id, resumed: true }, 200);

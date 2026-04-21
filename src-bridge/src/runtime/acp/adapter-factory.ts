@@ -76,9 +76,8 @@ export interface AcpRuntimeAdapterFactory {
 /**
  * Build a per-task ACP runtime adapter for a given adapterId.
  *
- * The caller must check the emergency fallback env flag
- * `BRIDGE_ACP_<ADAPTER>=0` BEFORE invoking this factory — the legacy
- * fallback mapping lives in `runtime/registry.ts` (T6b), not here.
+ * All five adapters (claude_code, codex, opencode, cursor, gemini) dispatch
+ * exclusively through ACP. The legacy fallback path has been removed (TΔ3).
  *
  * Unstable methods (`setModel`, `fork`, etc.) throw
  * `AcpCapabilityUnsupported` when the agent has not advertised

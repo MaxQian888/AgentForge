@@ -824,4 +824,14 @@ Draft-2 left eight open questions. Each gets final disposition here.
   - `im_child_task_folding_mode` config added (§9.1, §9.4) to address QQ nested-card incompatibility.
   - `AcpCommandNotFound` error class added to cover `node` / `npx` / `cursor-agent` missing in PATH on desktop.
 - **2026-04-21 (TΔ2)** — added integration test scaffolding × 5 (`tests/integration/acp/{claude_code,codex,opencode,cursor,gemini}.test.ts`); appended §8.1 as placeholder pending first empirical run; extended `pnpm dev:backend:verify` with 5-adapter ACP echo step gated by `VERIFY_ACP=1`.
+- **2026-04-22 (TΔ3)** — atomic legacy deletion:
+  - Deleted handler files: `handlers/claude-runtime.ts`, `handlers/codex-runtime.ts`, `handlers/opencode-runtime.ts` + their test files.
+  - Deleted `opencode/` directory (transport and pending-interactions modules); content moved to `runtime/opencode-transport.ts` and `session/pending-interactions.ts` to preserve non-execution usage (advanced ops, provider auth routes).
+  - Removed `claudeQuery: ClaudeQueryControl | null` field from `AgentRuntime` and its corresponding live-controls fallback branch in `toStatus()`.
+  - Removed `isAcpEnabled()` helper and all `BRIDGE_ACP_<ADAPTER>` emergency env flag infrastructure from `registry.ts`.
+  - Simplified `runWithAcpAdapter()` to unconditional dispatch; removed legacy fallback parameter from all 5 adapter `execute()` methods.
+  - Removed `ClaudeRuntimeDeps` interface; fields migrated to direct `ExecuteDeps` / `AgentRuntimeRegistryOptions` members.
+  - Deleted `noAcpEnvLookup` test helpers and all legacy-path test cases from `execute.test.ts`, `server.test.ts`, `registry.test.ts`, and `server.advanced-routes.test.ts`.
+  - Updated stale `BRIDGE_ACP_<X>=0` doc comments in `adapter-factory.ts` and `registry.ts`.
+  - Test suite: 311 pass, 25 skip, 0 fail.
 - **Pre-2026-04-21** — see `docs/dev/specs/2026-04-16-bridge-acp-client-integration.md` §14 for draft-1 → draft-2 history.

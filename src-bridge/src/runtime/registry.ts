@@ -2,29 +2,15 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import {
-  streamClaudeRuntime,
-  type ClaudeRuntimeDeps,
-} from "../handlers/claude-runtime.js";
-import {
   streamCommandRuntime,
   type CommandRuntimeRunner,
 } from "../handlers/command-runtime.js";
 import {
-  getDefaultCodexAuthStatus,
-  streamCodexRuntime,
-  type CodexAuthStatusProvider,
-  type CodexRuntimeRunner,
-} from "../handlers/codex-runtime.js";
-import {
-  streamOpenCodeRuntime,
-  type OpenCodeEventRunner,
-  type OpenCodeRuntimeDeps,
-} from "../handlers/opencode-runtime.js";
-import {
   createOpenCodeTransport,
   type OpenCodeExecuteCapabilities,
   type OpenCodeTransport,
-} from "../opencode/transport.js";
+} from "./opencode-transport.js";
+import type { PluginRecord } from "../plugins/types.js";
 import {
   getRuntimeProfile,
   getRuntimeProfiles,
@@ -149,6 +135,63 @@ export interface DefaultCodexForkRunnerDeps {
 }
 
 export class UnknownRuntimeError extends Error {}
+
+// ---------------------------------------------------------------------------
+// Types previously defined in deleted handlers (moved here to avoid breakage)
+// ---------------------------------------------------------------------------
+
+export interface CodexAuthStatus {
+  authenticated: boolean;
+  message?: string;
+}
+
+export type CodexAuthStatusProvider = () => CodexAuthStatus;
+
+export type CodexRuntimeRunner = (params: {
+  mode: "start" | "resume";
+  command: string;
+  req: ExecuteRequest;
+  systemPrompt: string;
+  threadId?: string;
+  abortSignal: AbortSignal;
+}) => AsyncIterable<Record<string, unknown>>;
+
+export function getDefaultCodexAuthStatus(command = "codex"): CodexAuthStatus {
+  try {
+    const result = Bun.spawnSync({
+      cmd: [command, "login", "status"],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output =
+      `${Buffer.from(result.stdout).toString("utf8")}\n${Buffer.from(result.stderr).toString("utf8")}`.trim();
+
+    if (result.exitCode !== 0) {
+      return {
+        authenticated: false,
+        message: output || "Codex CLI authentication is unavailable",
+      };
+    }
+
+    if (/logged in/i.test(output)) {
+      return {
+        authenticated: true,
+        message: output,
+      };
+    }
+
+    return {
+      authenticated: false,
+      message: output || "Codex CLI authentication is unavailable",
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      authenticated: false,
+      message: message || "Codex CLI authentication is unavailable",
+    };
+  }
+}
 export class RuntimeConfigurationError extends Error {}
 export class UnsupportedRuntimeProviderError extends Error {}
 export class ExecuteRequestValidationError extends Error {}
@@ -186,7 +229,7 @@ interface RuntimeAdapter {
   setModel(runtime: AgentRuntime, params: RuntimeSetModelParams): Promise<void>;
 }
 
-export interface AgentRuntimeRegistryOptions extends ClaudeRuntimeDeps {
+export interface AgentRuntimeRegistryOptions {
   commandRuntimeRunner?: CommandRuntimeRunner;
   codexRuntimeRunner?: CodexRuntimeRunner;
   defaultRuntime?: AgentRuntimeKey;
@@ -194,9 +237,8 @@ export interface AgentRuntimeRegistryOptions extends ClaudeRuntimeDeps {
   envLookup?: (name: string) => string | undefined;
   opencodeTransport?: OpenCodeTransport;
   codexAuthStatusProvider?: CodexAuthStatusProvider;
-  continuity?: RuntimeContinuityState;
-  opencodeEventRunner?: OpenCodeEventRunner;
-  opencodePendingInteractions?: OpenCodeRuntimeDeps["opencodePendingInteractions"];
+  now?: () => number;
+  activePlugins?: PluginRecord[];
   advancedOperations?: Partial<Record<AgentRuntimeKey, RuntimeAdvancedOperations>>;
   forkSessionRunner?: (
     sessionId: string,
@@ -435,25 +477,16 @@ export function createRuntimeRegistry(
   };
 
   /**
-   * Helper to create a per-task ACP adapter for one of the 5 migrated adapters.
-   * Respects the BRIDGE_ACP_<ADAPTER>=0 emergency fallback env flag.
+   * Dispatch a task through the ACP adapter. All 5 migrated adapters route
+   * exclusively through ACP; there is no legacy fallback path.
    */
-  function isAcpEnabled(adapterId: AcpAdapterId): boolean {
-    const flag = (envLookup(`BRIDGE_ACP_${adapterId.toUpperCase()}`) ?? process.env[`BRIDGE_ACP_${adapterId.toUpperCase()}`]);
-    return flag !== "0";
-  }
-
   async function runWithAcpAdapter(
     adapterId: AcpAdapterId,
     runtime: AgentRuntime,
     streamer: EventSink,
     req: ExecuteRequest,
     systemPrompt: string,
-    legacyExecute: (runtime: AgentRuntime, streamer: EventSink, req: ExecuteRequest, systemPrompt: string) => Promise<void>,
   ): Promise<void> {
-    if (!isAcpEnabled(adapterId)) {
-      return legacyExecute(runtime, streamer, req, systemPrompt);
-    }
     const task: AcpTaskInput = {
       id: req.task_id,
       worktreeRoot: req.worktree_path,
@@ -486,9 +519,6 @@ export function createRuntimeRegistry(
       strictModelOptions: Boolean(claudeProfile.strict_model_options),
       supportedFeatures: [...claudeProfile.supported_features],
       async getDiagnostics() {
-        if (options.queryRunner) {
-          return [];
-        }
         const diagnostics: RuntimeDiagnostic[] = [];
         const apiKey = envLookup("ANTHROPIC_API_KEY")?.trim();
         if (!apiKey) {
@@ -505,22 +535,7 @@ export function createRuntimeRegistry(
         assertDiagnosticsAvailable(await this.getDiagnostics());
       },
       async execute(runtime, streamer, req, systemPrompt) {
-        await runWithAcpAdapter(
-          "claude_code",
-          runtime,
-          streamer,
-          req,
-          systemPrompt,
-          async (rt, str, rq, sp) => {
-            await streamClaudeRuntime(rt, str, rq, sp, {
-              continuity: options.continuity,
-              queryRunner: options.queryRunner,
-              hookCallbackManager: options.hookCallbackManager,
-              forkSessionRunner: options.forkSessionRunner,
-              now: options.now,
-            });
-          },
-        );
+        await runWithAcpAdapter("claude_code", runtime, streamer, req, systemPrompt);
       },
       ...createAcpWrappedAdvancedOperations("claude_code", createClaudeAdvancedOperations(options)),
     },
@@ -537,11 +552,10 @@ export function createRuntimeRegistry(
         codexForkRunner: options.codexForkRunner,
         codexRollbackRunner: options.codexRollbackRunner,
       });
-      const legacyExecute = codexAdapter.execute.bind(codexAdapter);
       return {
         ...codexAdapter,
         async execute(runtime, streamer, req, systemPrompt) {
-          await runWithAcpAdapter("codex", runtime, streamer, req, systemPrompt, legacyExecute);
+          await runWithAcpAdapter("codex", runtime, streamer, req, systemPrompt);
         },
         ...createAcpWrappedAdvancedOperations("codex", createCodexAdvancedOperations({
           defaultCommand: codexCommand,
@@ -557,22 +571,18 @@ export function createRuntimeRegistry(
     opencode: (() => {
       const opencodeAdapter = createOpenCodeReadinessAdapter(opencodeProfile, {
         transport: opencodeTransport,
-        eventRunner: options.opencodeEventRunner,
         defaultModel:
           readEnvConfig(envLookup, "OPENCODE_RUNTIME_MODEL") ?? opencodeProfile.default_model,
         now: options.now,
         advancedOperations: options.advancedOperations?.opencode,
-        opencodePendingInteractions: options.opencodePendingInteractions,
       });
-      const legacyExecute = opencodeAdapter.execute.bind(opencodeAdapter);
       return {
         ...opencodeAdapter,
         async execute(runtime, streamer, req, systemPrompt) {
-          await runWithAcpAdapter("opencode", runtime, streamer, req, systemPrompt, legacyExecute);
+          await runWithAcpAdapter("opencode", runtime, streamer, req, systemPrompt);
         },
         ...createAcpWrappedAdvancedOperations("opencode", createOpenCodeAdvancedOperations({
           transport: opencodeTransport,
-          eventRunner: options.opencodeEventRunner,
           defaultModel:
             readEnvConfig(envLookup, "OPENCODE_RUNTIME_MODEL") ?? opencodeProfile.default_model,
           now: options.now,
@@ -587,11 +597,10 @@ export function createRuntimeRegistry(
         commandRuntimeRunner: options.commandRuntimeRunner,
         now: options.now,
       });
-      const legacyExecute = cursorAdapter.execute.bind(cursorAdapter);
       return {
         ...cursorAdapter,
         async execute(runtime, streamer, req, systemPrompt) {
-          await runWithAcpAdapter("cursor", runtime, streamer, req, systemPrompt, legacyExecute);
+          await runWithAcpAdapter("cursor", runtime, streamer, req, systemPrompt);
         },
         ...createAcpWrappedAdvancedOperations("cursor", {
           fork: unsupportedOperation("cursor", "fork"),
@@ -615,11 +624,10 @@ export function createRuntimeRegistry(
         commandRuntimeRunner: options.commandRuntimeRunner,
         now: options.now,
       });
-      const legacyExecute = geminiAdapter.execute.bind(geminiAdapter);
       return {
         ...geminiAdapter,
         async execute(runtime, streamer, req, systemPrompt) {
-          await runWithAcpAdapter("gemini", runtime, streamer, req, systemPrompt, legacyExecute);
+          await runWithAcpAdapter("gemini", runtime, streamer, req, systemPrompt);
         },
         ...createAcpWrappedAdvancedOperations("gemini", {
           fork: unsupportedOperation("gemini", "fork"),
@@ -660,7 +668,7 @@ function createCodexAdapter(profile: RuntimeProfile, options: {
   defaultCommand: string;
   defaultModel?: string;
   now?: () => number;
-  activePlugins?: ClaudeRuntimeDeps["activePlugins"];
+  activePlugins?: PluginRecord[];
   advancedOperations?: RuntimeAdvancedOperations;
   codexForkRunner?: AgentRuntimeRegistryOptions["codexForkRunner"];
   codexRollbackRunner?: AgentRuntimeRegistryOptions["codexRollbackRunner"];
@@ -705,12 +713,10 @@ function createCodexAdapter(profile: RuntimeProfile, options: {
       assertDiagnosticsAvailable(await this.getDiagnostics());
     },
     async execute(runtime, streamer, req, systemPrompt) {
-      await streamCodexRuntime(runtime, streamer, req, systemPrompt, {
-        command: options.defaultCommand,
-        codexRuntimeRunner: options.codexRuntimeRunner,
-        now: options.now,
-        activePlugins: options.activePlugins,
-      });
+      // Execute is overridden by the caller (codex adapter uses ACP).
+      // This fallback should never be reached in normal operation.
+      void runtime; void streamer; void req; void systemPrompt;
+      throw new Error("codex execute must be dispatched via ACP adapter");
     },
     ...createCodexAdvancedOperations(options),
   };
@@ -718,11 +724,9 @@ function createCodexAdapter(profile: RuntimeProfile, options: {
 
 function createOpenCodeReadinessAdapter(profile: RuntimeProfile, options: {
   transport: OpenCodeTransport;
-  eventRunner?: OpenCodeEventRunner;
   defaultModel?: string;
   now?: () => number;
   advancedOperations?: RuntimeAdvancedOperations;
-  opencodePendingInteractions?: OpenCodeRuntimeDeps["opencodePendingInteractions"];
 }): RuntimeAdapter {
   const executeCapabilities = getOpenCodeExecuteCapabilities(options.transport);
   const supportedFeatures = withSupportedFeatures(profile.supported_features, [
@@ -801,12 +805,10 @@ function createOpenCodeReadinessAdapter(profile: RuntimeProfile, options: {
       assertDiagnosticsAvailable(await this.getDiagnostics());
     },
     async execute(runtime, streamer, req, systemPrompt) {
-      await streamOpenCodeRuntime(runtime, streamer, req, systemPrompt, {
-        transport: options.transport,
-        eventRunner: options.eventRunner,
-        now: options.now,
-        opencodePendingInteractions: options.opencodePendingInteractions,
-      });
+      // Execute is overridden by the caller (opencode adapter uses ACP).
+      // This fallback should never be reached in normal operation.
+      void runtime; void streamer; void req; void systemPrompt;
+      throw new Error("opencode execute must be dispatched via ACP adapter");
     },
     ...createOpenCodeAdvancedOperations(options),
   };
@@ -922,7 +924,7 @@ function createCliRuntimeAdapter(
  * (rollback, revert, getMessages, getDiff, executeShell, getMcpServerStatus, fork)
  * fall through to the provided legacy operations so that existing functionality
  * is preserved for adapters that implement those.
- * When `runtime.acpAdapter` is null (legacy path or BRIDGE_ACP_<X>=0), all ops
+ * When `runtime.acpAdapter` is null (e.g. during catalog/readiness checks), all ops
  * fall through to the legacy implementations unchanged.
  */
 function createAcpWrappedAdvancedOperations(
@@ -1084,23 +1086,7 @@ function createClaudeAdvancedOperations(
           },
         };
       }),
-    rollback:
-      overrides?.rollback ??
-      (async (runtime, params) => {
-        const checkpointId =
-          params.checkpoint_id ??
-          (runtime.continuity?.runtime === "claude_code"
-            ? runtime.continuity.checkpoint_id
-            : undefined);
-        if (!checkpointId || typeof runtime.claudeQuery?.rewindFiles !== "function") {
-          throw new UnsupportedOperationError("rollback", "claude_code");
-        }
-
-        const result = await runtime.claudeQuery.rewindFiles(checkpointId);
-        if (result?.canRewind === false) {
-          throw new Error(result.error ?? `Unable to rewind Claude files to ${checkpointId}`);
-        }
-      }),
+    rollback: overrides?.rollback ?? unsupportedOperation("claude_code", "rollback"),
     revert: overrides?.revert ?? unsupportedOperation("claude_code", "revert"),
     getMessages: overrides?.getMessages ?? unsupportedOperation("claude_code", "getMessages"),
     getDiff: overrides?.getDiff ?? unsupportedOperation("claude_code", "getDiff"),
@@ -1109,39 +1095,11 @@ function createClaudeAdvancedOperations(
     executeShell:
       overrides?.executeShell ?? unsupportedOperation("claude_code", "executeShell"),
     setThinkingBudget:
-      overrides?.setThinkingBudget ??
-      (async (runtime, params) => {
-        if (typeof runtime.claudeQuery?.setMaxThinkingTokens !== "function") {
-          throw new UnsupportedOperationError("setThinkingBudget", "claude_code");
-        }
-        await runtime.claudeQuery.setMaxThinkingTokens(
-          params.max_thinking_tokens ?? null,
-        );
-      }),
+      overrides?.setThinkingBudget ?? unsupportedOperation("claude_code", "setThinkingBudget"),
     getMcpServerStatus:
-      overrides?.getMcpServerStatus ??
-      (async (runtime) => {
-        if (typeof runtime.claudeQuery?.mcpServerStatus !== "function") {
-          throw new UnsupportedOperationError("getMcpServerStatus", "claude_code");
-        }
-        return runtime.claudeQuery.mcpServerStatus();
-      }),
-    interrupt:
-      overrides?.interrupt ??
-      (async (runtime) => {
-        if (typeof runtime.claudeQuery?.interrupt !== "function") {
-          throw new UnsupportedOperationError("interrupt", "claude_code");
-        }
-        await runtime.claudeQuery.interrupt();
-      }),
-    setModel:
-      overrides?.setModel ??
-      (async (runtime, params) => {
-        if (typeof runtime.claudeQuery?.setModel !== "function") {
-          throw new UnsupportedOperationError("setModel", "claude_code");
-        }
-        await runtime.claudeQuery.setModel(params.model);
-      }),
+      overrides?.getMcpServerStatus ?? unsupportedOperation("claude_code", "getMcpServerStatus"),
+    interrupt: overrides?.interrupt ?? unsupportedOperation("claude_code", "interrupt"),
+    setModel: overrides?.setModel ?? unsupportedOperation("claude_code", "setModel"),
   };
 }
 
@@ -1149,7 +1107,7 @@ function createCodexAdvancedOperations(options: {
   defaultCommand: string;
   defaultModel?: string;
   now?: () => number;
-  activePlugins?: ClaudeRuntimeDeps["activePlugins"];
+  activePlugins?: PluginRecord[];
   advancedOperations?: RuntimeAdvancedOperations;
   codexForkRunner?: AgentRuntimeRegistryOptions["codexForkRunner"];
   codexRollbackRunner?: AgentRuntimeRegistryOptions["codexRollbackRunner"];
@@ -1247,7 +1205,6 @@ function createCodexAdvancedOperations(options: {
 
 function createOpenCodeAdvancedOperations(options: {
   transport: OpenCodeTransport;
-  eventRunner?: OpenCodeEventRunner;
   defaultModel?: string;
   now?: () => number;
   advancedOperations?: RuntimeAdvancedOperations;

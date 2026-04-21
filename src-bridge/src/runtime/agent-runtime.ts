@@ -10,17 +10,6 @@ import {
 } from "../cost/accounting.js";
 import type { AcpRuntimeAdapter } from "./acp/index.js";
 
-export interface ClaudeQueryControl {
-  interrupt?: () => Promise<void>;
-  setModel?: (model?: string) => Promise<void>;
-  setMaxThinkingTokens?: (maxThinkingTokens: number | null) => Promise<void>;
-  rewindFiles?: (
-    userMessageId: string,
-    options?: { dryRun?: boolean },
-  ) => Promise<{ canRewind: boolean; error?: string }>;
-  mcpServerStatus?: () => Promise<unknown>;
-}
-
 export type RuntimeStatus =
   | "starting"
   | "running"
@@ -43,7 +32,6 @@ export class AgentRuntime {
   request: ExecuteRequest | null;
   continuity: RuntimeContinuityState | null;
   structuredOutput: Record<string, unknown> | null;
-  claudeQuery: ClaudeQueryControl | null;
   budgetWarningEmitted: boolean;
   costAccounting: CostAccountingSnapshot | null;
 
@@ -69,7 +57,6 @@ export class AgentRuntime {
     this.request = null;
     this.continuity = null;
     this.structuredOutput = null;
-    this.claudeQuery = null;
     this.budgetWarningEmitted = false;
     this.costAccounting = null;
     this.maxTurnsLimit = 0;
@@ -136,9 +123,8 @@ export class AgentRuntime {
     const subagentCount = this.request?.agents
       ? Object.keys(this.request.agents).length
       : undefined;
-    // Capability-driven live_controls: prefer the ACP adapter's liveControls flags
-    // when one is present (ACP-backed runtime). Fall back to the legacy claudeQuery
-    // surface when BRIDGE_ACP_CLAUDE_CODE=0 keeps the legacy path alive.
+    // Capability-driven live_controls: use the ACP adapter's liveControls flags
+    // when one is present (all 5 adapters now route through ACP exclusively).
     let liveControls: Record<string, true | undefined> | undefined;
     if (this.acpAdapter) {
       const lc = this.acpAdapter.liveControls;
@@ -147,15 +133,6 @@ export class AgentRuntime {
         set_model: lc.setModel || undefined,
         set_thinking_budget: lc.setThinkingBudget || undefined,
         mcp_status: lc.mcpServerStatus || undefined,
-      };
-    } else if (runtime === "claude_code" && this.claudeQuery) {
-      liveControls = {
-        interrupt: typeof this.claudeQuery.interrupt === "function" || undefined,
-        set_model: typeof this.claudeQuery.setModel === "function" || undefined,
-        set_thinking_budget:
-          typeof this.claudeQuery.setMaxThinkingTokens === "function" || undefined,
-        mcp_status:
-          typeof this.claudeQuery.mcpServerStatus === "function" || undefined,
       };
     }
     return {

@@ -3,7 +3,7 @@ import { createApp } from "./server.js";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
 import { createRuntimeRegistry } from "./runtime/registry.js";
 import { HookCallbackManager } from "./runtime/hook-callback-manager.js";
-import { OpenCodePendingInteractionStore } from "./opencode/pending-interactions.js";
+import { OpenCodePendingInteractionStore } from "./session/pending-interactions.js";
 import { SessionManager } from "./session/manager.js";
 
 function createAdvancedRequest() {
@@ -435,12 +435,15 @@ describe("bridge advanced runtime routes", () => {
       model: "claude-sonnet-4-5",
     });
     const controlCalls: Array<{ kind: string; payload: unknown }> = [];
-    claudeRuntime.claudeQuery = {
-      setMaxThinkingTokens: async (value) => {
+    claudeRuntime.acpAdapter = {
+      liveControls: { setThinkingBudget: true, mcpServerStatus: true, interrupt: true, setModel: false },
+      setThinkingBudget: async (value: number | null) => {
         controlCalls.push({ kind: "thinking", payload: value });
       },
-      mcpServerStatus: async () => [{ name: "github", healthy: true }],
-    };
+      session: {
+        extMethod: async () => [{ name: "github", healthy: true }],
+      },
+    } as never;
 
     const codexRuntime = pool.acquire("task-codex", "session-codex", "codex");
     codexRuntime.bindRequest({
