@@ -147,11 +147,12 @@ const (
 type WorkflowActionType string
 
 const (
-	WorkflowActionAgent    WorkflowActionType = "agent"
-	WorkflowActionReview   WorkflowActionType = "review"
-	WorkflowActionTask     WorkflowActionType = "task"
-	WorkflowActionWorkflow WorkflowActionType = "workflow"
-	WorkflowActionApproval WorkflowActionType = "approval"
+	WorkflowActionAgent     WorkflowActionType = "agent"
+	WorkflowActionReview    WorkflowActionType = "review"
+	WorkflowActionTask      WorkflowActionType = "task"
+	WorkflowActionWorkflow  WorkflowActionType = "workflow"
+	WorkflowActionApproval  WorkflowActionType = "approval"
+	WorkflowActionToolChain WorkflowActionType = "tool_chain"
 )
 
 type WorkflowPluginSpec struct {
@@ -177,12 +178,28 @@ type WorkflowRoleBinding struct {
 }
 
 type WorkflowStepDefinition struct {
-	ID       string             `yaml:"id" json:"id"`
-	Role     string             `yaml:"role" json:"role"`
-	Action   WorkflowActionType `yaml:"action" json:"action"`
-	Next     []string           `yaml:"next,omitempty" json:"next,omitempty"`
-	Config   map[string]any     `yaml:"config,omitempty" json:"config,omitempty"`
-	Metadata map[string]any     `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	ID        string             `yaml:"id" json:"id"`
+	Role      string             `yaml:"role" json:"role"`
+	Action    WorkflowActionType `yaml:"action" json:"action"`
+	Next      []string           `yaml:"next,omitempty" json:"next,omitempty"`
+	Config    map[string]any     `yaml:"config,omitempty" json:"config,omitempty"`
+	Metadata  map[string]any     `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	ToolChain *ToolChainSpec     `yaml:"tool_chain,omitempty" json:"tool_chain,omitempty"`
+}
+
+// ToolChainStep is one MCP tool call within a ToolChain.
+type ToolChainStep struct {
+	Tool     string         `yaml:"tool" json:"tool"`
+	Input    map[string]any `yaml:"input,omitempty" json:"input,omitempty"`
+	OutputAs string         `yaml:"output_as,omitempty" json:"output_as,omitempty"`
+}
+
+// ToolChainSpec declares a sequence of MCP tool calls for one Workflow Step.
+// OnError is one of "stop" (default), "skip", or "retry(n)" where n is a
+// positive integer; values outside that set are treated as "stop".
+type ToolChainSpec struct {
+	Steps   []ToolChainStep `yaml:"steps" json:"steps"`
+	OnError string          `yaml:"on_error,omitempty" json:"on_error,omitempty"`
 }
 
 type PluginWorkflowTrigger struct {
