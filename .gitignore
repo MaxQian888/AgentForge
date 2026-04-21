@@ -4,6 +4,10 @@
 .worktrees/
 .claude/worktrees/
 
+# Local test fixtures / sandboxed agent repos
+data/repos/
+src-go/data/repos/
+
 # dependencies
 node_modules
 /.pnp

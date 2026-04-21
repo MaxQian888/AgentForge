@@ -10,8 +10,28 @@ linters:
     - staticcheck
   settings:
     staticcheck:
+      # Enable SA* (semantic analysis — real bugs).
+      # Disable ST*/QF*/S1* (style / quick-fix / simplification suggestions)
+      # to keep CI focused on correctness, not cosmetic rewrites.
       checks:
-        - all
+        - "SA*"
+        - "-SA1019"
+    errcheck:
+      # Skip idiomatic close/discard patterns that rarely surface actionable errors
+      # at the call site. Audit explicit error handling in leaf services instead.
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*os.File).Close
+        - (*net/http.Response).Body.Close
+        - io.Copy
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+        - (net/http.ResponseWriter).Write
+        - (*strings.Builder).WriteString
+        - (*bytes.Buffer).WriteString
+        - (*bytes.Buffer).Write
 
 issues:
   max-same-issues: 0

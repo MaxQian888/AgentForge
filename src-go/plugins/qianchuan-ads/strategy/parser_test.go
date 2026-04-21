@@ -97,12 +97,8 @@ func TestParseUnknownActionRejected(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	var spe *StrategyParseError
-	if errors.As(err, &spe) {
-		if spe.Line == 0 {
-			t.Errorf("expected parse error to carry a non-zero line, got %+v", spe)
-		}
-	} else {
-		// non-structured errors are tolerated as long as they mention the bad type
+	if errors.As(err, &spe) && spe.Line == 0 {
+		t.Errorf("expected parse error to carry a non-zero line, got %+v", spe)
 	}
 	if !strings.Contains(err.Error(), "do_evil") {
 		t.Errorf("error should mention bad type: %v", err)

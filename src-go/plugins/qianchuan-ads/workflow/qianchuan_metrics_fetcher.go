@@ -19,6 +19,8 @@ func (QianchuanMetricsFetcherHandler) Execute(_ context.Context, req *nodetypes.
 	var (
 		bindingTpl string
 		dims       []string
+		binding    string
+		nodeID     string
 	)
 	if req != nil {
 		bindingTpl, _ = req.Config["binding_id_template"].(string)
@@ -29,11 +31,10 @@ func (QianchuanMetricsFetcherHandler) Execute(_ context.Context, req *nodetypes.
 				}
 			}
 		}
-	}
-	binding := nodetypes.ResolveTemplateVars(bindingTpl, req.DataStore)
-	nodeID := ""
-	if req != nil && req.Node != nil {
-		nodeID = req.Node.ID
+		binding = nodetypes.ResolveTemplateVars(bindingTpl, req.DataStore)
+		if req.Node != nil {
+			nodeID = req.Node.ID
+		}
 	}
 	payload, _ := json.Marshal(nodetypes.FetchQianchuanMetricsPayload{
 		BindingID: binding, Dimensions: dims, NodeID: nodeID,

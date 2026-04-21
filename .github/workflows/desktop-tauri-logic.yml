@@ -28,6 +28,22 @@ jobs:
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked
 
+      - name: Stub sidecar binaries for Tauri build.rs validation
+        shell: bash
+        run: |
+          # Tauri's build.rs validates that externalBin paths exist even for cargo test --lib.
+          # We stub empty placeholders to satisfy the check — unit tests don't spawn sidecars.
+          mkdir -p src-tauri/binaries
+          for base in server bridge im-bridge; do
+            for triple in x86_64-pc-windows-msvc x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+              if [[ "$triple" == *"windows"* ]]; then
+                touch "src-tauri/binaries/${base}-${triple}.exe"
+              else
+                touch "src-tauri/binaries/${base}-${triple}"
+              fi
+            done
+          done
+
       - name: Run src-tauri lib tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 

@@ -65,6 +65,9 @@ func (r *AgentTeamRepository) GetTeamSummary(ctx context.Context, id uuid.UUID) 
 	}
 
 	summaries, err := r.buildTeamSummaries(ctx, []*model.AgentTeam{team})
+	if err != nil {
+		return nil, fmt.Errorf("get agent team summary: %w", err)
+	}
 	if len(summaries) == 0 {
 		return nil, ErrNotFound
 	}
