@@ -1497,7 +1497,21 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin({
+            use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::LogDir {
+                        file_name: Some("AgentForge".to_string()),
+                    }),
+                    Target::new(TargetKind::Webview),
+                ])
+                .max_file_size(10_000_000_u128)
+                .rotation_strategy(RotationStrategy::KeepAll)
+                .build()
+        })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(updater_plugin_builder().build())
