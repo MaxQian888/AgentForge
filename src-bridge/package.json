@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "bun run src/server.ts",
     "build": "bun build src/server.ts --compile --outfile=bridge",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.63",
@@ -23,6 +24,9 @@
   "devDependencies": {
     "@types/bun": "^1.3.2",
     "@types/ws": "^8.18.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.0",
+    "@typescript-eslint/parser": "^8.59.0",
+    "eslint": "^10.2.1",
     "typescript": "^5.9.0"
   }
 }

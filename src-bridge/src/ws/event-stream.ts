@@ -1,6 +1,9 @@
 import WebSocket from "ws";
 import type { AgentEvent } from "../types.js";
 import type { MCPServerStatus } from "../mcp/types.js";
+import { createLogger } from "../lib/logger.js";
+
+const log = createLogger().child({ module: "event-streamer" });
 
 /** Provider for heartbeat status data. */
 export interface HeartbeatStatusProvider {
@@ -42,7 +45,7 @@ export class EventStreamer {
     this.ws = new WebSocket(this.url);
 
     this.ws.on("open", () => {
-      console.log("[EventStreamer] Connected to Go WS");
+      log.info("connected to go ws");
       this.reconnectDelay = 1000;
       this.flushBuffer();
       this.startHeartbeat();
@@ -58,7 +61,7 @@ export class EventStreamer {
     });
 
     this.ws.on("close", () => {
-      console.log("[EventStreamer] Connection closed");
+      log.info("connection closed");
       this.stopHeartbeat();
       if (!this.closed) {
         this.scheduleReconnect();
@@ -66,7 +69,7 @@ export class EventStreamer {
     });
 
     this.ws.on("error", (err) => {
-      console.error("[EventStreamer] Error:", err.message);
+      log.error({ err }, "websocket error");
     });
   }
 
@@ -96,7 +99,7 @@ export class EventStreamer {
 
   private scheduleReconnect(): void {
     this.stopHeartbeat();
-    console.log(`[EventStreamer] Reconnecting in ${this.reconnectDelay}ms...`);
+    log.info({ reconnect_delay_ms: this.reconnectDelay }, "reconnecting");
     this.reconnectTimer = setTimeout(() => this.connect(), this.reconnectDelay);
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
   }
