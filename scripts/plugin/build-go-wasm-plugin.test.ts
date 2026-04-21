@@ -12,21 +12,21 @@ describe("build-go-wasm-plugin target resolution", () => {
         process.cwd(),
         "plugins",
         "integrations",
-        "feishu-adapter",
+        "sample-integration-plugin",
         "manifest.yaml",
       ),
     });
 
     expect(target).toMatchObject({
-      pluginId: "feishu-adapter",
+      pluginId: "sample-integration-plugin",
       runtime: "wasm",
       modulePath: path.join(
         process.cwd(),
         "plugins",
         "integrations",
-        "feishu-adapter",
+        "sample-integration-plugin",
         "dist",
-        "feishu.wasm",
+        "sample-integration.wasm",
       ),
       sourcePath: "./cmd/sample-wasm-plugin",
     });
