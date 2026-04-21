@@ -431,12 +431,40 @@ type IMBridgeRegisterRequest struct {
 	// backend projectId so the router can resolve (bridge, provider, tenant)
 	// triples without a separate lookup.
 	TenantManifest []IMTenantBinding `json:"tenantManifest,omitempty"`
+	// New fields — optional, back-compat preserved.
+	Providers      []IMBridgeProvider      `json:"providers,omitempty"`
+	CommandPlugins []IMBridgeCommandPlugin `json:"commandPlugins,omitempty"`
 }
 
 // IMTenantBinding maps a tenantID to a backend project.
 type IMTenantBinding struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"projectId"`
+}
+
+// IMBridgeProvider describes one IM provider active on a Bridge process.
+// When a Bridge hosts a single provider, Providers[0] content mirrors the
+// top-level Platform/Transport/CapabilityMatrix/CallbackPaths/Tenants fields.
+type IMBridgeProvider struct {
+	ID               string            `json:"id"`
+	Transport        string            `json:"transport"`
+	ReadinessTier    string            `json:"readinessTier,omitempty"`
+	CapabilityMatrix map[string]any    `json:"capabilityMatrix,omitempty"`
+	CallbackPaths    []string          `json:"callbackPaths,omitempty"`
+	Tenants          []string          `json:"tenants,omitempty"`
+	// MetadataSource is "builtin" today. Reserved values: "oop-grpc".
+	MetadataSource   string            `json:"metadataSource"`
+}
+
+// IMBridgeCommandPlugin mirrors a core/plugin manifest loaded by a Bridge.
+// Read-only; the Go orchestrator cannot enable/disable command plugins via
+// this channel.
+type IMBridgeCommandPlugin struct {
+	ID         string   `json:"id"`
+	Version    string   `json:"version"`
+	Commands   []string `json:"commands"`
+	Tenants    []string `json:"tenants,omitempty"`
+	SourcePath string   `json:"sourcePath,omitempty"`
 }
 
 // IMBridgeInstance describes the server-side view of a registered Bridge.
@@ -454,6 +482,9 @@ type IMBridgeInstance struct {
 	LastSeenAt       string            `json:"lastSeenAt,omitempty"`
 	ExpiresAt        string            `json:"expiresAt,omitempty"`
 	Status           string            `json:"status,omitempty"`
+	// New fields
+	Providers      []IMBridgeProvider      `json:"providers,omitempty"`
+	CommandPlugins []IMBridgeCommandPlugin `json:"commandPlugins,omitempty"`
 }
 
 // IMBridgeHeartbeatResponse reports refreshed liveness.
