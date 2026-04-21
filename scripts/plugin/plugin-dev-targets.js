@@ -6,12 +6,12 @@ const path = require("node:path");
 const DEFAULT_GO_WASM_MANIFEST_PATH = path.join(
   "plugins",
   "integrations",
-  "feishu-adapter",
+  "sample-integration-plugin",
   "manifest.yaml",
 );
 
 const MAINTAINED_GO_WASM_TARGETS = {
-  "feishu-adapter": {
+  "sample-integration-plugin": {
     sourcePath: "./cmd/sample-wasm-plugin",
   },
   "standard-dev-flow": {
