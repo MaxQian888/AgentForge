@@ -47,13 +47,10 @@ describe("plugin runtime reporter", () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.input).toBe("https://example.com/runtime");
-    expect(calls[0]?.init).toMatchObject({
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(update),
-    });
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify(update));
+    const headers = new Headers(calls[0]?.init?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
   });
 
   test("throws when the remote report endpoint responds with an error", async () => {

@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { createLogger, withTrace } from "./lib/logger.js";
 import { traceMiddleware } from "./middleware/trace.js";
+import { ingestToOrchestrator } from "./lib/orchestrator-fetch.js";
 
 const log = createLogger();
 import { AgentRuntime } from "./runtime/agent-runtime.js";
@@ -559,8 +560,20 @@ function resolveRuntimeForBridgeControl(taskId: string):
         return c.json({ error: message }, 400);
       }
       if (err instanceof RuntimeConfigurationError) {
+        ingestToOrchestrator(c, {
+          level: "error",
+          source: "ts-bridge",
+          summary: "runtime spawn failed",
+          detail: { err: message },
+        });
         return c.json({ error: message }, 503);
       }
+      ingestToOrchestrator(c, {
+        level: "error",
+        source: "ts-bridge",
+        summary: "runtime spawn failed",
+        detail: { err: message },
+      });
       return c.json({ error: message }, 500);
     }
   }
@@ -1265,6 +1278,12 @@ function resolveRuntimeForBridgeControl(taskId: string):
       return c.json(activated, 200);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      ingestToOrchestrator(c, {
+        level: "warn",
+        source: "ts-bridge",
+        summary: "plugin load failed",
+        detail: { err: message },
+      });
       return c.json({ error: message }, 500);
     }
   }
@@ -1338,6 +1357,12 @@ function resolveRuntimeForBridgeControl(taskId: string):
       }, 200);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      ingestToOrchestrator(c, {
+        level: "warn",
+        source: "ts-bridge",
+        summary: "mcp call failed",
+        detail: { plugin_id: c.req.param("id"), err: message },
+      });
       return c.json({ error: message }, 400);
     }
   }
