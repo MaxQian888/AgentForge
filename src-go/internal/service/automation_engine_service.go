@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	applog "github.com/agentforge/server/internal/log"
 	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
 )
@@ -637,11 +638,26 @@ func (s *AutomationEngineService) executeStartWorkflow(
 	}, nil
 }
 
+// withTraceDetail returns a JSON string for AutomationLog.Detail, merging
+// trace_id from ctx (if present) into the given map.
+func withTraceDetail(ctx context.Context, existing map[string]any) string {
+	if existing == nil {
+		existing = map[string]any{}
+	}
+	if tid := applog.TraceID(ctx); tid != "" {
+		existing["trace_id"] = tid
+	}
+	raw, _ := json.Marshal(existing)
+	if raw == nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
 func (s *AutomationEngineService) writeAutomationLog(ctx context.Context, rule *model.AutomationRule, event AutomationEvent, status string, detail map[string]any) {
 	if s.logs == nil || rule == nil {
 		return
 	}
-	raw, _ := json.Marshal(detail)
 	_ = s.logs.Create(ctx, &model.AutomationLog{
 		ID:          uuid.New(),
 		RuleID:      rule.ID,
@@ -649,7 +665,7 @@ func (s *AutomationEngineService) writeAutomationLog(ctx context.Context, rule *
 		EventType:   event.EventType,
 		TriggeredAt: s.now(),
 		Status:      status,
-		Detail:      string(raw),
+		Detail:      withTraceDetail(ctx, detail),
 	})
 }
 
