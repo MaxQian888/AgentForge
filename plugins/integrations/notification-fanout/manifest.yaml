@@ -1,0 +1,28 @@
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: notification-fanout
+  name: Notification Fanout
+  version: 0.1.0
+  description: >-
+    First-party in-proc plugin that routes one notification to multiple
+    delivery channels — IM via the IM Bridge (through IMService) and
+    email via the email-adapter plugin. Keeps the IM Bridge as the sole
+    transport owner for IM platforms.
+  tags:
+    - builtin
+    - integration
+    - notification
+spec:
+  runtime: firstparty-inproc
+  capabilities:
+    - health
+    - fanout
+  config:
+    hook: src-go/internal/server/notification_fanout_plugin.go:NewNotificationFanoutPlugin
+permissions:
+  network:
+    required: false
+source:
+  type: builtin
+  path: ./plugins/integrations/notification-fanout/manifest.yaml

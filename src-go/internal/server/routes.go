@@ -197,6 +197,43 @@ func (a webhookEventPublisherAdapter) PublishRaw(ctx context.Context, eventType 
 	return eventbus.PublishLegacy(ctx, a.bus, eventType, "", payload)
 }
 
+// fanoutIMAdapter satisfies IMNotifier by delegating to IMService.Notify.
+// Wraps the (platform, channelID, text) tuple into the canonical
+// IMNotifyRequest envelope. Event="notification.fanout" labels the
+// delivery so downstream subscribers can recognize it.
+type fanoutIMAdapter struct{ svc *service.IMService }
+
+func (a fanoutIMAdapter) Notify(ctx context.Context, platform, channelID, text string) error {
+	if a.svc == nil {
+		return fmt.Errorf("notification-fanout: IMService not configured")
+	}
+	return a.svc.Notify(ctx, &model.IMNotifyRequest{
+		Platform:  platform,
+		ChannelID: channelID,
+		Event:     "notification.fanout",
+		Body:      text,
+	})
+}
+
+// fanoutEmailAdapter satisfies EmailSender by invoking the email-adapter
+// plugin's send_email operation through the shared plugin runtime. The
+// plugin must be installed and active for sends to succeed; if it isn't,
+// the underlying PluginService.Invoke returns the appropriate error and
+// notification-fanout aggregates it into its return value.
+type fanoutEmailAdapter struct{ svc *service.PluginService }
+
+func (a fanoutEmailAdapter) SendEmail(ctx context.Context, to, subject, body string) error {
+	if a.svc == nil {
+		return fmt.Errorf("notification-fanout: PluginService not configured")
+	}
+	_, err := a.svc.Invoke(ctx, "email-adapter", "send_email", map[string]any{
+		"to":      to,
+		"subject": subject,
+		"body":    body,
+	})
+	return err
+}
+
 type bridgeIntentAdapter struct {
 	client *bridge.Client
 }
@@ -370,6 +407,12 @@ type RouteServices struct {
 	Automation   *service.AutomationEngineService
 	AuditSink    *service.AuditSink
 	Invitation   *service.InvitationService
+	// NotificationFanout is the first-party fanout service that routes a
+	// single notification across IM (via IM Bridge through IMService) and
+	// email (via the email-adapter plugin). Exposed here so future
+	// consumers (workflow nodes, automation actions, alerting) can take a
+	// single dependency without re-deriving the fanout wiring.
+	NotificationFanout *NotificationFanoutPlugin
 	// PluginBackgroundRunners are long-running goroutines contributed by
 	// first-party plugins (e.g. the qianchuan token refresher). main.go
 	// supervises them uniformly, so core routing has no compile-time
@@ -1527,6 +1570,28 @@ func RegisterRoutes(
 	// gates itself behind an env flag and returns nil when disabled. See
 	// plugins/qianchuan-ads/plugin.go and the manifest at
 	// plugins/integrations/qianchuan-ads/manifest.yaml.
+
+	// notification-fanout (first-party inproc): routes one notification
+	// across multiple channels — IM via IMService (which the IM Bridge
+	// owns transport for) and email via the email-adapter plugin. The
+	// service is consumed in-proc by callers that have a *NotificationFanoutPlugin
+	// reference; the manifest registration here only contributes
+	// control-plane visibility (GET /api/v1/plugins). Failures of the
+	// self-registration are non-fatal — same policy as qianchuan.
+	notificationFanout := NewNotificationFanoutPlugin(
+		fanoutIMAdapter{svc: imSvc},
+		fanoutEmailAdapter{svc: pluginSvc},
+	)
+	if pluginSvc != nil {
+		notifyManifestPath := os.Getenv("AGENTFORGE_NOTIFICATION_FANOUT_MANIFEST")
+		if notifyManifestPath == "" {
+			notifyManifestPath = "plugins/integrations/notification-fanout/manifest.yaml"
+		}
+		if _, err := pluginSvc.RegisterFirstPartyInProc(context.Background(), notifyManifestPath); err != nil {
+			log.WithError(err).Warn("notification-fanout: self-registration into control plane failed")
+		}
+	}
+
 	var pluginRunners []BackgroundRunner
 	if r := qianchuanads.Install(qianchuanads.InstallDeps{
 		DB:           taskRepo.DB(),
@@ -1551,6 +1616,7 @@ func RegisterRoutes(
 		Automation:              automationEngine,
 		AuditSink:               auditSink,
 		Invitation:              invitationSvc,
+		NotificationFanout:      notificationFanout,
 		PluginBackgroundRunners: pluginRunners,
 	}
 }
