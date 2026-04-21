@@ -1,0 +1,27 @@
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: hierarchical-demo
+  name: Hierarchical Demo
+  version: 0.1.0
+  description: Demo hierarchical workflow — manager decomposes the input, workers run in parallel, manager aggregates the results.
+  tags:
+    - demo
+    - workflow
+    - hierarchical
+spec:
+  runtime: wasm
+  module: ./dist/hierarchical-demo.wasm
+  abiVersion: v1
+  workflow:
+    process: hierarchical
+    managerRole: project-assistant
+    workerRoles:
+      - coding-agent
+      - test-engineer
+    maxParallelWorkers: 2
+    workerFailurePolicy: best_effort
+    aggregation: manager_summarize
+source:
+  type: builtin
+  path: ./plugins/workflows/hierarchical-demo/manifest.yaml
