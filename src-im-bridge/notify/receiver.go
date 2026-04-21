@@ -18,6 +18,7 @@ import (
 
 	"github.com/agentforge/im-bridge/audit"
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/internal/tracectx"
 )
 
 // DefaultSignatureSkew is the fallback window for timestamp skew checks
@@ -257,7 +258,7 @@ func (r *Receiver) Start() error {
 
 	r.server = &http.Server{
 		Addr:    ":" + r.port,
-		Handler: mux,
+		Handler: withTrace(mux),
 	}
 
 	log.WithFields(log.Fields{"component": "notify", "port": r.port}).Info("Notification receiver starting")
@@ -305,6 +306,14 @@ func (r *Receiver) Stop() error {
 
 func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	start := r.now()
+	ctx := req.Context()
+	if tracectx.TraceID(ctx) == "" {
+		ctx = tracectx.With(ctx, tracectx.New())
+		log.WithFields(log.Fields{
+			"trace_id": tracectx.TraceID(ctx),
+			"origin":   "im.webhook",
+		}).Info("trace.generated_for_background_job")
+	}
 	deliveryID := strings.TrimSpace(req.Header.Get("X-AgentForge-Delivery-Id"))
 	bodyBytes, ok := r.verifyAndRememberDelivery(w, req, "/im/notify")
 	if !ok {
@@ -326,8 +335,6 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, fmt.Sprintf("notification platform %q does not match active platform %q", notificationPlatform, activePlatform), http.StatusConflict)
 		return
 	}
-
-	ctx := context.Background()
 	chatID := n.TargetChatID
 	if chatID == "" {
 		chatID = n.TargetIMUserID // fallback to DM
@@ -344,7 +351,7 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 			Metadata:    n.Metadata,
 		})
 		if err != nil {
-			log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send typed payload")
+			log.WithFields(log.Fields{"component": "notify", "chat_id": chatID, "trace_id": tracectx.TraceID(ctx)}).WithError(err).Error("Failed to send typed payload")
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			r.emitFailed("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, err.Error(), start)
 			return
@@ -358,7 +365,7 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	if n.Card != nil && r.metadata.Capabilities.SupportsRichMessages {
 		if _, ok := r.platform.(core.CardSender); ok {
 			if _, err := core.DeliverCard(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Card); err != nil {
-				log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send card")
+				log.WithFields(log.Fields{"component": "notify", "chat_id": chatID, "trace_id": tracectx.TraceID(ctx)}).WithError(err).Error("Failed to send card")
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				r.emitFailed("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, err.Error(), start)
 				return
@@ -372,7 +379,7 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 
 	// Fallback to plain text.
 	if _, err := core.DeliverText(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Content); err != nil {
-		log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send message")
+		log.WithFields(log.Fields{"component": "notify", "chat_id": chatID, "trace_id": tracectx.TraceID(ctx)}).WithError(err).Error("Failed to send message")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		r.emitFailed("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, err.Error(), start)
 		return
@@ -442,7 +449,7 @@ func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := req.Context()
 
 	// Card path: spec §8 ProviderNeutralCard. Mutually exclusive with the
 	// content/structured/native/attachments envelope.
@@ -703,6 +710,14 @@ type ActionResponse struct {
 
 func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 	start := r.now()
+	ctx := req.Context()
+	if tracectx.TraceID(ctx) == "" {
+		ctx = tracectx.With(ctx, tracectx.New())
+		log.WithFields(log.Fields{
+			"trace_id": tracectx.TraceID(ctx),
+			"origin":   "im.inbound",
+		}).Info("trace.generated_for_background_job")
+	}
 	var a ActionRequest
 	if err := json.NewDecoder(req.Body).Decode(&a); err != nil {
 		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
@@ -718,10 +733,9 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
 	result, err := r.actionHandler.HandleAction(ctx, &a)
 	if err != nil {
-		log.WithFields(log.Fields{"component": "notify", "action": a.Action, "entity_id": a.EntityID}).WithError(err).Error("Action failed")
+		log.WithFields(log.Fields{"component": "notify", "action": a.Action, "entity_id": a.EntityID, "trace_id": tracectx.TraceID(ctx)}).WithError(err).Error("Action failed")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		r.emitAudit(audit.Event{
 			Direction:  audit.DirectionAction,
