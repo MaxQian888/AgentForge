@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	applog "github.com/agentforge/server/internal/log"
 	memorypkg "github.com/agentforge/server/internal/memory"
+	log "github.com/sirupsen/logrus"
 )
 
 const defaultHistoryLimit = 256
@@ -282,6 +285,12 @@ func (r *InstructionRouter) executePrepared(ctx context.Context, req Request, de
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			buf := make([]byte, 4<<10)
+			n := runtime.Stack(buf, false)
+			log.WithFields(log.Fields{
+				"trace_id": applog.TraceID(ctx),
+				"stack":    string(buf[:n]),
+			}).Error("panic in instruction router")
 			err = fmt.Errorf("instruction handler panic: %v", recovered)
 			result.Status = StatusFailed
 			result.Error = err.Error()

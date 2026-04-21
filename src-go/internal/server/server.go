@@ -54,7 +54,20 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 	}
 
 	// Middleware stack (order matters)
-	e.Use(echomiddleware.Recover())
+	e.Use(echomiddleware.RecoverWithConfig(echomiddleware.RecoverConfig{
+		StackSize:         4 << 10, // 4 KB
+		DisableStackAll:   false,
+		DisablePrintStack: false,
+		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
+			log.WithFields(log.Fields{
+				"trace_id": applog.TraceID(c.Request().Context()),
+				"path":     c.Request().URL.Path,
+				"method":   c.Request().Method,
+				"stack":    string(stack),
+			}).WithError(err).Error("panic recovered")
+			return err
+		},
+	}))
 	e.Use(echomiddleware.RequestID())
 	e.Use(appMiddleware.Trace()) // trace_id correlation — must precede request logger
 	e.Use(echomiddleware.RequestLoggerWithConfig(echomiddleware.RequestLoggerConfig{

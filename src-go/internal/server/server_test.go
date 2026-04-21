@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/agentforge/server/internal/bridge"
 	"github.com/agentforge/server/internal/config"
 	"github.com/agentforge/server/internal/eventbus"
+	applog "github.com/agentforge/server/internal/log"
 	"github.com/agentforge/server/internal/model"
 	"github.com/agentforge/server/internal/repository"
 	"github.com/agentforge/server/internal/server"
@@ -23,7 +25,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/redis/go-redis/v9"
+	log "github.com/sirupsen/logrus"
 )
 
 func testConfig() *config.Config {
@@ -839,5 +843,63 @@ func TestPprof_RequiresValidToken(t *testing.T) {
 	e.ServeHTTP(recOK, reqOK)
 	if recOK.Code != http.StatusOK {
 		t.Errorf("GET /debug/pprof/heap with valid token: expected 200, got %d", recOK.Code)
+	}
+}
+
+func TestPanicRecovery_LogsStack(t *testing.T) {
+	// Capture logrus output into a buffer.
+	var buf bytes.Buffer
+	old := log.StandardLogger().Out
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(old) })
+
+	const traceID = "test-trace-id-panic-001"
+
+	// Build a minimal Echo instance with the same RecoverWithConfig used in server.New.
+	e := echo.New()
+	e.HideBanner = true
+	e.Use(echomiddleware.RecoverWithConfig(echomiddleware.RecoverConfig{
+		StackSize:         4 << 10,
+		DisableStackAll:   false,
+		DisablePrintStack: false,
+		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
+			log.WithFields(log.Fields{
+				"trace_id": applog.TraceID(c.Request().Context()),
+				"path":     c.Request().URL.Path,
+				"method":   c.Request().Method,
+				"stack":    string(stack),
+			}).WithError(err).Error("panic recovered")
+			return err
+		},
+	}))
+
+	// Route that panics deliberately.
+	e.GET("/panic-test", func(c echo.Context) error {
+		panic("deliberate test panic")
+	})
+
+	// Inject a trace_id into the request context so the middleware can read it.
+	req := httptest.NewRequest(http.MethodGet, "/panic-test", nil)
+	ctx := applog.WithTrace(req.Context(), traceID)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	// 1. Response must be 500.
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", rec.Code)
+	}
+
+	logged := buf.String()
+
+	// 2. Log must contain the "panic recovered" message or a stack trace marker.
+	if !strings.Contains(logged, "panic recovered") && !strings.Contains(logged, "stack") {
+		t.Errorf("expected log to contain 'panic recovered' or 'stack', got: %s", logged)
+	}
+
+	// 3. Log must contain the trace_id.
+	if !strings.Contains(logged, traceID) {
+		t.Errorf("expected log to contain trace_id %q, got: %s", traceID, logged)
 	}
 }
