@@ -88,8 +88,8 @@ func TestDocumentHandler_Upload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	part.Write([]byte("fake docx content"))
-	w.Close()
+	_, _ = part.Write([]byte("fake docx content"))
+	_ = w.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/", &buf)
 	req.Header.Set(echo.HeaderContentType, w.FormDataContentType())

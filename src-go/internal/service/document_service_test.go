@@ -72,8 +72,8 @@ func createTestDocx(text string) []byte {
   </w:body>
 </w:document>`
 	f, _ := w.Create("word/document.xml")
-	f.Write([]byte(docXML))
-	w.Close()
+	_, _ = f.Write([]byte(docXML))
+	_ = w.Close()
 	return buf.Bytes()
 }
 

@@ -832,8 +832,8 @@ security:
 	writer := newMultipartWriter(&buf)
 	writer.WriteField("type", "role")
 	part, _ := writer.CreateFormFile("file", "sideload-test.zip")
-	part.Write(roleZip)
-	writer.Close()
+	_, _ = part.Write(roleZip)
+	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/marketplace/sideload", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -887,8 +887,8 @@ description: Sideloaded skill
 	writer := newMultipartWriter(&buf)
 	writer.WriteField("type", "skill")
 	part, _ := writer.CreateFormFile("file", "sideload-skill.zip")
-	part.Write(skillZip)
-	writer.Close()
+	_, _ = part.Write(skillZip)
+	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/marketplace/sideload", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())

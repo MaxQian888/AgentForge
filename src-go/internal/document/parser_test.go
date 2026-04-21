@@ -290,8 +290,8 @@ func TestDocxParser_Chunking(t *testing.T) {
 	sb.WriteString(`</w:body></w:document>`)
 
 	f, _ := w.Create("word/document.xml")
-	f.Write([]byte(sb.String()))
-	w.Close()
+	_, _ = f.Write([]byte(sb.String()))
+	_ = w.Close()
 
 	parser := &DocxParser{}
 	chunks, err := parser.Parse(bytes.NewReader(buf.Bytes()))

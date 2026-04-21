@@ -208,7 +208,7 @@ func (h *MarketplaceHandler) Install(c echo.Context) error {
 	tee := io.TeeReader(resp.Body, hasher)
 	if _, err := io.Copy(f, tee); err != nil {
 		f.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		installState.FailureReason = "failed to download artifact"
 		_ = h.writeConsumptionState(installState)
 		return c.JSON(http.StatusInternalServerError, model.MarketplaceInstallResponse{
@@ -223,7 +223,7 @@ func (h *MarketplaceHandler) Install(c echo.Context) error {
 	// 3. Verify digest.
 	actualDigest := hex.EncodeToString(hasher.Sum(nil))
 	if expectedDigest != "" && actualDigest != expectedDigest {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		installState.FailureReason = "artifact digest mismatch"
 		_ = h.writeConsumptionState(installState)
 		return c.JSON(http.StatusBadRequest, model.MarketplaceInstallResponse{
@@ -760,7 +760,7 @@ func (h *MarketplaceHandler) extractZipPackage(artifactPath string, tempParent s
 	if err != nil {
 		return "", &marketplaceArtifactError{message: fmt.Sprintf("invalid artifact: expected zip archive: %v", err)}
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	if err := os.MkdirAll(tempParent, 0o755); err != nil {
 		return "", err
@@ -1032,7 +1032,7 @@ func (h *MarketplaceHandler) Sideload(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create temp file"})
 	}
 	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	if _, err := io.Copy(tmpFile, src); err != nil {
 		tmpFile.Close()
