@@ -1,4 +1,34 @@
 import { DEFAULT_LOCALE, getPreferredLocale } from "@/lib/stores/locale-store";
+import { setTraceId } from "./log";
+
+// ---------------------------------------------------------------------------
+// Trace-id helpers
+// ---------------------------------------------------------------------------
+
+const CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz";
+
+function newTraceId(): string {
+  const bytes = new Uint8Array(15);
+  // Works in both browser (globalThis.crypto) and Node.js (webcrypto fallback).
+  const cryptoImpl =
+    globalThis.crypto ??
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    (require("node:crypto") as { webcrypto: Crypto }).webcrypto;
+  cryptoImpl.getRandomValues(bytes);
+  let bits = 0, buf = 0, out = "";
+  for (const b of bytes) {
+    buf = (buf << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      out += CROCKFORD[(buf >> bits) & 0x1f];
+    }
+  }
+  if (bits > 0) out += CROCKFORD[(buf << (5 - bits)) & 0x1f];
+  return "tr_" + out.slice(0, 24);
+}
+
+// ---------------------------------------------------------------------------
 
 function getLocale(): string {
   try {
@@ -60,6 +90,22 @@ async function request<T>(
   init: RequestInit,
   _isRetry = false
 ): Promise<ApiResponse<T>> {
+  // Resolve trace id: honor caller-supplied X-Trace-ID, else mint a fresh one.
+  // Work with plain objects to preserve header-name casing for existing tests.
+  const rawHeaders = (init.headers ?? {}) as Record<string, string>;
+  // Case-insensitive lookup for X-Trace-ID (callers may use any casing).
+  const existingTrace =
+    rawHeaders["X-Trace-ID"] ??
+    rawHeaders["x-trace-id"] ??
+    rawHeaders["X-Trace-Id"] ??
+    null;
+  const trace = existingTrace ?? newTraceId();
+  setTraceId(trace);
+  init = {
+    ...init,
+    headers: { ...rawHeaders, "X-Trace-ID": trace },
+  };
+
   const url = `${baseUrl.replace(/\/$/, "")}${path}`;
   const res = await fetch(url, {
     ...init,
@@ -123,13 +169,14 @@ export class ApiError extends Error {
 export function createApiClient(baseUrl: string) {
   return {
     get<T>(path: string, opts?: RequestOptions & { token?: string }) {
-      const { token, ...rest } = opts ?? {};
+      const { token, headers: callerHeaders, ...rest } = opts ?? {};
       return request<T>(baseUrl, path, {
         ...rest,
         method: "GET",
-        headers: token
-          ? { Authorization: `Bearer ${token}` }
-          : undefined,
+        headers: {
+          ...(callerHeaders as Record<string, string> | undefined),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
     },
 
@@ -138,14 +185,15 @@ export function createApiClient(baseUrl: string) {
       body: unknown,
       opts?: RequestOptions & { token?: string }
     ) {
-      const { token, ...rest } = opts ?? {};
+      const { token, headers: callerHeaders, ...rest } = opts ?? {};
       return request<T>(baseUrl, path, {
         ...rest,
         method: "POST",
         body: JSON.stringify(body),
-        headers: token
-          ? { Authorization: `Bearer ${token}` }
-          : undefined,
+        headers: {
+          ...(callerHeaders as Record<string, string> | undefined),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
     },
 
@@ -154,14 +202,15 @@ export function createApiClient(baseUrl: string) {
       body: unknown,
       opts?: RequestOptions & { token?: string }
     ) {
-      const { token, ...rest } = opts ?? {};
+      const { token, headers: callerHeaders, ...rest } = opts ?? {};
       return request<T>(baseUrl, path, {
         ...rest,
         method: "PUT",
         body: JSON.stringify(body),
-        headers: token
-          ? { Authorization: `Bearer ${token}` }
-          : undefined,
+        headers: {
+          ...(callerHeaders as Record<string, string> | undefined),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
     },
 
@@ -170,25 +219,27 @@ export function createApiClient(baseUrl: string) {
       body: unknown,
       opts?: RequestOptions & { token?: string }
     ) {
-      const { token, ...rest } = opts ?? {};
+      const { token, headers: callerHeaders, ...rest } = opts ?? {};
       return request<T>(baseUrl, path, {
         ...rest,
         method: "PATCH",
         body: JSON.stringify(body),
-        headers: token
-          ? { Authorization: `Bearer ${token}` }
-          : undefined,
+        headers: {
+          ...(callerHeaders as Record<string, string> | undefined),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
     },
 
     delete<T>(path: string, opts?: RequestOptions & { token?: string }) {
-      const { token, ...rest } = opts ?? {};
+      const { token, headers: callerHeaders, ...rest } = opts ?? {};
       return request<T>(baseUrl, path, {
         ...rest,
         method: "DELETE",
-        headers: token
-          ? { Authorization: `Bearer ${token}` }
-          : undefined,
+        headers: {
+          ...(callerHeaders as Record<string, string> | undefined),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
     },
 

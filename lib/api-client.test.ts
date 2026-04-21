@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { createApiClient, ApiError, registerTokenRefresh } from "./api-client";
 import { LOCALE_STORAGE_KEY, useLocaleStore } from "@/lib/stores/locale-store";
 
@@ -363,5 +366,47 @@ describe("createApiClient", () => {
       expect(r1.data).toEqual({ ok: true });
       expect(r2.data).toEqual({ ok: true });
     });
+  });
+});
+
+describe("api-client trace injection", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("adds X-Trace-ID header when absent", async () => {
+    let captured = "";
+    global.fetch = jest.fn().mockImplementation((_url: string, init: RequestInit) => {
+      // At this point init.headers is the merged plain-object headers from request()
+      captured = (init.headers as Record<string, string>)["X-Trace-ID"] ?? "";
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({}),
+      });
+    }) as unknown as typeof fetch;
+
+    const c = createApiClient("http://x");
+    await c.get("/whatever");
+    expect(captured.startsWith("tr_")).toBe(true);
+    expect(captured.length).toBe(27); // "tr_" (3) + 24 crockford chars
+  });
+
+  it("preserves caller-supplied X-Trace-ID header", async () => {
+    let captured = "";
+    global.fetch = jest.fn().mockImplementation((_url: string, init: RequestInit) => {
+      captured = (init.headers as Record<string, string>)["X-Trace-ID"] ?? "";
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({}),
+      });
+    }) as unknown as typeof fetch;
+
+    const c = createApiClient("http://x");
+    await c.get("/whatever", {
+      headers: { "X-Trace-ID": "tr_supplied0000000000000000" },
+    });
+    expect(captured).toBe("tr_supplied0000000000000000");
   });
 });
