@@ -160,6 +160,16 @@ type WorkflowPluginSpec struct {
 	Steps    []WorkflowStepDefinition `yaml:"steps,omitempty" json:"steps,omitempty"`
 	Triggers []PluginWorkflowTrigger  `yaml:"triggers,omitempty" json:"triggers,omitempty"`
 	Limits   *WorkflowExecutionLimits `yaml:"limits,omitempty" json:"limits,omitempty"`
+
+	// Hierarchical-mode fields. ManagerRole and WorkerRoles together drive
+	// the manager → workers → aggregate flow; MaxParallelWorkers caps
+	// concurrent worker dispatch (0 = no cap, all workers run in parallel).
+	// WorkerFailurePolicy is "best_effort" (default) or "fail_fast".
+	ManagerRole         string   `yaml:"managerRole,omitempty" json:"managerRole,omitempty"`
+	WorkerRoles         []string `yaml:"workerRoles,omitempty" json:"workerRoles,omitempty"`
+	MaxParallelWorkers  int      `yaml:"maxParallelWorkers,omitempty" json:"maxParallelWorkers,omitempty"`
+	WorkerFailurePolicy string   `yaml:"workerFailurePolicy,omitempty" json:"workerFailurePolicy,omitempty"`
+	Aggregation         string   `yaml:"aggregation,omitempty" json:"aggregation,omitempty"`
 }
 
 type WorkflowRoleBinding struct {
@@ -179,6 +189,15 @@ type PluginWorkflowTrigger struct {
 	Event        string `yaml:"event,omitempty" json:"event,omitempty"`
 	Profile      string `yaml:"profile,omitempty" json:"profile,omitempty"`
 	RequiresTask bool   `yaml:"requiresTask,omitempty" json:"requiresTask,omitempty"`
+
+	// Event-driven-mode fields. Filter is a key→value match against the event
+	// payload (all keys must match for the trigger to fire). Role + Action
+	// describe the workflow step the executor dispatches when matched.
+	// MaxConcurrent caps in-flight dispatches per trigger (0 = 1).
+	Filter        map[string]any `yaml:"filter,omitempty" json:"filter,omitempty"`
+	Role          string         `yaml:"role,omitempty" json:"role,omitempty"`
+	Action        string         `yaml:"action,omitempty" json:"action,omitempty"`
+	MaxConcurrent int            `yaml:"maxConcurrent,omitempty" json:"maxConcurrent,omitempty"`
 }
 
 type WorkflowExecutionLimits struct {
