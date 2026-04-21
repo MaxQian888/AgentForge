@@ -3,7 +3,35 @@ package model
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/go-playground/validator/v10"
 )
+
+func TestIMMessageRequest_PlatformValidatorAcceptsAllRegisteredProviders(t *testing.T) {
+	v := validator.New()
+	// Must stay in sync with the oneof validator on IMMessageRequest.Platform.
+	for _, platform := range []string{
+		"feishu",
+		"dingtalk",
+		"slack",
+		"telegram",
+		"discord",
+		"wecom",
+		"wechat",
+		"qq",
+		"qqbot",
+		"email",
+	} {
+		req := &IMMessageRequest{Platform: platform, ChannelID: "c", Text: "t"}
+		if err := v.Struct(req); err != nil {
+			t.Fatalf("platform %q should validate, got %v", platform, err)
+		}
+	}
+
+	if err := v.Struct(&IMMessageRequest{Platform: "unknown-platform", ChannelID: "c", Text: "t"}); err == nil {
+		t.Fatalf("unknown platform should fail validation")
+	}
+}
 
 func TestIMReplyTarget_JSONRoundTripPreservesNativeUpdateHints(t *testing.T) {
 	target := &IMReplyTarget{

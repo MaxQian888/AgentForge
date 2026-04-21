@@ -8,7 +8,7 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("feishu", "slack", "dingtalk", "telegram", "discord", "wecom", "qq", "qqbot")]
+    [ValidateSet("feishu", "slack", "dingtalk", "telegram", "discord", "wecom", "wechat", "qq", "qqbot", "email")]
     [string]$Platform,
 
     [int]$Port = 7780,

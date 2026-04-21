@@ -73,6 +73,25 @@ export const PLATFORM_DEFINITIONS: Record<IMPlatform, PlatformDefinition> = {
       },
     ],
   },
+  wechat: {
+    label: "WeChat (iLinks)",
+    icon: MessageCircleMore,
+    configFields: [
+      { key: "appId", label: "App ID", placeholder: "wx1234567890" },
+      {
+        key: "appSecret",
+        label: "App Secret",
+        placeholder: "wechat-app-secret",
+        type: "password",
+      },
+      {
+        key: "callbackToken",
+        label: "Callback Token",
+        placeholder: "wechat-callback-token",
+        type: "password",
+      },
+    ],
+  },
   qq: {
     label: "QQ",
     icon: MessageCircleMore,

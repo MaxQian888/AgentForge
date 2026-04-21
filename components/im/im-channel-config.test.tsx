@@ -84,6 +84,9 @@ describe("IMChannelConfig", () => {
 
     await user.click(screen.getByRole("button", { name: "New Channel" }));
     await user.click(screen.getByRole("combobox", { name: "Platform" }));
+    expect(
+      screen.getByRole("option", { name: "WeChat (iLinks)" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "QQ Bot" }));
 
     expect(screen.getByLabelText("App ID")).toBeInTheDocument();

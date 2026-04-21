@@ -12,6 +12,7 @@ export type IMPlatform =
   | "telegram"
   | "discord"
   | "wecom"
+  | "wechat"
   | "qq"
   | "qqbot"
   | "email";

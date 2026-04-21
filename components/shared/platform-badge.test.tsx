@@ -11,4 +11,14 @@ describe("PlatformBadge", () => {
       "qqbot",
     );
   });
+
+  it("renders the personal wechat (iLinks) platform", () => {
+    render(<PlatformBadge platform="wechat" />);
+
+    expect(screen.getByText("WeChat (iLinks)")).toBeInTheDocument();
+    expect(screen.getByTestId("platform-badge-wechat")).toHaveAttribute(
+      "data-platform",
+      "wechat",
+    );
+  });
 });

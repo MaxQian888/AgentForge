@@ -100,6 +100,7 @@
     "telegram": "Telegram",
     "discord": "Discord",
     "wecom": "企业微信",
+    "wechat": "个人微信 (iLinks)",
     "qq": "QQ",
     "qqbot": "QQ Bot",
     "email": "邮件"
