@@ -51,6 +51,18 @@ import {
   UnsupportedOperationError,
   type RuntimeOperationName,
 } from "./errors.js";
+import {
+  AcpConnectionPool,
+  MultiplexedClient,
+  createPooledEntryFactory,
+  createAcpRuntimeAdapter,
+  TerminalManager,
+  FsSandbox,
+  AcpCapabilityUnsupported,
+  type AcpDeps,
+  type AcpTaskInput,
+  type AdapterId as AcpAdapterId,
+} from "./acp/index.js";
 
 type EventSink = Pick<EventStreamer, "send">;
 
@@ -370,6 +382,98 @@ export function createRuntimeRegistry(
   const claudeProfile = getRuntimeProfile("claude_code");
   const opencodeProfile = getRuntimeProfile("opencode");
 
+  // ---------------------------------------------------------------------------
+  // ACP infrastructure — shared across all 5 ACP-backed adapters
+  // ---------------------------------------------------------------------------
+  const acpLogger = {
+    debug: (msg: string, ...args: unknown[]) => void (process.env.BRIDGE_ACP_DEBUG && console.debug(`[acp] ${msg}`, ...args)),
+    info: (msg: string, ...args: unknown[]) => console.info(`[acp] ${msg}`, ...args),
+    warn: (msg: string, ...args: unknown[]) => console.warn(`[acp] ${msg}`, ...args),
+    error: (msg: string, ...args: unknown[]) => console.error(`[acp] ${msg}`, ...args),
+  };
+  const acpMultiplexedClient = new MultiplexedClient({ logger: acpLogger });
+  const acpPool = new AcpConnectionPool({
+    logger: acpLogger,
+    factory: createPooledEntryFactory({
+      logger: acpLogger,
+      clientDispatcher: acpMultiplexedClient,
+      resolveEnv: (adapterId): Record<string, string> => {
+        switch (adapterId) {
+          case "claude_code":
+            return { ANTHROPIC_API_KEY: (envLookup("ANTHROPIC_API_KEY") ?? process.env.ANTHROPIC_API_KEY) ?? "" };
+          case "codex":
+            return { OPENAI_API_KEY: (envLookup("OPENAI_API_KEY") ?? process.env.OPENAI_API_KEY) ?? "" };
+          default:
+            return {};
+        }
+      },
+    }),
+  });
+  const acpTerminalManager = new TerminalManager();
+  const acpDeps: AcpDeps = {
+    pool: acpPool,
+    multiplexedClient: acpMultiplexedClient,
+    makeFsSandbox: (root) => new FsSandbox(root),
+    terminalManager: acpTerminalManager,
+    permissionRouter: {
+      async request(_taskId, _toolCall, requestOptions) {
+        // TODO(T-future): Wire into the Bridge permission UX via HookCallbackManager.
+        // HookCallbackManager.register() requires a per-call callbackUrl (an external
+        // HTTP endpoint) that is not available in the static registry context.
+        // For now, auto-select the first presented option (permissive default).
+        // A future task should route this through the per-execute EventSink so the
+        // client can respond via /bridge/permission-response/:request_id.
+        return {
+          outcome: "selected" as const,
+          optionId: (requestOptions as { options?: Array<{ id?: string }> })?.options?.[0]?.id ?? "",
+        };
+      },
+    },
+    resolveMcpServersFor: () => [],
+    thinkingBudgetAdvertisedFor: (adapterId) => adapterId === "claude_code",
+    logger: acpLogger,
+  };
+
+  /**
+   * Helper to create a per-task ACP adapter for one of the 5 migrated adapters.
+   * Respects the BRIDGE_ACP_<ADAPTER>=0 emergency fallback env flag.
+   */
+  function isAcpEnabled(adapterId: AcpAdapterId): boolean {
+    const flag = (envLookup(`BRIDGE_ACP_${adapterId.toUpperCase()}`) ?? process.env[`BRIDGE_ACP_${adapterId.toUpperCase()}`]);
+    return flag !== "0";
+  }
+
+  async function runWithAcpAdapter(
+    adapterId: AcpAdapterId,
+    runtime: AgentRuntime,
+    streamer: EventSink,
+    req: ExecuteRequest,
+    systemPrompt: string,
+    legacyExecute: (runtime: AgentRuntime, streamer: EventSink, req: ExecuteRequest, systemPrompt: string) => Promise<void>,
+  ): Promise<void> {
+    if (!isAcpEnabled(adapterId)) {
+      return legacyExecute(runtime, streamer, req, systemPrompt);
+    }
+    const task: AcpTaskInput = {
+      id: req.task_id,
+      worktreeRoot: req.worktree_path,
+    };
+    // Adapt EventSink.send to the { emit } interface expected by AcpRuntimeAdapter
+    const acpStreamer = { emit: (event: unknown) => streamer.send(event as Parameters<typeof streamer.send>[0]) };
+    const adapter = await createAcpRuntimeAdapter(adapterId)(task, acpStreamer, acpDeps);
+    runtime.acpAdapter = adapter;
+    try {
+      const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${req.prompt}` : req.prompt;
+      await adapter.execute({ prompt: fullPrompt });
+    } finally {
+      runtime.acpAdapter = null;
+      await adapter.dispose().catch(() => undefined);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build the adapters map
+  // ---------------------------------------------------------------------------
   const adapters: Record<AgentRuntimeKey, RuntimeAdapter> = {
     claude_code: {
       key: claudeProfile.key,
@@ -401,49 +505,137 @@ export function createRuntimeRegistry(
         assertDiagnosticsAvailable(await this.getDiagnostics());
       },
       async execute(runtime, streamer, req, systemPrompt) {
-        await streamClaudeRuntime(runtime, streamer, req, systemPrompt, {
-          continuity: options.continuity,
-          queryRunner: options.queryRunner,
-          hookCallbackManager: options.hookCallbackManager,
-          forkSessionRunner: options.forkSessionRunner,
-          now: options.now,
-        });
+        await runWithAcpAdapter(
+          "claude_code",
+          runtime,
+          streamer,
+          req,
+          systemPrompt,
+          async (rt, str, rq, sp) => {
+            await streamClaudeRuntime(rt, str, rq, sp, {
+              continuity: options.continuity,
+              queryRunner: options.queryRunner,
+              hookCallbackManager: options.hookCallbackManager,
+              forkSessionRunner: options.forkSessionRunner,
+              now: options.now,
+            });
+          },
+        );
       },
-      ...createClaudeAdvancedOperations(options),
+      ...createAcpWrappedAdvancedOperations("claude_code", createClaudeAdvancedOperations(options)),
     },
-    codex: createCodexAdapter(codexProfile, {
-      executableLookup,
-      authStatusProvider: codexAuthStatusProvider,
-      codexRuntimeRunner: options.codexRuntimeRunner,
-      defaultCommand: codexCommand,
-      defaultModel: readEnvConfig(envLookup, "CODEX_RUNTIME_MODEL") ?? codexProfile.default_model,
-      now: options.now,
-      activePlugins: options.activePlugins,
-      advancedOperations: options.advancedOperations?.codex,
-      codexForkRunner: options.codexForkRunner,
-      codexRollbackRunner: options.codexRollbackRunner,
-    }),
-    opencode: createOpenCodeReadinessAdapter(opencodeProfile, {
-      transport: opencodeTransport,
-      eventRunner: options.opencodeEventRunner,
-      defaultModel:
-        readEnvConfig(envLookup, "OPENCODE_RUNTIME_MODEL") ?? opencodeProfile.default_model,
-      now: options.now,
-      advancedOperations: options.advancedOperations?.opencode,
-      opencodePendingInteractions: options.opencodePendingInteractions,
-    }),
-    cursor: createCliRuntimeAdapter(getRuntimeProfile("cursor"), {
-      executableLookup,
-      envLookup,
-      commandRuntimeRunner: options.commandRuntimeRunner,
-      now: options.now,
-    }),
-    gemini: createCliRuntimeAdapter(getRuntimeProfile("gemini"), {
-      executableLookup,
-      envLookup,
-      commandRuntimeRunner: options.commandRuntimeRunner,
-      now: options.now,
-    }),
+    codex: (() => {
+      const codexAdapter = createCodexAdapter(codexProfile, {
+        executableLookup,
+        authStatusProvider: codexAuthStatusProvider,
+        codexRuntimeRunner: options.codexRuntimeRunner,
+        defaultCommand: codexCommand,
+        defaultModel: readEnvConfig(envLookup, "CODEX_RUNTIME_MODEL") ?? codexProfile.default_model,
+        now: options.now,
+        activePlugins: options.activePlugins,
+        advancedOperations: options.advancedOperations?.codex,
+        codexForkRunner: options.codexForkRunner,
+        codexRollbackRunner: options.codexRollbackRunner,
+      });
+      const legacyExecute = codexAdapter.execute.bind(codexAdapter);
+      return {
+        ...codexAdapter,
+        async execute(runtime, streamer, req, systemPrompt) {
+          await runWithAcpAdapter("codex", runtime, streamer, req, systemPrompt, legacyExecute);
+        },
+        ...createAcpWrappedAdvancedOperations("codex", createCodexAdvancedOperations({
+          defaultCommand: codexCommand,
+          defaultModel: readEnvConfig(envLookup, "CODEX_RUNTIME_MODEL") ?? codexProfile.default_model,
+          now: options.now,
+          activePlugins: options.activePlugins,
+          advancedOperations: options.advancedOperations?.codex,
+          codexForkRunner: options.codexForkRunner,
+          codexRollbackRunner: options.codexRollbackRunner,
+        })),
+      };
+    })(),
+    opencode: (() => {
+      const opencodeAdapter = createOpenCodeReadinessAdapter(opencodeProfile, {
+        transport: opencodeTransport,
+        eventRunner: options.opencodeEventRunner,
+        defaultModel:
+          readEnvConfig(envLookup, "OPENCODE_RUNTIME_MODEL") ?? opencodeProfile.default_model,
+        now: options.now,
+        advancedOperations: options.advancedOperations?.opencode,
+        opencodePendingInteractions: options.opencodePendingInteractions,
+      });
+      const legacyExecute = opencodeAdapter.execute.bind(opencodeAdapter);
+      return {
+        ...opencodeAdapter,
+        async execute(runtime, streamer, req, systemPrompt) {
+          await runWithAcpAdapter("opencode", runtime, streamer, req, systemPrompt, legacyExecute);
+        },
+        ...createAcpWrappedAdvancedOperations("opencode", createOpenCodeAdvancedOperations({
+          transport: opencodeTransport,
+          eventRunner: options.opencodeEventRunner,
+          defaultModel:
+            readEnvConfig(envLookup, "OPENCODE_RUNTIME_MODEL") ?? opencodeProfile.default_model,
+          now: options.now,
+          advancedOperations: options.advancedOperations?.opencode,
+        })),
+      };
+    })(),
+    cursor: (() => {
+      const cursorAdapter = createCliRuntimeAdapter(getRuntimeProfile("cursor"), {
+        executableLookup,
+        envLookup,
+        commandRuntimeRunner: options.commandRuntimeRunner,
+        now: options.now,
+      });
+      const legacyExecute = cursorAdapter.execute.bind(cursorAdapter);
+      return {
+        ...cursorAdapter,
+        async execute(runtime, streamer, req, systemPrompt) {
+          await runWithAcpAdapter("cursor", runtime, streamer, req, systemPrompt, legacyExecute);
+        },
+        ...createAcpWrappedAdvancedOperations("cursor", {
+          fork: unsupportedOperation("cursor", "fork"),
+          rollback: unsupportedOperation("cursor", "rollback"),
+          revert: unsupportedOperation("cursor", "revert"),
+          getMessages: unsupportedOperation("cursor", "getMessages"),
+          getDiff: unsupportedOperation("cursor", "getDiff"),
+          executeCommand: unsupportedOperation("cursor", "executeCommand"),
+          executeShell: unsupportedOperation("cursor", "executeShell"),
+          setThinkingBudget: unsupportedOperation("cursor", "setThinkingBudget"),
+          getMcpServerStatus: unsupportedOperation("cursor", "getMcpServerStatus"),
+          interrupt: unsupportedOperation("cursor", "interrupt"),
+          setModel: unsupportedOperation("cursor", "setModel"),
+        }),
+      };
+    })(),
+    gemini: (() => {
+      const geminiAdapter = createCliRuntimeAdapter(getRuntimeProfile("gemini"), {
+        executableLookup,
+        envLookup,
+        commandRuntimeRunner: options.commandRuntimeRunner,
+        now: options.now,
+      });
+      const legacyExecute = geminiAdapter.execute.bind(geminiAdapter);
+      return {
+        ...geminiAdapter,
+        async execute(runtime, streamer, req, systemPrompt) {
+          await runWithAcpAdapter("gemini", runtime, streamer, req, systemPrompt, legacyExecute);
+        },
+        ...createAcpWrappedAdvancedOperations("gemini", {
+          fork: unsupportedOperation("gemini", "fork"),
+          rollback: unsupportedOperation("gemini", "rollback"),
+          revert: unsupportedOperation("gemini", "revert"),
+          getMessages: unsupportedOperation("gemini", "getMessages"),
+          getDiff: unsupportedOperation("gemini", "getDiff"),
+          executeCommand: unsupportedOperation("gemini", "executeCommand"),
+          executeShell: unsupportedOperation("gemini", "executeShell"),
+          setThinkingBudget: unsupportedOperation("gemini", "setThinkingBudget"),
+          getMcpServerStatus: unsupportedOperation("gemini", "getMcpServerStatus"),
+          interrupt: unsupportedOperation("gemini", "interrupt"),
+          setModel: unsupportedOperation("gemini", "setModel"),
+        }),
+      };
+    })(),
     qoder: createCliRuntimeAdapter(getRuntimeProfile("qoder"), {
       executableLookup,
       envLookup,
@@ -719,6 +911,139 @@ function createCliRuntimeAdapter(
     getMcpServerStatus: unsupportedOperation(profile.key, "getMcpServerStatus"),
     interrupt: unsupportedOperation(profile.key, "interrupt"),
     setModel: unsupportedOperation(profile.key, "setModel"),
+  };
+}
+
+/**
+ * Wraps a set of legacy advanced operations with ACP-first dispatch.
+ * When `runtime.acpAdapter` is set (ACP path), the methods that AcpRuntimeAdapter
+ * exposes (interrupt, setModel, setThinkingBudget, executeCommand) are delegated
+ * to the ACP adapter. Methods not on AcpRuntimeAdapter
+ * (rollback, revert, getMessages, getDiff, executeShell, getMcpServerStatus, fork)
+ * fall through to the provided legacy operations so that existing functionality
+ * is preserved for adapters that implement those.
+ * When `runtime.acpAdapter` is null (legacy path or BRIDGE_ACP_<X>=0), all ops
+ * fall through to the legacy implementations unchanged.
+ */
+function createAcpWrappedAdvancedOperations(
+  _runtimeKey: AcpAdapterId,
+  legacy: RequiredRuntimeAdvancedOperations,
+): RequiredRuntimeAdvancedOperations {
+  return {
+    async fork(runtime, params) {
+      if (runtime.acpAdapter) {
+        try {
+          const forkedSession = await runtime.acpAdapter.fork();
+          // Return continuity state reflecting the forked session.
+          return {
+            continuity: {
+              runtime: _runtimeKey as string,
+              resume_ready: true,
+              captured_at: Date.now(),
+              session_handle: forkedSession.sessionId,
+              resume_token: forkedSession.sessionId,
+              checkpoint_id: params.message_id,
+              fork_available: true,
+            },
+          } as RuntimeForkResult;
+        } catch (err) {
+          if (err instanceof AcpCapabilityUnsupported) {
+            // Fall through to legacy (which may throw UnsupportedOperationError).
+          } else {
+            throw err;
+          }
+        }
+      }
+      return legacy.fork(runtime, params);
+    },
+    async rollback(runtime, params) {
+      if (runtime.acpAdapter) {
+        try {
+          await runtime.acpAdapter.rollback();
+          return;
+        } catch (err) {
+          if (err instanceof AcpCapabilityUnsupported) {
+            throw new UnsupportedOperationError("rollback", _runtimeKey, "unsupported", err.reason);
+          }
+          throw err;
+        }
+      }
+      return legacy.rollback(runtime, params);
+    },
+    revert: legacy.revert,
+    getMessages: legacy.getMessages,
+    getDiff: legacy.getDiff,
+    async executeShell(runtime, params) {
+      if (runtime.acpAdapter) {
+        try {
+          return await runtime.acpAdapter.executeShell(params.command);
+        } catch (err) {
+          if (err instanceof AcpCapabilityUnsupported) {
+            throw new UnsupportedOperationError("executeShell", _runtimeKey, "unsupported", err.reason);
+          }
+          throw err;
+        }
+      }
+      return legacy.executeShell(runtime, params);
+    },
+    async interrupt(runtime) {
+      if (runtime.acpAdapter) {
+        await runtime.acpAdapter.interrupt();
+        return;
+      }
+      return legacy.interrupt(runtime);
+    },
+    async setModel(runtime, params) {
+      if (runtime.acpAdapter) {
+        try {
+          await runtime.acpAdapter.setModel(params.model);
+        } catch (err) {
+          if (err instanceof AcpCapabilityUnsupported) {
+            throw new UnsupportedOperationError("setModel", _runtimeKey, "unsupported", err.reason);
+          }
+          throw err;
+        }
+        return;
+      }
+      return legacy.setModel(runtime, params);
+    },
+    async setThinkingBudget(runtime, params) {
+      if (runtime.acpAdapter) {
+        try {
+          await runtime.acpAdapter.setThinkingBudget(params.max_thinking_tokens ?? null);
+        } catch (err) {
+          if (err instanceof AcpCapabilityUnsupported) {
+            throw new UnsupportedOperationError("setThinkingBudget", _runtimeKey, "unsupported", err.reason);
+          }
+          throw err;
+        }
+        return;
+      }
+      return legacy.setThinkingBudget(runtime, params);
+    },
+    async getMcpServerStatus(runtime) {
+      if (runtime.acpAdapter) {
+        try {
+          return await runtime.acpAdapter.session.extMethod("mcp/serverStatus", {});
+        } catch {
+          throw new UnsupportedOperationError("getMcpServerStatus", _runtimeKey, "unsupported", "acp_not_implemented");
+        }
+      }
+      return legacy.getMcpServerStatus(runtime);
+    },
+    async executeCommand(runtime, params) {
+      if (runtime.acpAdapter) {
+        try {
+          return await runtime.acpAdapter.executeCommand(params.command);
+        } catch (err) {
+          if (err instanceof AcpCapabilityUnsupported) {
+            throw new UnsupportedOperationError("executeCommand", _runtimeKey, "unsupported", err.reason);
+          }
+          throw err;
+        }
+      }
+      return legacy.executeCommand(runtime, params);
+    },
   };
 }
 

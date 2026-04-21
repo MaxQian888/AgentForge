@@ -3,6 +3,16 @@ import { BRIDGE_HTTP_ROUTE_GROUPS, createApp } from "./server.js";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
 import { SessionManager } from "./session/manager.js";
 
+/**
+ * Returns "0" for all BRIDGE_ACP_* env flags, forcing every adapter to take
+ * the legacy path. Used in tests that mock legacy runners and should not
+ * attempt to spawn real ACP processes.
+ */
+function noAcpEnvLookup(name: string): string | undefined {
+  if (name.startsWith("BRIDGE_ACP_")) return "0";
+  return undefined;
+}
+
 const validRequest = {
   task_id: "task-123",
   title: "Build task decomposition",
@@ -441,6 +451,7 @@ describe("bridge execute route", () => {
     const sessionManager = new SessionManager();
     const app = createApp({
       awaitExecution: true,
+      envLookup: noAcpEnvLookup,
       queryRunner: async function* () {
         yield {
           type: "assistant",
@@ -503,6 +514,7 @@ describe("bridge execute route", () => {
     const events: string[] = [];
     const app = createApp({
       pool,
+      envLookup: noAcpEnvLookup,
       queryRunner: async function* ({ options }) {
         const abortController = options?.abortController as AbortController | undefined;
 
@@ -811,6 +823,7 @@ describe("bridge execute route", () => {
     const app = createApp({
       pool,
       sessionManager,
+      envLookup: noAcpEnvLookup,
       queryRunner: async function* ({ prompt, options }) {
         executedPrompts.push(prompt);
         const abortController = options?.abortController as AbortController | undefined;
@@ -1156,6 +1169,7 @@ describe("bridge execute route", () => {
     const app = createApp({
       pool,
       sessionManager,
+      envLookup: noAcpEnvLookup,
       opencodeTransport: {
         async createSession(input: { title?: string }) {
           calls.push({ kind: "createSession", payload: input });
@@ -1313,6 +1327,7 @@ describe("bridge execute route", () => {
     const app = createApp({
       pool,
       sessionManager,
+      envLookup: noAcpEnvLookup,
       opencodeTransport: {
         async createSession() {
           return { id: "opencode-session-cancel" };

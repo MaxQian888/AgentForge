@@ -6,6 +6,7 @@ import { liveControlsFor, type LiveControlsFlags } from "./capabilities.js";
 import { AcpCapabilityUnsupported } from "./errors.js";
 import type { Logger } from "./process-host.js";
 import type { McpServer } from "@agentclientprotocol/sdk";
+import type { TerminalManager } from "./terminal-manager.js";
 
 export interface AcpTaskInput {
   id: string;
@@ -48,7 +49,19 @@ export interface AcpRuntimeAdapter {
   setConfigOption(configId: string, value: boolean | string): Promise<unknown>;
   setThinkingBudget(max: number | null): Promise<void>;
   fork(): Promise<AcpSession>;
+  /**
+   * Three-tier rollback ladder (spec §7.2):
+   * 1. Fork-if-capable → `session.forkSession()`.
+   * 2. LoadSession replay (not yet implemented — throws stub error).
+   * 3. Reject with UnsupportedOperationError.
+   */
+  rollback(): Promise<void>;
   executeCommand(command: string): Promise<unknown>;
+  /**
+   * One-shot shell execution via the bridge TerminalManager.
+   * Spawns the command, waits for exit, and returns buffered output.
+   */
+  executeShell(command: string): Promise<{ output: string; exitCode: number | null }>;
   dispose(): Promise<void>;
 }
 
@@ -139,6 +152,16 @@ export function createAcpRuntimeAdapter(
         // AcpCapabilityUnsupported if the agent does not advertise it.
         return session.forkSession();
       },
+      async rollback() {
+        // Tier 1: fork-if-capable
+        if (session.capabilities.sessionCapabilities?.fork) {
+          await session.forkSession();
+          return;
+        }
+        // Tier 2: loadSession replay — not yet implemented.
+        // TODO(T7): implement replay via fresh session + successive prompt calls.
+        throw new Error("rollback replay not implemented — see spec §7.2");
+      },
       async executeCommand(command) {
         // Best-effort: prefer an extension RPC; fall back to a slash-prefix
         // prompt. Spec §4.6 documents this fallback explicitly.
@@ -150,6 +173,21 @@ export function createAcpRuntimeAdapter(
             { type: "text", text: `/run ${command}` } as any,
           ]);
         }
+      },
+      async executeShell(command) {
+        const tm = deps.terminalManager as TerminalManager;
+        // Split command into program + args using shell-word splitting (basic).
+        // We spawn via /bin/sh -c on Unix; on Windows we use cmd /c.
+        const isWindows = process.platform === "win32";
+        const id = tm.create(
+          isWindows
+            ? { command: "cmd", args: ["/c", command], cwd: task.worktreeRoot }
+            : { command: "sh", args: ["-c", command], cwd: task.worktreeRoot },
+        );
+        const exitInfo = await tm.waitForExit(id);
+        const result = tm.getOutput(id);
+        tm.release(id);
+        return { output: result.output, exitCode: exitInfo.exitCode };
       },
       dispose: () => session.dispose(),
     };

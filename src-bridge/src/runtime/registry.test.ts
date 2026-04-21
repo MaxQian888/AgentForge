@@ -505,6 +505,8 @@ describe("agent runtime registry", () => {
             return "test-token";
           case "CURSOR_API_KEY":
             return "cursor-token";
+          case "BRIDGE_ACP_CURSOR":
+            return "0";
           default:
             return undefined;
         }
@@ -569,6 +571,8 @@ describe("agent runtime registry", () => {
             return "test-token";
           case "GEMINI_API_KEY":
             return "gemini-token";
+          case "BRIDGE_ACP_GEMINI":
+            return "0";
           default:
             return undefined;
         }

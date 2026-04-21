@@ -5,6 +5,16 @@ import { RuntimePoolManager } from "../runtime/pool-manager.js";
 import { SessionManager } from "../session/manager.js";
 import type { ExecuteRequest } from "../types.js";
 
+/**
+ * Returns "0" for all BRIDGE_ACP_* env flags, forcing every adapter to take
+ * the legacy path. Used in tests that mock legacy runners and should not
+ * attempt to spawn real ACP processes.
+ */
+function noAcpEnvLookup(name: string): string | undefined {
+  if (name.startsWith("BRIDGE_ACP_")) return "0";
+  return undefined;
+}
+
 function createRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteRequest {
   return {
     task_id: "task-123",
@@ -88,6 +98,7 @@ describe("handleExecute", () => {
       queryRunner,
       sessionManager,
       awaitCompletion: true,
+      envLookup: noAcpEnvLookup,
     });
 
     expect(response).toEqual({ session_id: request.session_id });
@@ -148,6 +159,7 @@ describe("handleExecute", () => {
       }),
       {
         awaitCompletion: true,
+        envLookup: noAcpEnvLookup,
         queryRunner: async function* () {
           yield {
             type: "result",
@@ -211,6 +223,7 @@ describe("handleExecute", () => {
       queryRunner,
       sessionManager,
       awaitCompletion: true,
+      envLookup: noAcpEnvLookup,
     });
 
     expect(events.map((event) => event.type)).toEqual([
@@ -329,6 +342,7 @@ describe("handleExecute", () => {
     const response = await handleExecute(pool, streamer as never, request, {
       codexRuntimeRunner,
       awaitCompletion: true,
+      envLookup: noAcpEnvLookup,
       executableLookup(command) {
         return `C:/mock/${command}.exe`;
       },
@@ -408,6 +422,7 @@ describe("handleExecute", () => {
       request,
       {
         awaitCompletion: true,
+        envLookup: noAcpEnvLookup,
         executableLookup(command) {
           return `C:/mock/${command}.exe`;
         },
@@ -453,6 +468,7 @@ describe("handleExecute", () => {
 
     const response = await handleExecute(pool, streamer as never, request, {
       awaitCompletion: true,
+      envLookup: noAcpEnvLookup,
       opencodeTransport: {
         async createSession(input: { title?: string }) {
           calls.push({ kind: "createSession", payload: input });
@@ -596,6 +612,7 @@ describe("handleExecute", () => {
       request,
       {
         awaitCompletion: true,
+        envLookup: noAcpEnvLookup,
         pluginManager: {
           list() {
             return [
