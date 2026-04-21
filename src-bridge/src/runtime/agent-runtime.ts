@@ -41,7 +41,7 @@ export class AgentRuntime {
   executionStartMs: number;
   turnLimitWarningEmitted: boolean;
 
-  // ACP adapter — set during execute() for ACP-backed runtimes; null for legacy paths
+  // ACP adapter — set during execute() for the active task; null when idle (between tasks).
   acpAdapter: AcpRuntimeAdapter | null;
 
   constructor(taskId: string, sessionId: string) {

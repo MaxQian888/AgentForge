@@ -917,15 +917,16 @@ function createCliRuntimeAdapter(
 }
 
 /**
- * Wraps a set of legacy advanced operations with ACP-first dispatch.
- * When `runtime.acpAdapter` is set (ACP path), the methods that AcpRuntimeAdapter
- * exposes (interrupt, setModel, setThinkingBudget, executeCommand) are delegated
- * to the ACP adapter. Methods not on AcpRuntimeAdapter
- * (rollback, revert, getMessages, getDiff, executeShell, getMcpServerStatus, fork)
- * fall through to the provided legacy operations so that existing functionality
- * is preserved for adapters that implement those.
- * When `runtime.acpAdapter` is null (e.g. during catalog/readiness checks), all ops
- * fall through to the legacy implementations unchanged.
+ * Wraps adapter advanced operations with ACP-first dispatch.
+ *
+ * When `runtime.acpAdapter` is active (ACP session in flight):
+ *   - interrupt / setModel / setThinkingBudget / executeCommand / executeShell /
+ *     fork / rollback / getMcpServerStatus → delegate to the ACP adapter.
+ *   - revert / getMessages / getDiff → always route to the adapter ops
+ *     (file-level revert, local event store, worktree diff — not via ACP).
+ *
+ * When `runtime.acpAdapter` is null (no active task), all methods fall through
+ * to the adapter's own implementation.
  */
 function createAcpWrappedAdvancedOperations(
   _runtimeKey: AcpAdapterId,
