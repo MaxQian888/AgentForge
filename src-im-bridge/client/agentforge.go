@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/internal/tracectx"
 )
 
 var errProjectScopeNotConfigured = errors.New(
@@ -1394,6 +1395,9 @@ func (c *AgentForgeClient) UploadDocumentFromURL(ctx context.Context, fileURL st
 	if c.bridgeID != "" {
 		req.Header.Set("X-IM-Bridge-ID", c.bridgeID)
 	}
+	if tid := tracectx.TraceID(ctx); tid != "" {
+		req.Header.Set("X-Trace-ID", tid)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -1431,6 +1435,9 @@ func (c *AgentForgeClient) doRequest(ctx context.Context, method, path string, b
 		if encoded, err := json.Marshal(c.replyTarget); err == nil {
 			req.Header.Set("X-IM-Reply-Target", string(encoded))
 		}
+	}
+	if tid := tracectx.TraceID(ctx); tid != "" {
+		req.Header.Set("X-Trace-ID", tid)
 	}
 	return c.client.Do(req)
 }
