@@ -6,6 +6,7 @@ import (
 
 	"github.com/agentforge/server/internal/config"
 	"github.com/agentforge/server/internal/handler"
+	applog "github.com/agentforge/server/internal/log"
 	appMiddleware "github.com/agentforge/server/internal/middleware"
 	"github.com/agentforge/server/internal/repository"
 	"github.com/go-playground/validator/v10"
@@ -39,6 +40,7 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 	// Middleware stack (order matters)
 	e.Use(echomiddleware.Recover())
 	e.Use(echomiddleware.RequestID())
+	e.Use(appMiddleware.Trace()) // trace_id correlation — must precede request logger
 	e.Use(echomiddleware.RequestLoggerWithConfig(echomiddleware.RequestLoggerConfig{
 		LogMethod:    true,
 		LogURI:       true,
@@ -55,6 +57,7 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 				"status":     v.Status,
 				"latency_ms": v.Latency.Milliseconds(),
 				"reqid":      v.RequestID,
+				"trace_id":   applog.TraceID(c.Request().Context()),
 				"remote_ip":  c.RealIP(),
 			}
 			if v.Error != nil {
@@ -68,8 +71,8 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
 		AllowOrigins:     cfg.AllowOrigins,
 		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS, echo.PATCH},
-		AllowHeaders:     []string{"Content-Type", "Authorization", "X-Request-ID", "Accept", "Accept-Language"},
-		ExposeHeaders:    []string{"X-Request-ID"},
+		AllowHeaders:     []string{"Content-Type", "Authorization", "X-Request-ID", "X-Trace-ID", "Accept", "Accept-Language"},
+		ExposeHeaders:    []string{"X-Request-ID", "X-Trace-ID"},
 		AllowCredentials: true,
 		MaxAge:           3600,
 	}))
