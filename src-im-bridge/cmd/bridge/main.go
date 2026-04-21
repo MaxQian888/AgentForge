@@ -648,6 +648,14 @@ func main() {
 		}).Info("Plugin registry loaded")
 	}
 
+	// Register the Bridge process with the orchestrator once, carrying the
+	// full multi-provider + command-plugin inventory. Must happen before the
+	// per-provider heartbeat / WS goroutines start so the control plane has
+	// the up-to-date capability matrix for delivery routing.
+	if err := registerBridgeInventory(context.Background(), apiClient, bridgeID, cfg, extractActiveProviders(bindings), pluginRegistry); err != nil {
+		log.WithField("component", "main").WithError(err).Fatal("Bridge registration failed")
+	}
+
 	// Wire each provider binding. Each gets its own engine / notify receiver /
 	// runtime control-plane connection but shares state/audit/factory/rate.
 	for _, b := range bindings {
@@ -813,6 +821,8 @@ func main() {
 		log.WithField("component", "main").Warn("Shutdown deadline exceeded; some providers still draining")
 	}
 
+	_ = apiClient.UnregisterBridge(context.Background(), bridgeID)
+
 	if stateStore != nil {
 		_ = stateStore.Close()
 	}
@@ -903,6 +913,16 @@ func buildTenantManifest(res *core.TenantLoadResult) []client.TenantBinding {
 	out := make([]client.TenantBinding, 0, len(all))
 	for _, t := range all {
 		out = append(out, client.TenantBinding{ID: t.ID, ProjectID: t.ProjectID})
+	}
+	return out
+}
+
+// extractActiveProviders returns the activeProvider for each binding.
+// Used to pass the full provider list to registerBridgeInventory.
+func extractActiveProviders(bindings []*providerBinding) []*activeProvider {
+	out := make([]*activeProvider, 0, len(bindings))
+	for _, b := range bindings {
+		out = append(out, b.Provider)
 	}
 	return out
 }
