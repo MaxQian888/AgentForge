@@ -21,6 +21,7 @@
     "plugins": "Plugins",
     "marketplace": "Marketplace",
     "logs": "Logs",
+    "debug": "Debug",
     "settings": "Settings",
     "group": {
       "workspace": "Workspace",

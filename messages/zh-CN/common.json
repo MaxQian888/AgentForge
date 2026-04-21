@@ -21,6 +21,7 @@
     "plugins": "插件",
     "marketplace": "应用市场",
     "logs": "日志",
+    "debug": "调试",
     "settings": "设置",
     "group": {
       "workspace": "工作区",
