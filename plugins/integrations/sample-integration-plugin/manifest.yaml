@@ -1,0 +1,25 @@
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: sample-integration-plugin
+  name: Sample Integration Plugin
+  version: 0.1.0
+  description: Reference Go WASM integration plugin demonstrating the plugin ABI, health check, and echo operation. Use as a starting template for new Integration Plugins.
+  tags:
+    - builtin
+    - sample
+    - demo
+    - wasm
+spec:
+  runtime: wasm
+  module: ./dist/sample-integration.wasm
+  abiVersion: v1
+  capabilities:
+    - health
+    - echo
+permissions:
+  network:
+    required: false
+source:
+  type: builtin
+  path: ./plugins/integrations/sample-integration-plugin/manifest.yaml
