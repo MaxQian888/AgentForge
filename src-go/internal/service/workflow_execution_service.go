@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/plugin"
 	rolepkg "github.com/agentforge/server/internal/role"
 	"github.com/google/uuid"
 )
@@ -92,6 +93,11 @@ type WorkflowExecutionService struct {
 	// legacy per-run observers so the workflow workspace UI can consume one
 	// cross-engine channel (bridge-unified-run-view).
 	runEmitter *WorkflowRunEventEmitter
+	// executors routes a workflow run to the right WorkflowExecutor based
+	// on its declared Process mode. Populated by registerProcessExecutors
+	// at construction time; new modes (hierarchical, event-driven) plug in
+	// here without touching the existing run loop.
+	executors map[model.WorkflowProcessMode]plugin.WorkflowExecutor
 }
 
 // SetRunEmitter wires the unified workflow.run.* emitter. Nil keeps the
@@ -108,13 +114,41 @@ func NewWorkflowExecutionService(
 	roles PluginRoleStore,
 	executor WorkflowStepExecutor,
 ) *WorkflowExecutionService {
-	return &WorkflowExecutionService{
+	svc := &WorkflowExecutionService{
 		plugins:  plugins,
 		runs:     runs,
 		roles:    roles,
 		executor: executor,
 		now:      func() time.Time { return time.Now().UTC() },
 	}
+	svc.executors = map[model.WorkflowProcessMode]plugin.WorkflowExecutor{
+		model.WorkflowProcessSequential: NewSequentialExecutor(executor),
+	}
+	return svc
+}
+
+// RegisterExecutor registers a WorkflowExecutor for a process mode. Used by
+// later wiring (e.g. routes.go) to plug in HierarchicalExecutor and
+// EventDrivenExecutor without forcing this constructor to take a growing
+// list of mode-specific dependencies. Overwrites any existing entry for the
+// same mode.
+func (s *WorkflowExecutionService) RegisterExecutor(exec plugin.WorkflowExecutor) {
+	if exec == nil {
+		return
+	}
+	if s.executors == nil {
+		s.executors = map[model.WorkflowProcessMode]plugin.WorkflowExecutor{}
+	}
+	s.executors[exec.Mode()] = exec
+}
+
+// ResolveExecutor returns the WorkflowExecutor for the given process mode.
+// Returns an error when no executor is registered for the mode.
+func (s *WorkflowExecutionService) ResolveExecutor(mode model.WorkflowProcessMode) (plugin.WorkflowExecutor, error) {
+	if exec, ok := s.executors[mode]; ok {
+		return exec, nil
+	}
+	return nil, fmt.Errorf("no workflow executor registered for process mode %q", mode)
 }
 
 func (s *WorkflowExecutionService) WithClock(now func() time.Time) *WorkflowExecutionService {
