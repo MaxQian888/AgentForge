@@ -1,0 +1,34 @@
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: event-driven-demo
+  name: Event-Driven Demo
+  version: 0.1.0
+  description: Demo event-driven workflow — responds to IM messages and PR events.
+  tags:
+    - demo
+    - workflow
+    - event-driven
+spec:
+  runtime: wasm
+  module: ./dist/event-driven-demo.wasm
+  abiVersion: v1
+  workflow:
+    process: event-driven
+    triggers:
+      - event: integration.im.message_received
+        filter:
+          platform: slack
+          contains_mention: true
+        role: project-assistant
+        action: agent
+        maxConcurrent: 2
+      - event: vcs.pull_request.opened
+        filter:
+          base_branch: main
+        role: code-reviewer
+        action: review
+        maxConcurrent: 1
+source:
+  type: builtin
+  path: ./plugins/workflows/event-driven-demo/manifest.yaml

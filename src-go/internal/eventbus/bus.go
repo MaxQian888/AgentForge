@@ -11,10 +11,11 @@ import (
 const maxCausationDepth = 3
 
 type Bus struct {
-	mu       sync.Mutex
-	mods     []Mod
-	pipeline *Pipeline
-	started  bool
+	mu          sync.Mutex
+	mods        []Mod
+	pipeline    *Pipeline
+	started     bool
+	subscribers []chan *Event
 }
 
 func NewBus() *Bus {
@@ -53,6 +54,7 @@ func (b *Bus) publishInternal(ctx context.Context, e *Event) error {
 			Warn("eventbus: publish rejected")
 		return err
 	}
+	b.fanoutToSubscribers(out)
 	depth := GetCausationDepth(out) + 1
 	for i := range pc.Emits {
 		child := pc.Emits[i]
@@ -70,4 +72,52 @@ func (b *Bus) publishInternal(ctx context.Context, e *Event) error {
 		}
 	}
 	return nil
+}
+
+// Subscribe returns a buffered channel that receives every event the bus
+// publishes while ctx is live. Unlike Register, Subscribe is safe to call
+// at any time — even after the pipeline has started — because subscribers
+// run after pipeline mods and never participate in guard/transform
+// decisions. The channel closes when ctx is cancelled.
+//
+// Use this for runtime listeners (e.g. EventDrivenExecutor) that need to
+// react to events without becoming part of the pipeline. Slow consumers
+// silently drop overflow events; the buffer (64) is sized for short
+// bursts, not sustained backpressure.
+func (b *Bus) Subscribe(ctx context.Context) <-chan *Event {
+	ch := make(chan *Event, 64)
+	b.mu.Lock()
+	b.subscribers = append(b.subscribers, ch)
+	b.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		b.mu.Lock()
+		for i, s := range b.subscribers {
+			if s == ch {
+				b.subscribers = append(b.subscribers[:i], b.subscribers[i+1:]...)
+				break
+			}
+		}
+		b.mu.Unlock()
+		close(ch)
+	}()
+	return ch
+}
+
+// fanoutToSubscribers delivers e to every active subscriber. Non-blocking:
+// if a subscriber's buffer is full the event is dropped for that subscriber
+// (the rest still receive it). Holding the mutex while sending is safe
+// because all receivers are buffered and we use select+default.
+func (b *Bus) fanoutToSubscribers(e *Event) {
+	b.mu.Lock()
+	subs := make([]chan *Event, len(b.subscribers))
+	copy(subs, b.subscribers)
+	b.mu.Unlock()
+	for _, sub := range subs {
+		select {
+		case sub <- e:
+		default:
+			// drop; consumer too slow
+		}
+	}
 }
