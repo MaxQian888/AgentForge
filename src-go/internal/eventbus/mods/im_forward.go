@@ -60,8 +60,25 @@ func NewIMForward(tasks AncestorRootResolver, controlPlane IMForwardControlPlane
 func (m *IMForward) Name() string  { return "im.forward" }
 func (m *IMForward) Priority() int { return 81 } // runs just after im.forward-legacy (80)
 func (m *IMForward) Mode() eb.Mode { return eb.ModeObserve }
+
+// Intercepts declares the event-type patterns this observer wants to receive.
+//
+// Currently reachable (publishers emit "task:<uuid>" as e.Target):
+//   - "task.*" — reserved for task-scoped publishers that set Target via
+//     eventbus.MakeTask(taskID). No production publisher does this yet; all
+//     current call-sites use PublishLegacy which sets Target to
+//     "project:<id>" or "system:broadcast". The pattern is declared here so
+//     the observer is wired-up as soon as the first task-targeted publisher
+//     lands.
+//
+// NOTE: "review.*", "agent.*", and "notification" were removed because every
+// current publisher emits those events via PublishLegacy, which sets
+// e.Target = "project:<id>" (or "system:broadcast"). The Observe dispatch
+// guard at line ~74 returns early whenever addr.Scheme != "task", so these
+// patterns were silently no-ops. Re-add them here when their publishers
+// migrate to eventbus.MakeTask(taskID) targets.
 func (m *IMForward) Intercepts() []string {
-	return []string{"task.*", "review.*", "agent.*", "notification"}
+	return []string{"task.*"}
 }
 
 func (m *IMForward) Observe(ctx context.Context, e *eb.Event, _ *eb.PipelineCtx) {

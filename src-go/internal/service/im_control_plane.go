@@ -1287,6 +1287,11 @@ func (s *IMControlPlane) QueueBoundProgressRaw(ctx context.Context, taskID, cont
 // BoundPlatformForTask returns the IM platform of the bound action for the given
 // task ID, or an empty string if no binding exists. Used by the im_forward
 // observer to determine the folding mode before calling QueueBoundProgress.
+//
+// This is a read-only lookup intentionally held under the coarse exclusive
+// s.mu for consistency with the 30+ writer paths in this struct, all of which
+// use sync.Mutex rather than sync.RWMutex. Migrating to sync.RWMutex for
+// read paths is tracked as a separate future refactor.
 func (s *IMControlPlane) BoundPlatformForTask(taskID string) string {
 	if strings.TrimSpace(taskID) == "" {
 		return ""
