@@ -28,6 +28,7 @@ export function newTraceId(): string {
 declare module "hono" {
   interface ContextVariableMap {
     traceId: string;
+    log: import("pino").Logger;
   }
 }
 

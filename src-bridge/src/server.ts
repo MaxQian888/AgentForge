@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { createLogger, withTrace } from "./lib/logger.js";
+import { traceMiddleware } from "./middleware/trace.js";
+
+const log = createLogger();
 import { AgentRuntime } from "./runtime/agent-runtime.js";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
 import { EventStreamer } from "./ws/event-stream.js";
@@ -313,6 +317,19 @@ function registerBridgeRouteGroup(
 
 export function createApp(deps: AppDeps = {}): Hono {
   const app = new Hono();
+  app.use("*", traceMiddleware({
+    onMidchain: (id) => log.warn({ trace_id: id }, "trace.generated_midchain"),
+  }));
+  app.use("*", async (c, next) => {
+    const reqLog = withTrace(log, c.get("traceId"));
+    c.set("log", reqLog);
+    const start = Date.now();
+    await next();
+    reqLog.info(
+      { method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start },
+      "request",
+    );
+  });
   const pool = deps.pool ?? createDefaultPool();
   const streamer = deps.streamer ?? createDefaultStreamer();
   const startTime = deps.startTime ?? Date.now();
@@ -1811,7 +1828,7 @@ let signalHandlersRegistered = false;
 
 function getDefaultApp(): Hono {
   if (!defaultApp) {
-    console.log(`[Bridge] Starting on port ${port}`);
+    log.info({ port }, "bridge starting");
     defaultStreamer = createDefaultStreamer();
     defaultPool = createDefaultPool();
     defaultSessionManager = createDefaultSessionManager();
@@ -1837,11 +1854,11 @@ function getDefaultApp(): Hono {
       schedulerAdapter: defaultSchedulerAdapter,
     });
     void defaultSchedulerAdapter.start().catch((error) => {
-      console.warn("[Bridge] Failed to start Bun scheduler adapter:", error);
+      log.warn({ err: error }, "scheduler adapter start failed");
     });
     if (!signalHandlersRegistered) {
       const gracefulShutdown = async (signal: string) => {
-        console.log(`[Bridge] ${signal} received, starting graceful shutdown`);
+        log.info({ signal }, "graceful shutdown starting");
 
         // Save snapshots for all active runtimes
         if (defaultPool && defaultStreamer && defaultSessionManager) {
@@ -1856,9 +1873,9 @@ function getDefaultApp(): Hono {
                   defaultSessionManager,
                   Date.now,
                 );
-                console.log(`[Bridge] Saved snapshot for task ${runtime.taskId}`);
+                log.info({ task_id: runtime.taskId }, "snapshot saved");
               } catch (err) {
-                console.error(`[Bridge] Failed to save snapshot for task ${runtime.taskId}:`, err);
+                log.error({ task_id: runtime.taskId, err }, "snapshot save failed");
               }
             }
           }
@@ -1868,31 +1885,31 @@ function getDefaultApp(): Hono {
         if (defaultPluginManager) {
           try {
             await defaultPluginManager.dispose();
-            console.log("[Bridge] Plugin manager disposed");
+            log.info("plugin manager disposed");
           } catch (err) {
-            console.error("[Bridge] Error disposing plugin manager:", err);
+            log.error({ err }, "plugin manager dispose error");
           }
         }
 
         if (defaultSchedulerAdapter) {
           try {
             await defaultSchedulerAdapter.stop();
-            console.log("[Bridge] Scheduler adapter stopped");
+            log.info("scheduler adapter stopped");
           } catch (err) {
-            console.error("[Bridge] Error stopping scheduler adapter:", err);
+            log.error({ err }, "scheduler adapter stop error");
           }
         }
 
         // Close WS connection
         defaultStreamer?.close();
-        console.log("[Bridge] Shutdown complete");
+        log.info("shutdown complete");
         process.exit(0);
       };
 
       // Hard timeout for shutdown
       const shutdownWithTimeout = (signal: string) => {
         const timeout = setTimeout(() => {
-          console.error("[Bridge] Shutdown timed out after 30s, force exiting");
+          log.error("shutdown timed out after 30s, force exiting");
           process.exit(1);
         }, 30000);
         timeout.unref?.();
