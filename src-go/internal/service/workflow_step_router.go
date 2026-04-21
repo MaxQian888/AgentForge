@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/agentforge/server/internal/model"
+	"github.com/agentforge/server/internal/plugin"
 	"github.com/google/uuid"
 )
 
@@ -95,6 +96,10 @@ type WorkflowStepRouterExecutor struct {
 	dagChild   WorkflowDAGChildStarter
 	linkWriter WorkflowParentLinkWriter
 	cycleGuard WorkflowCrossEngineRecursionGuard
+	// toolChain dispatches the WorkflowActionToolChain action. When nil,
+	// the router rejects tool_chain steps with a clear error so a missing
+	// wiring fails loudly rather than silently dropping the call.
+	toolChain *plugin.ToolChainExecutor
 }
 
 func NewWorkflowStepRouterExecutor(
@@ -135,6 +140,14 @@ func (e *WorkflowStepRouterExecutor) WithCrossEngineRecursionGuard(guard Workflo
 	return e
 }
 
+// WithToolChainExecutor wires the executor used by the tool_chain action.
+// Nil is valid (action disabled); steps that declare action=tool_chain
+// will then fail with a clear error.
+func (e *WorkflowStepRouterExecutor) WithToolChainExecutor(executor *plugin.ToolChainExecutor) *WorkflowStepRouterExecutor {
+	e.toolChain = executor
+	return e
+}
+
 // DAGChildStarter returns the cross-engine starter wired into the router, if
 // any. Used by the workflow execution service's cancellation path to cascade
 // a cancel to an in-flight DAG child when the parent plugin run is cancelled.
@@ -159,9 +172,35 @@ func (e *WorkflowStepRouterExecutor) Execute(ctx context.Context, req WorkflowSt
 		return e.executeWorkflow(ctx, req, trigger)
 	case model.WorkflowActionApproval:
 		return e.executeApproval(ctx, req)
+	case model.WorkflowActionToolChain:
+		return e.executeToolChain(ctx, req)
 	default:
 		return nil, fmt.Errorf("unsupported workflow action: %s", req.Step.Action)
 	}
+}
+
+// executeToolChain dispatches the tool_chain action. The step's ToolChain
+// spec is required; the resolver consumes the run's input map for
+// {{workflow.input.*}} expansion. Outputs of the chain land under
+// "completed_steps", "final_output", and "step_outputs" so downstream
+// steps in the surrounding workflow can read them.
+func (e *WorkflowStepRouterExecutor) executeToolChain(ctx context.Context, req WorkflowStepExecutionRequest) (*WorkflowStepExecutionResult, error) {
+	if e.toolChain == nil {
+		return nil, fmt.Errorf("tool_chain executor is not configured")
+	}
+	if req.Step.ToolChain == nil {
+		return nil, fmt.Errorf("step %q has action tool_chain but no tool_chain spec", req.Step.ID)
+	}
+	chainResult, err := e.toolChain.Execute(ctx, req.PluginID, req.Step.ToolChain, req.Input)
+	if err != nil {
+		return nil, err
+	}
+	output := map[string]any{
+		"completed_steps": chainResult.CompletedSteps,
+		"final_output":    chainResult.FinalOutput,
+		"step_outputs":    chainResult.StepOutputs,
+	}
+	return &WorkflowStepExecutionResult{Output: output}, nil
 }
 
 func (e *WorkflowStepRouterExecutor) executeAgent(ctx context.Context, req WorkflowStepExecutionRequest, trigger map[string]any) (*WorkflowStepExecutionResult, error) {
