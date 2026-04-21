@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	applog "github.com/agentforge/server/internal/log"
 	"github.com/agentforge/server/internal/model"
 )
 
@@ -1385,6 +1386,26 @@ func TestClientGetToolPluginMCPPromptUsesCanonicalBridgeContract(t *testing.T) {
 	}
 	if result.PluginID != "repo-search" || result.Operation != "get_prompt" || result.Result.Description != "Repository summary prompt" {
 		t.Fatalf("unexpected prompt result: %+v", result)
+	}
+}
+
+func TestClient_SendsTraceHeader(t *testing.T) {
+	t.Parallel()
+
+	var gotTraceID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTraceID = r.Header.Get("X-Trace-ID")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	ctx := applog.WithTrace(context.Background(), "tr_outbound00000000000000")
+	// Health is the simplest method: GET with no body, minimal response parsing.
+	_ = c.Health(ctx)
+	if gotTraceID != "tr_outbound00000000000000" {
+		t.Fatalf("want X-Trace-ID %q, got %q", "tr_outbound00000000000000", gotTraceID)
 	}
 }
 

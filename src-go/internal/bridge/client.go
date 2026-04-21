@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	applog "github.com/agentforge/server/internal/log"
 	"github.com/agentforge/server/internal/model"
 	log "github.com/sirupsen/logrus"
 )
@@ -390,6 +391,14 @@ func bridgeUpstreamError(path string, status int, respBody []byte) error {
 	return fmt.Errorf("bridge upstream %s returned %d: %s", path, status, body)
 }
 
+// attachTraceHeader copies the trace_id from req's context onto the outbound
+// request as X-Trace-ID. No-op when no trace is present.
+func attachTraceHeader(req *http.Request) {
+	if tid := applog.TraceID(req.Context()); tid != "" {
+		req.Header.Set("X-Trace-ID", tid)
+	}
+}
+
 // NewClient creates a new bridge client.
 func NewClient(baseURL string) *Client {
 	return &Client{
@@ -422,6 +431,7 @@ func (c *Client) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteRespo
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -456,6 +466,7 @@ func (c *Client) GetStatus(ctx context.Context, taskID string) (*StatusResponse,
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge status request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -486,6 +497,7 @@ func (c *Client) GetPoolSummary(ctx context.Context) (*PoolSummaryResponse, erro
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -514,6 +526,7 @@ func (c *Client) GetRuntimeCatalog(ctx context.Context) (*RuntimeCatalogResponse
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -546,6 +559,7 @@ func (c *Client) Cancel(ctx context.Context, taskID, reason string) error {
 		return fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -576,6 +590,7 @@ func (c *Client) Pause(ctx context.Context, taskID, reason string) (*PauseRespon
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -623,6 +638,7 @@ func (c *Client) Resume(ctx context.Context, req ExecuteRequest) (*ResumeRespons
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -657,6 +673,7 @@ func (c *Client) Health(ctx context.Context) error {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge health request creation failed")
 		return fmt.Errorf("create request: %w", err)
 	}
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -701,6 +718,7 @@ func (c *Client) DecomposeTask(ctx context.Context, req DecomposeRequest) (*Deco
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -743,6 +761,7 @@ func (c *Client) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -1027,6 +1046,7 @@ func (c *Client) ClassifyIntent(ctx context.Context, req ClassifyIntentRequest) 
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -1074,6 +1094,7 @@ func (c *Client) Review(ctx context.Context, req ReviewRequest) (*ReviewResponse
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -1254,6 +1275,7 @@ func (c *Client) doPluginRequest(ctx context.Context, method, path string, paylo
 	if payload != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -1343,6 +1365,7 @@ func (c *Client) doJSONRequest(ctx context.Context, method, path string, payload
 	if payload != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
+	attachTraceHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
