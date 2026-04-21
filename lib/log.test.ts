@@ -33,7 +33,7 @@ describe("browser logger", () => {
     expect(body[0].level).toBe("warn");
     expect(body[1].level).toBe("error");
     expect(body[0].summary).toBe("kept");
-    expect(body[0].detail).toEqual({ k: 2 });
+    expect(body[0].detail).toEqual({ k: 2, trace_id: "tr_front000000000000000000" });
   });
 
   it("flushes immediately when buffer fills", async () => {
@@ -70,5 +70,34 @@ describe("browser logger", () => {
     log.error("boom");
     await new Promise((r) => setTimeout(r, 20));
     // getting here without a thrown exception is success
+  });
+
+  it("stamps per-entry trace_id at push time, not flush time", async () => {
+    const calls: Array<{ init: RequestInit }> = [];
+    const fetchMock: typeof fetch = (async (_i, init) => {
+      calls.push({ init: init! });
+      return new Response(null, { status: 202 });
+    }) as typeof fetch;
+
+    let currentTrace = "tr_first0000000000000000000";
+    const log = createBrowserLogger({
+      fetch: fetchMock,
+      flushMs: 20,
+      bufferSize: 10,
+      traceId: () => currentTrace,
+    });
+
+    log.warn("a");                                  // stamped with tr_first
+    currentTrace = "tr_second00000000000000000";
+    log.error("b");                                 // stamped with tr_second
+
+    await new Promise((r) => setTimeout(r, 40));
+    expect(calls).toHaveLength(1);
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body).toHaveLength(2);
+    expect(body[0].detail?.trace_id).toBe("tr_first0000000000000000000");
+    expect(body[1].detail?.trace_id).toBe("tr_second00000000000000000");
+    expect(body[0].summary).toBe("a");
+    expect(body[1].summary).toBe("b");
   });
 });

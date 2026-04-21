@@ -68,7 +68,13 @@ export function createBrowserLogger(opts: BrowserLoggerOpts): BrowserLogger {
     if (!INGEST_LEVELS.has(level)) {
       return;
     }
-    buffer.push({ tab: "system", level, source: "frontend", summary, detail, ts: Date.now() });
+    // Stamp trace_id at push time so per-entry attribution survives batching.
+    const stampedDetail: Record<string, unknown> = { ...(detail ?? {}) };
+    const trace = opts.traceId();
+    if (trace) {
+      stampedDetail.trace_id = trace;
+    }
+    buffer.push({ tab: "system", level, source: "frontend", summary, detail: stampedDetail, ts: Date.now() });
     if (buffer.length >= cap) {
       void flush();
     } else {
