@@ -232,7 +232,7 @@ G1, G3, G5, G7 are strictly additive and safe. G2 requires a permission check (a
 
 ### 7.3 `trace_id` format
 
-- **Choice:** `tr_` + 24-char Crockford base32 (12 random bytes). Fits in standard headers, is URL-safe, visually distinguishable from request IDs.
+- **Choice:** `tr_` + 24-char Crockford base32 (15 random bytes; 120 bits → 24 chars at 5 bits/char). Fits in standard headers, URL-safe, visually distinguishable from request IDs.
 
 ### 7.4 Logging library choices
 
