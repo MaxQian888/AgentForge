@@ -5,6 +5,7 @@
     "": {
       "name": "@agentforge/bridge",
       "dependencies": {
+        "@agentclientprotocol/sdk": "^0.19.0",
         "@ai-sdk/anthropic": "^3.0.63",
         "@ai-sdk/google": "^3.0.53",
         "@ai-sdk/openai": "^3.0.48",
@@ -27,6 +28,8 @@
     },
   },
   "packages": {
+    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@0.19.1", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-oSb3RzjlMoU3Xu6MRJAL/Gd1DyK2+XSmZyUENrt/j1yqt33+ROhxncU6em8nyXEs97D4lVIGaFZ1pN0Q1C9SpA=="],
+
     "@ai-sdk/anthropic": ["@ai-sdk/anthropic@3.0.63", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.21" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-SiLosFr0FfKfrNpAAj8mD/i3S5YBB/z5orb1DH3pN1yATuBNjjPMLnRE4P3Dn7Y5cQsro0uzw5g5117hkShWoQ=="],
 
     "@ai-sdk/gateway": ["@ai-sdk/gateway@3.0.79", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.21", "@vercel/oidc": "3.1.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-Wk2QJpqd0em5YcR49uoMCy9msyANAYgjXdlRcqqRt2fz4rNLnMMrKOlLwAXoFzR1ElR3bj4e/k6hscRfjpzSGA=="],
