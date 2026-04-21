@@ -1,0 +1,33 @@
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: generic-webhook-adapter
+  name: Generic Webhook Adapter
+  version: 0.1.0
+  description: Accepts any HTTP webhook and publishes it to the event bus with a configurable event type.
+  tags:
+    - builtin
+    - integration
+    - webhook
+spec:
+  runtime: wasm
+  module: ./dist/generic-webhook.wasm
+  abiVersion: v1
+  capabilities:
+    - health
+    - handle_webhook
+  configSchema:
+    type: object
+    properties:
+      event_type:
+        type: string
+        description: "EventBus event type to publish (default: integration.webhook.received)."
+      secret:
+        type: string
+        description: Optional shared secret for basic HMAC validation (not yet enforced).
+permissions:
+  network:
+    required: false
+source:
+  type: builtin
+  path: ./plugins/integrations/generic-webhook-adapter/manifest.yaml
