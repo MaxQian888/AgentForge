@@ -17,6 +17,7 @@ import (
 	"github.com/agentforge/server/internal/config"
 	"github.com/agentforge/server/internal/employee"
 	"github.com/agentforge/server/internal/eventbus"
+	ebrepo "github.com/agentforge/server/internal/eventbus/repository"
 	"github.com/agentforge/server/internal/handler"
 	"github.com/agentforge/server/internal/imcards"
 	"github.com/agentforge/server/internal/knowledge"
@@ -1026,6 +1027,9 @@ func RegisterRoutes(
 	logSvc := service.NewLogService(logRepo, hub, bus)
 	logH := handler.NewLogHandler(logSvc)
 
+	eventsRepo := ebrepo.NewEventsRepository(taskRepo.DB())
+	debugH := handler.NewDebugHandler(logRepo, automationLogRepo, eventsRepo)
+
 	costQuerySvc := service.NewCostQueryService(taskRepo, sprintRepo, agentRunRepo, budgetSvc)
 	costH := handler.NewCostHandler(costQuerySvc)
 	workflowRunRepo := repository.NewWorkflowPluginRunRepository()
@@ -1573,6 +1577,12 @@ func RegisterRoutes(
 	protected.GET("/im/event-types", imControlH.ListEventTypes)
 	protected.POST("/im/send", imH.Send)
 	protected.POST("/im/notify", imH.Notify)
+
+	// Observability: debug trace timeline (JWT-protected; no project scope).
+	// /metrics is intentionally open for Prometheus scraper compatibility.
+	debugGroup := protected.Group("/debug")
+	debugGroup.GET("/trace/:trace_id", debugH.GetTrace)
+	e.GET("/metrics", handler.MetricsHandler())
 
 	// Bridge-to-registry runtime sync
 	e.POST("/internal/plugins/runtime-state", pluginH.SyncRuntimeState)

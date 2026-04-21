@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   FolderKanban,
   Bot,
+  Bug,
   DollarSign,
   Shield,
   Users,
@@ -94,6 +95,7 @@ const navGroups: NavGroup[] = [
       { href: "/memory", labelKey: "nav.memory", icon: Brain },
       { href: "/documents", labelKey: "nav.documents", icon: FileStack },
       { href: "/logs", labelKey: "nav.logs", icon: ScrollText },
+      { href: "/debug", labelKey: "nav.debug", icon: Bug },
     ],
   },
   {

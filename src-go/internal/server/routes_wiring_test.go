@@ -190,6 +190,26 @@ func TestRegisterRoutes_WiresSecretsRoutes(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutes_WiresDebugObservabilityRoutes(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("routes.go"))
+	if err != nil {
+		t.Fatalf("ReadFile(routes.go) error = %v", err)
+	}
+	source := string(content)
+	expected := []string{
+		`eventsRepo := ebrepo.NewEventsRepository(taskRepo.DB())`,
+		`debugH := handler.NewDebugHandler(logRepo, automationLogRepo, eventsRepo)`,
+		`debugGroup := protected.Group("/debug")`,
+		`debugGroup.GET("/trace/:trace_id", debugH.GetTrace)`,
+		`e.GET("/metrics", handler.MetricsHandler())`,
+	}
+	for _, snippet := range expected {
+		if !strings.Contains(source, snippet) {
+			t.Fatalf("expected RegisterRoutes to contain %q", snippet)
+		}
+	}
+}
+
 func TestRegisterRoutes_WiresMemoryExplorerRoutes(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join("routes.go"))
 	if err != nil {
