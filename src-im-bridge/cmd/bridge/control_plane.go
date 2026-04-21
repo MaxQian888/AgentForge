@@ -301,28 +301,9 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (c *bridgeRuntimeControl) runtimeMetadata() map[string]string {
-	if c == nil || c.provider == nil {
-		return nil
-	}
-	metadata := map[string]string{
-		"platform_name":  c.provider.Platform.Name(),
-		"provider_id":    c.provider.Descriptor.ID,
-		"transport_mode": c.provider.TransportMode,
-	}
-	if capability := string(c.provider.Metadata().Capabilities.ActionCallbackMode); capability != "" {
-		metadata["action_callback_mode"] = capability
-	}
-	if surface := string(c.provider.Metadata().Capabilities.StructuredSurface); surface != "" {
-		metadata["structured_surface"] = surface
-	}
-	if readinessTier := string(c.provider.Metadata().Capabilities.ReadinessTier); readinessTier != "" {
-		metadata["readiness_tier"] = readinessTier
-	}
-	if preferredMode := string(c.provider.Metadata().Capabilities.PreferredAsyncUpdateMode); preferredMode != "" {
-		metadata["preferred_async_update_mode"] = preferredMode
-	}
-	if fallbackMode := string(c.provider.Metadata().Capabilities.FallbackAsyncUpdateMode); fallbackMode != "" {
-		metadata["fallback_async_update_mode"] = fallbackMode
-	}
-	return metadata
+	// Only emit bridge-wide facts here. Per-provider state lives in
+	// IMBridgeInstance.Providers[] from registration; overwriting Metadata
+	// on every heartbeat with per-provider values would flap between
+	// heartbeat ticks in multi-provider deployments (fixed 2026-04-21 in C6).
+	return map[string]string{}
 }

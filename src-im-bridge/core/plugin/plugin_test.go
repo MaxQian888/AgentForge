@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func writeManifest(t *testing.T, dir, id, body string) string {
@@ -179,5 +181,41 @@ commands:
 	res, err := r.Dispatch(context.Background(), InvokeContext{Command: "/jira", Subcommand: "create", Args: "ISSUE-1"})
 	if err != nil || res.Text != "create-ISSUE-1" {
 		t.Fatalf("create dispatch: %v %v", res, err)
+	}
+}
+
+func TestStartWatcherWithCallback_CallbackFiredAfterReload(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, "ping", `id: "ping"
+commands:
+  - slash: "/ping"
+    invoke:
+      kind: builtin
+      key: ping
+`)
+
+	r := NewRegistry(dir)
+	if err := r.ReloadAll(); err != nil {
+		t.Fatalf("initial reload: %v", err)
+	}
+
+	var callCount atomic.Int64
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	r.StartWatcherWithCallback(ctx, 20*time.Millisecond, func() {
+		callCount.Add(1)
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if callCount.Load() > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if callCount.Load() == 0 {
+		t.Fatal("expected callback to be invoked at least once after watcher tick")
 	}
 }

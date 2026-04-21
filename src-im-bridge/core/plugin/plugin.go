@@ -192,6 +192,12 @@ func (r *Registry) ReloadAll() error {
 // StartWatcher spawns a polling goroutine that refreshes the registry
 // every `interval`. fsnotify is deferred; polling is correct and portable.
 func (r *Registry) StartWatcher(ctx context.Context, interval time.Duration) {
+	r.StartWatcherWithCallback(ctx, interval, nil)
+}
+
+// StartWatcherWithCallback is identical to StartWatcher but invokes fn
+// after every successful ReloadAll. fn may be nil.
+func (r *Registry) StartWatcherWithCallback(ctx context.Context, interval time.Duration, fn func()) {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
@@ -203,7 +209,9 @@ func (r *Registry) StartWatcher(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				_ = r.ReloadAll()
+				if err := r.ReloadAll(); err == nil && fn != nil {
+					fn()
+				}
 			}
 		}
 	}()
