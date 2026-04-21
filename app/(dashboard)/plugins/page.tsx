@@ -463,7 +463,7 @@ export default function PluginsPage() {
       {isDesktopBreakpoint ? (
         <div className="min-h-0 flex-1 rounded-lg border">
           <ResizablePanelGroup orientation="horizontal">
-            <ResizablePanel defaultSize={35} minSize={25} maxSize={50}>
+            <ResizablePanel defaultSize="35%" minSize="25%" maxSize="50%">
               <ScrollArea className="h-full">
                 <div className="divide-y divide-border/40">
                   {renderListContent()}
@@ -473,7 +473,7 @@ export default function PluginsPage() {
 
             <ResizableHandle withHandle />
 
-            <ResizablePanel defaultSize={65} minSize={40}>
+            <ResizablePanel defaultSize="65%" minSize="40%">
               <PluginDetailPanel
                 plugin={viewCategory === "installed" ? selectedPlugin : null}
                 marketplaceEntry={viewCategory !== "installed" ? selectedMarketplaceEntry : null}
