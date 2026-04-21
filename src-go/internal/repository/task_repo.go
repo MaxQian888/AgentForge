@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -615,6 +616,36 @@ func (r *TaskRepository) SummarizeCompletedCostByDateRange(ctx context.Context, 
 		results = append(results, tc)
 	}
 	return results, rows.Err()
+}
+
+// ErrTaskAncestorCycle is returned by GetAncestorRoot when a cycle is detected
+// in the ParentID chain.
+var ErrTaskAncestorCycle = errors.New("task ancestor cycle detected")
+
+// GetAncestorRoot walks the ParentID chain from taskID up to the root task.
+// Returns the task itself if ParentID is nil.
+// Returns ErrTaskAncestorCycle if a cycle is encountered.
+func (r *TaskRepository) GetAncestorRoot(ctx context.Context, taskID uuid.UUID) (*model.Task, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	seen := make(map[uuid.UUID]struct{})
+	current := taskID
+	for {
+		if _, visited := seen[current]; visited {
+			return nil, fmt.Errorf("get ancestor root: %w", ErrTaskAncestorCycle)
+		}
+		seen[current] = struct{}{}
+
+		var record taskRecord
+		if err := r.db.WithContext(ctx).Where("id = ?", current).Take(&record).Error; err != nil {
+			return nil, fmt.Errorf("get ancestor root: %w", normalizeRepositoryError(err))
+		}
+		if record.ParentID == nil {
+			return record.toModel(), nil
+		}
+		current = *record.ParentID
+	}
 }
 
 func normalizeTaskBlockedBy(blockedBy []string) ([]uuid.UUID, error) {

@@ -12,6 +12,7 @@ const {
   DEFAULT_VERIFY_COMMAND_CONTENT,
   runIMStubSmoke,
 } = require("./im-stub-smoke.js");
+const { runAcpEchoSmoke } = require("./acp-echo-smoke.js");
 const {
   canUseDockerCompose,
   checkPrerequisiteVersions,
@@ -1097,6 +1098,27 @@ async function runWorkflowVerify({ profile = "backend", repoRoot = getRepoRoot()
     };
   }
 
+  // ACP echo smoke — gated by VERIFY_ACP=1 (default OFF). Requires real agent
+  // CLIs / API keys. Failures are logged per-adapter but do not abort other
+  // adapters; the overall verify result is only failed if ACP smoke is enabled
+  // (VERIFY_ACP=1) and at least one adapter fails.
+  const acpSmokeResult = await runAcpEchoSmoke();
+  stages.push(...acpSmokeResult.stages);
+  if (!acpSmokeResult.ok && !acpSmokeResult.skipped) {
+    return {
+      ok: false,
+      status: "verify_failed",
+      keepRunning: true,
+      failureStage: "acp-echo-smoke",
+      paths,
+      startResult,
+      smokeResult,
+      acpSmokeResult,
+      stages,
+      statusReport,
+    };
+  }
+
   return {
     ok: true,
     status: "verified",
@@ -1105,6 +1127,7 @@ async function runWorkflowVerify({ profile = "backend", repoRoot = getRepoRoot()
     paths,
     startResult,
     smokeResult,
+    acpSmokeResult,
     stages,
     statusReport,
   };

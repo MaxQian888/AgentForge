@@ -154,40 +154,6 @@ describe("AgentRuntime", () => {
     });
   });
 
-  test("publishes Claude live controls from the active query surface", () => {
-    const runtime = new AgentRuntime("task-live", "session-live");
-    runtime.bindRequest({
-      task_id: "task-live",
-      session_id: "session-live",
-      runtime: "claude_code",
-      provider: "anthropic",
-      model: "claude-sonnet-4-5",
-      prompt: "Inspect live controls",
-      worktree_path: "D:/Project/AgentForge",
-      branch_name: "agent/task-live",
-      system_prompt: "Base prompt",
-      max_turns: 12,
-      budget_usd: 5,
-      allowed_tools: ["Read"],
-      permission_mode: "default",
-    });
-    runtime.claudeQuery = {
-      interrupt: async () => {},
-      setModel: async () => {},
-      setMaxThinkingTokens: async () => {},
-      mcpServerStatus: async () => [],
-    };
-
-    expect(runtime.toStatus()).toMatchObject({
-      live_controls: {
-        interrupt: true,
-        set_model: true,
-        set_thinking_budget: true,
-        mcp_status: true,
-      },
-    });
-  });
-
   test("marks the runtime as cancelled when cancelled", () => {
     const runtime = new AgentRuntime("task-456", "session-456");
 

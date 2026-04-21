@@ -591,6 +591,29 @@ Permission requests flow through §6.3, not this table.
 
 `_meta` on every variant is copied verbatim into `AgentEvent.metadata._meta` so downstream consumers can opt into richer fields without a schema change. Usage / cost: emit `cost_update` when `_meta.usage` is present. T7 integration tests produce the empirical `_meta.usage` shape per adapter; the resulting table is appended to this spec's appendix before T7 PR merges (see §14 Q5).
 
+### 8.1 Empirical `_meta.usage` shapes (T7 observations)
+
+> Populated on first successful integration run with real API keys + CLIs. Until then, only the structural expectation below applies.
+
+**Structural expectation**: when an adapter emits `agent_message_chunk` with a `_meta` field, usage data (if present) should contain some subset of:
+- `input_tokens`
+- `output_tokens`
+- `cache_read_tokens`
+- `cache_creation_tokens` / `cache_write_tokens`
+
+Adapters that emit `_meta.usage` → bridge emits `cost_update` events populated from those fields.
+Adapters that don't emit `_meta.usage` → bridge stays silent on cost (no synthetic events).
+
+**Empirical table** (to be filled by the first successful integration run):
+
+| Adapter | `_meta.usage` observed? | Fields present | Notes |
+|---|---|---|---|
+| claude_code | pending | | |
+| codex | pending | | |
+| opencode | pending | | |
+| cursor | pending | | |
+| gemini | pending | | |
+
 ## 9. Cross-layer impact
 
 ### 9.1 Go orchestrator
@@ -800,4 +823,15 @@ Draft-2 left eight open questions. Each gets final disposition here.
   - Out-of-scope section (§13) explicitly lists 10 non-ACP TS Bridge concerns found during the 2026-04-21 audit, each with a named future spec.
   - `im_child_task_folding_mode` config added (§9.1, §9.4) to address QQ nested-card incompatibility.
   - `AcpCommandNotFound` error class added to cover `node` / `npx` / `cursor-agent` missing in PATH on desktop.
+- **2026-04-21 (TΔ2)** — added integration test scaffolding × 5 (`tests/integration/acp/{claude_code,codex,opencode,cursor,gemini}.test.ts`); appended §8.1 as placeholder pending first empirical run; extended `pnpm dev:backend:verify` with 5-adapter ACP echo step gated by `VERIFY_ACP=1`.
+- **2026-04-22 (TΔ3)** — atomic legacy deletion:
+  - Deleted handler files: `handlers/claude-runtime.ts`, `handlers/codex-runtime.ts`, `handlers/opencode-runtime.ts` + their test files.
+  - Deleted `opencode/` directory (transport and pending-interactions modules); content moved to `runtime/opencode-transport.ts` and `session/pending-interactions.ts` to preserve non-execution usage (advanced ops, provider auth routes).
+  - Removed `claudeQuery: ClaudeQueryControl | null` field from `AgentRuntime` and its corresponding live-controls fallback branch in `toStatus()`.
+  - Removed `isAcpEnabled()` helper and all `BRIDGE_ACP_<ADAPTER>` emergency env flag infrastructure from `registry.ts`.
+  - Simplified `runWithAcpAdapter()` to unconditional dispatch; removed legacy fallback parameter from all 5 adapter `execute()` methods.
+  - Removed `ClaudeRuntimeDeps` interface; fields migrated to direct `ExecuteDeps` / `AgentRuntimeRegistryOptions` members.
+  - Deleted `noAcpEnvLookup` test helpers and all legacy-path test cases from `execute.test.ts`, `server.test.ts`, `registry.test.ts`, and `server.advanced-routes.test.ts`.
+  - Updated stale `BRIDGE_ACP_<X>=0` doc comments in `adapter-factory.ts` and `registry.ts`.
+  - Test suite: 311 pass, 25 skip, 0 fail.
 - **Pre-2026-04-21** — see `docs/dev/specs/2026-04-16-bridge-acp-client-integration.md` §14 for draft-1 → draft-2 history.

@@ -4,30 +4,115 @@ import {
   AgentRuntimeRegistry,
   createRuntimeRegistry,
   type AgentRuntimeRegistryOptions,
+  type CodexAuthStatusProvider,
+  type CodexRuntimeRunner,
 } from "../runtime/registry.js";
 import type { EventStreamer } from "../ws/event-stream.js";
-import type { ExecuteRequest } from "../types.js";
+import type {
+  ExecuteRequest,
+  RuntimeContinuityState,
+  SessionSnapshot,
+} from "../types.js";
 import { buildSystemPrompt } from "../role/injector.js";
 import { classifyError } from "./errors.js";
-import {
-  persistRuntimeSnapshot,
-  type ClaudeRuntimeDeps,
-} from "./claude-runtime.js";
 import type { CommandRuntimeRunner } from "./command-runtime.js";
 import type { ToolPluginManager } from "../plugins/tool-plugin-manager.js";
+import type { PluginRecord } from "../plugins/types.js";
+import type { SessionManager } from "../session/manager.js";
+import type { OpenCodeTransport } from "../runtime/opencode-transport.js";
+import type { HookCallbackManager } from "../runtime/hook-callback-manager.js";
+import {
+  serializeCostAccounting,
+} from "../cost/accounting.js";
+
+type EventSink = Pick<EventStreamer, "send">;
+
+export interface ExecuteDeps extends AgentRuntimeRegistryOptions {
+  awaitCompletion?: boolean;
+  commandRuntimeRunner?: CommandRuntimeRunner;
+  codexRuntimeRunner?: CodexRuntimeRunner;
+  runtimeRegistry?: AgentRuntimeRegistry;
+  pluginManager?: ToolPluginManager;
+  activePlugins?: PluginRecord[];
+  sessionManager?: SessionManager;
+  now?: () => number;
+  hookCallbackManager?: HookCallbackManager;
+  continuity?: RuntimeContinuityState;
+  opencodeTransport?: OpenCodeTransport;
+  codexAuthStatusProvider?: CodexAuthStatusProvider;
+  forkSessionRunner?: AgentRuntimeRegistryOptions["forkSessionRunner"];
+  queryRunner?: never; // Removed: legacy claude-runtime queryRunner
+  opencodeEventRunner?: never; // Removed: legacy opencode event runner
+}
 
 function defaultSystemPrompt(taskId: string): string {
   return `You are a coding agent working on task ${taskId}. Follow best practices and write clean, well-tested code.`;
 }
 
-interface ExecuteDeps extends ClaudeRuntimeDeps, AgentRuntimeRegistryOptions {
-  awaitCompletion?: boolean;
-  commandRuntimeRunner?: CommandRuntimeRunner;
-  runtimeRegistry?: AgentRuntimeRegistry;
-  pluginManager?: ToolPluginManager;
+export function buildRuntimeSnapshot(
+  runtime: AgentRuntime,
+  req: ExecuteRequest,
+  now: () => number,
+): SessionSnapshot {
+  const updatedAt = now();
+  return {
+    task_id: req.task_id,
+    session_id: req.session_id,
+    status: runtime.status,
+    turn_number: runtime.turnNumber,
+    spent_usd: runtime.spentUsd,
+    created_at: runtime.createdAt,
+    updated_at: updatedAt,
+    request: { ...req },
+    cost_accounting: serializeCostAccounting(runtime.costAccounting),
+    continuity: runtime.continuity
+      ? { ...runtime.continuity }
+      : req.runtime === "claude_code" || req.provider === "anthropic"
+        ? {
+            runtime: "claude_code",
+            resume_ready: false,
+            captured_at: updatedAt,
+            blocking_reason: "missing_continuity_state",
+          }
+        : req.runtime === "codex" ||
+            req.provider === "codex" ||
+            req.provider === "openai"
+          ? {
+              runtime: "codex",
+              resume_ready: false,
+              captured_at: updatedAt,
+              blocking_reason: "missing_continuity_state",
+            }
+          : req.runtime === "opencode" || req.provider === "opencode"
+            ? {
+                runtime: "opencode",
+                resume_ready: false,
+                captured_at: updatedAt,
+                blocking_reason: "missing_continuity_state",
+              }
+            : undefined,
+  };
 }
 
-type EventSink = Pick<EventStreamer, "send">;
+export function persistRuntimeSnapshot(
+  runtime: AgentRuntime,
+  req: ExecuteRequest,
+  streamer: EventSink,
+  sessionManager: SessionManager | undefined,
+  now: () => number,
+): void {
+  const snapshot = buildRuntimeSnapshot(runtime, req, now);
+
+  sessionManager?.save(req.task_id, snapshot);
+
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: snapshot.updated_at,
+    type: "snapshot",
+    data: snapshot,
+  });
+}
 
 export async function handleExecute(
   pool: RuntimePoolManager,
@@ -49,20 +134,16 @@ export async function handleExecute(
   const runtimeRegistry =
     deps.runtimeRegistry ??
     createRuntimeRegistry({
-      queryRunner: deps.queryRunner,
       commandRuntimeRunner: deps.commandRuntimeRunner,
       codexRuntimeRunner: deps.codexRuntimeRunner,
       activePlugins: deps.activePlugins,
-      hookCallbackManager: deps.hookCallbackManager,
       forkSessionRunner: deps.forkSessionRunner,
-      continuity: deps.continuity,
       executableLookup: deps.executableLookup,
       envLookup: deps.envLookup,
       defaultRuntime: deps.defaultRuntime,
       now: deps.now,
       codexAuthStatusProvider: deps.codexAuthStatusProvider,
       opencodeTransport: deps.opencodeTransport,
-      opencodeEventRunner: deps.opencodeEventRunner,
     });
   const { adapter, request } = await runtimeRegistry.resolveExecute(req);
   const runtime = pool.acquire(request.task_id, request.session_id, request.runtime ?? "claude_code");
