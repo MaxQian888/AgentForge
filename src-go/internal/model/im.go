@@ -380,6 +380,10 @@ type IMBridgeStatus struct {
 	RecentFailures    int                      `json:"recentFailures"`
 	RecentDowngrades  int                      `json:"recentDowngrades"`
 	AverageLatencyMs  int64                    `json:"averageLatencyMs"`
+	// Bridges is a per-bridge summary with Providers/CommandPlugins inventory.
+	// Frontend consumes this for the BridgeInventoryPanel; existing
+	// per-platform aggregation in ProviderDetails stays unchanged.
+	Bridges []IMBridgeInstance `json:"bridges,omitempty"`
 }
 
 type IMDeliveryStatus string
