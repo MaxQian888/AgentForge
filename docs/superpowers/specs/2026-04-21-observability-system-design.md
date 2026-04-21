@@ -184,7 +184,7 @@ New route: `app/(dashboard)/debug/page.tsx` (client-rendered). Four tabs, only t
   - `GET /api/v1/debug/queue` — dumps current queue depth + per-priority buckets.
   - `GET /api/v1/debug/pool` — dumps agent pool active / reserved counts.
 - `internal/handler/metrics_handler.go` (may already exist for Prometheus; if not, add `GET /metrics` using `promhttp.Handler()`)
-- `internal/repository/events_repo.go` — new method `ListByTraceID(traceID string) ([]Event, error)` that queries the persisted-events table where `payload->>'trace_id' = $1`.
+- `internal/repository/events_repo.go` — new method `ListByTraceID(traceID string) ([]Event, error)` that queries the persisted-events table where `metadata->>'trace_id' = $1` (trace_id is stored in `Event.Metadata`, not `Payload`; confirmed by Phase 1 implementation).
 - The ingest endpoint (`POST /api/v1/internal/logs/ingest`) already exists from Phase 1 and is reused here unchanged.
 
 ### 5.3 Permission model
