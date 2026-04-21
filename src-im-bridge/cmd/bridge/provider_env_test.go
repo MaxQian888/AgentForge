@@ -48,3 +48,19 @@ func TestCfgProviderEnv_DurationOr(t *testing.T) {
 		t.Errorf("DurationOr IM_UNKNOWN fallback = %v, want 10s", got)
 	}
 }
+
+func TestCfgProviderEnv_OSFallbackInsideNamespace(t *testing.T) {
+	t.Setenv("FEISHU_FUTURE_KEY", "from-os")
+	env := newCfgProviderEnv(&config{}, []string{"FEISHU_"})
+	if got := env.Get("FEISHU_FUTURE_KEY"); got != "from-os" {
+		t.Errorf("os.Getenv fallback inside namespace = %q, want from-os", got)
+	}
+}
+
+func TestCfgProviderEnv_CrossNamespaceSkipsOSEnv(t *testing.T) {
+	t.Setenv("SLACK_BOT_TOKEN", "xoxb-leaked")
+	env := newCfgProviderEnv(&config{}, []string{"FEISHU_"})
+	if got := env.Get("SLACK_BOT_TOKEN"); got != "" {
+		t.Errorf("namespace gate bypassed via os.Getenv: got %q", got)
+	}
+}
