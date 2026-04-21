@@ -55,6 +55,14 @@ func main() {
 		log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
 		log.SetLevel(log.DebugLevel)
 	}
+	// LOG_LEVEL overrides the env-based default when set. Invalid values fall back to the default with a warning.
+	if cfg.LogLevel != "" {
+		if lvl, err := log.ParseLevel(cfg.LogLevel); err == nil {
+			log.SetLevel(lvl)
+		} else {
+			log.WithError(err).WithField("value", cfg.LogLevel).Warn("invalid LOG_LEVEL, using default")
+		}
+	}
 
 	log.WithFields(log.Fields{
 		"version":   version.Version,

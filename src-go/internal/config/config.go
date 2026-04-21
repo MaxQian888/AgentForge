@@ -58,6 +58,9 @@ type Config struct {
 	// default reply cards (`<base>/runs/<exec_id>`). Defaults to
 	// http://localhost:3000.
 	FrontendBaseURL string
+	// LogLevel overrides the env-based log level when set.
+	// Accepted values: debug, info, warn, error. Empty = env-based default.
+	LogLevel string
 }
 
 func Load() *Config {
@@ -162,5 +165,6 @@ func Load() *Config {
 		UseWorkflowBackedReview:      viper.GetBool("USE_WORKFLOW_BACKED_REVIEW"),
 		PublicBaseURL:                viper.GetString("AGENTFORGE_PUBLIC_BASE_URL"),
 		FrontendBaseURL:              viper.GetString("FRONTEND_BASE_URL"),
+		LogLevel:                     viper.GetString("LOG_LEVEL"),
 	}
 }
