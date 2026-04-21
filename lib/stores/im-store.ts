@@ -52,6 +52,41 @@ export interface IMBridgeProviderDetail {
   bridgeId?: string;
 }
 
+export interface IMBridgeProvider {
+  id: string;
+  transport: string;
+  readinessTier?: string;
+  capabilityMatrix?: Record<string, unknown>;
+  callbackPaths?: string[];
+  tenants?: string[];
+  metadataSource: string;
+}
+
+export interface IMBridgeCommandPlugin {
+  id: string;
+  version: string;
+  commands: string[];
+  tenants?: string[];
+  sourcePath?: string;
+}
+
+export interface IMBridgeInstance {
+  bridgeId: string;
+  platform: string;
+  transport: string;
+  projectIds?: string[];
+  capabilityMatrix?: Record<string, unknown>;
+  callbackPaths?: string[];
+  metadata?: Record<string, string>;
+  tenants?: string[];
+  tenantManifest?: IMBridgeTenantBinding[];
+  lastSeenAt?: string;
+  expiresAt?: string;
+  status?: string;
+  providers?: IMBridgeProvider[];
+  commandPlugins?: IMBridgeCommandPlugin[];
+}
+
 export interface IMBridgeStatus {
   registered: boolean;
   lastHeartbeat: string | null;
@@ -62,6 +97,8 @@ export interface IMBridgeStatus {
   recentFailures: number;
   recentDowngrades: number;
   averageLatencyMs: number;
+  /** Per-bridge inventory — the new BridgeInventoryPanel consumes this. */
+  bridges?: IMBridgeInstance[];
 }
 
 export type IMDeliveryStatus =
@@ -166,6 +203,7 @@ const DEFAULT_BRIDGE_STATUS: IMBridgeStatus = {
   recentFailures: 0,
   recentDowngrades: 0,
   averageLatencyMs: 0,
+  bridges: [],
 };
 
 function normalizeProviderDetail(
@@ -217,6 +255,85 @@ function normalizeProviderDetail(
           .filter((t): t is IMBridgeTenantBinding => t !== null)
       : undefined,
     bridgeId: typeof detail.bridgeId === "string" ? detail.bridgeId : undefined,
+  };
+}
+
+function normalizeBridgeProvider(raw: Partial<IMBridgeProvider> | null | undefined): IMBridgeProvider | null {
+  if (!raw || typeof raw.id !== "string" || raw.id.trim() === "") return null;
+  return {
+    id: raw.id,
+    transport: typeof raw.transport === "string" ? raw.transport : "",
+    readinessTier: typeof raw.readinessTier === "string" ? raw.readinessTier : undefined,
+    capabilityMatrix:
+      raw.capabilityMatrix && typeof raw.capabilityMatrix === "object"
+        ? { ...(raw.capabilityMatrix as Record<string, unknown>) }
+        : undefined,
+    callbackPaths: Array.isArray(raw.callbackPaths)
+      ? raw.callbackPaths.filter((p): p is string => typeof p === "string")
+      : undefined,
+    tenants: Array.isArray(raw.tenants)
+      ? raw.tenants.filter((t): t is string => typeof t === "string")
+      : undefined,
+    metadataSource: typeof raw.metadataSource === "string" ? raw.metadataSource : "builtin",
+  };
+}
+
+function normalizeCommandPlugin(raw: Partial<IMBridgeCommandPlugin> | null | undefined): IMBridgeCommandPlugin | null {
+  if (!raw || typeof raw.id !== "string" || raw.id.trim() === "") return null;
+  return {
+    id: raw.id,
+    version: typeof raw.version === "string" ? raw.version : "",
+    commands: Array.isArray(raw.commands)
+      ? raw.commands.filter((c): c is string => typeof c === "string")
+      : [],
+    tenants: Array.isArray(raw.tenants)
+      ? raw.tenants.filter((t): t is string => typeof t === "string")
+      : undefined,
+    sourcePath: typeof raw.sourcePath === "string" ? raw.sourcePath : undefined,
+  };
+}
+
+function normalizeBridgeInstance(raw: Partial<IMBridgeInstance> | null | undefined): IMBridgeInstance | null {
+  if (!raw || typeof raw.bridgeId !== "string" || raw.bridgeId.trim() === "") return null;
+  return {
+    bridgeId: raw.bridgeId,
+    platform: typeof raw.platform === "string" ? raw.platform : "",
+    transport: typeof raw.transport === "string" ? raw.transport : "",
+    projectIds: Array.isArray(raw.projectIds)
+      ? raw.projectIds.filter((p): p is string => typeof p === "string")
+      : undefined,
+    capabilityMatrix:
+      raw.capabilityMatrix && typeof raw.capabilityMatrix === "object"
+        ? { ...(raw.capabilityMatrix as Record<string, unknown>) }
+        : undefined,
+    callbackPaths: Array.isArray(raw.callbackPaths)
+      ? raw.callbackPaths.filter((p): p is string => typeof p === "string")
+      : undefined,
+    metadata:
+      raw.metadata && typeof raw.metadata === "object"
+        ? { ...(raw.metadata as Record<string, string>) }
+        : undefined,
+    tenants: Array.isArray(raw.tenants)
+      ? raw.tenants.filter((t): t is string => typeof t === "string")
+      : undefined,
+    tenantManifest: Array.isArray(raw.tenantManifest)
+      ? raw.tenantManifest
+          .map((b) =>
+            b && typeof b === "object" && typeof (b as IMBridgeTenantBinding).id === "string" && typeof (b as IMBridgeTenantBinding).projectId === "string"
+              ? { id: (b as IMBridgeTenantBinding).id, projectId: (b as IMBridgeTenantBinding).projectId }
+              : null,
+          )
+          .filter((b): b is IMBridgeTenantBinding => b !== null)
+      : undefined,
+    lastSeenAt: typeof raw.lastSeenAt === "string" ? raw.lastSeenAt : undefined,
+    expiresAt: typeof raw.expiresAt === "string" ? raw.expiresAt : undefined,
+    status: typeof raw.status === "string" ? raw.status : undefined,
+    providers: Array.isArray(raw.providers)
+      ? raw.providers.map((p) => normalizeBridgeProvider(p)).filter((p): p is IMBridgeProvider => p !== null)
+      : undefined,
+    commandPlugins: Array.isArray(raw.commandPlugins)
+      ? raw.commandPlugins.map((cp) => normalizeCommandPlugin(cp)).filter((cp): cp is IMBridgeCommandPlugin => cp !== null)
+      : undefined,
   };
 }
 
@@ -277,6 +394,7 @@ function normalizeBridgeStatus(
       ...DEFAULT_BRIDGE_STATUS,
       providers: [...DEFAULT_BRIDGE_STATUS.providers],
       providerDetails: [...DEFAULT_BRIDGE_STATUS.providerDetails],
+      bridges: [],
     };
   }
 
@@ -311,6 +429,9 @@ function normalizeBridgeStatus(
       typeof status.averageLatencyMs === "number"
         ? status.averageLatencyMs
         : DEFAULT_BRIDGE_STATUS.averageLatencyMs,
+    bridges: Array.isArray(status.bridges)
+      ? status.bridges.map((b) => normalizeBridgeInstance(b)).filter((b): b is IMBridgeInstance => b !== null)
+      : [],
   };
 }
 

@@ -41,6 +41,8 @@ import {
 } from "@/lib/stores/plugin-store";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 import { toast } from "sonner";
+import { BridgeInventoryPanel } from "@/components/im/bridge-inventory-panel";
+import { useIMStore } from "@/lib/stores/im-store";
 
 const EMPTY_RUNTIME_STATUS: DesktopRuntimeStatus = {
   overall: "stopped",
@@ -63,6 +65,10 @@ export default function PluginsPage() {
   useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Plugins" }]);
   const t = useTranslations("plugins");
   const { isDesktop: isDesktopBreakpoint } = useBreakpoint();
+
+  /* ── IM Bridge inventory ── */
+  const bridges = useIMStore((s) => s.bridgeStatus.bridges ?? []);
+  const fetchBridgeStatus = useIMStore((s) => s.fetchBridgeStatus);
 
   /* ── Store ── */
   const plugins = usePluginStore((s) => s.plugins);
@@ -120,7 +126,8 @@ export default function PluginsPage() {
     void discoverBuiltins();
     void fetchMarketplace();
     void fetchRemoteMarketplace();
-  }, [fetchPlugins, discoverBuiltins, fetchMarketplace, fetchRemoteMarketplace]);
+    void fetchBridgeStatus();
+  }, [fetchPlugins, discoverBuiltins, fetchMarketplace, fetchRemoteMarketplace, fetchBridgeStatus]);
 
   const loadDesktopState = useEffectEvent(async () => {
     if (!isDesktop) return;
@@ -515,6 +522,16 @@ export default function PluginsPage() {
       <PluginInstallDialog open={installOpen} onOpenChange={setInstallOpen} />
       <PluginConfigDialog plugin={configPlugin} open={configOpen} onOpenChange={setConfigOpen} />
       <PluginInvokeDialog plugin={invokePlugin} open={invokeOpen} onOpenChange={setInvokeOpen} />
+
+      {/* ── IM Bridge inventory ── */}
+      <section className="mt-8">
+        <h2 className="mb-3 text-lg font-semibold">IM Bridge Providers</h2>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Read-only view of providers and command plugins loaded by every online IM Bridge process.
+          Configuration is owned by the Bridge&apos;s environment; use this view for audit.
+        </p>
+        <BridgeInventoryPanel bridges={bridges} />
+      </section>
     </div>
   );
 }
