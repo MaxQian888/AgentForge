@@ -22,6 +22,18 @@ import (
 	"github.com/agentforge/im-bridge/core/state"
 	"github.com/agentforge/im-bridge/notify"
 	"github.com/google/uuid"
+
+	// Register all built-in IM providers. Each import's init() calls core.RegisterProvider.
+	_ "github.com/agentforge/im-bridge/platform/dingtalk"
+	_ "github.com/agentforge/im-bridge/platform/discord"
+	_ "github.com/agentforge/im-bridge/platform/email"
+	_ "github.com/agentforge/im-bridge/platform/feishu"
+	_ "github.com/agentforge/im-bridge/platform/qq"
+	_ "github.com/agentforge/im-bridge/platform/qqbot"
+	_ "github.com/agentforge/im-bridge/platform/slack"
+	_ "github.com/agentforge/im-bridge/platform/telegram"
+	_ "github.com/agentforge/im-bridge/platform/wechat"
+	_ "github.com/agentforge/im-bridge/platform/wecom"
 )
 
 // reactionSinkAdapter bridges notify.ReactionSink to the AgentForge backend

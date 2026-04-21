@@ -30,6 +30,10 @@ type providerDescriptor struct {
 	ValidateConfig          func(cfg *config, mode string) error
 	NewStub                 platformFactory
 	NewLive                 platformFactory
+	// envPrefixes is the factory's declared env-var namespaces — carried
+	// here so legacy callers that need the factory's namespace (e.g. for
+	// error messages) can reach it without re-consulting core.RegisteredProviders.
+	envPrefixes []string
 }
 
 // Keep the older name as an alias while callers and tests migrate to the
