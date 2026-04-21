@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { TerminalManager } from "./terminal-manager.js";
+import { AcpCapabilityUnsupported } from "./errors.js";
 
 /**
  * Unit tests for the new AcpRuntimeAdapter methods (rollback, executeShell)
@@ -68,7 +69,7 @@ describe("adapter-factory rollback logic", () => {
     expect(forkWasCalled.value).toBe(true);
   });
 
-  test("tier-2/3: throws stub error when fork capability is absent", async () => {
+  test("tier-2/3: throws AcpCapabilityUnsupported when fork capability is absent", async () => {
     const session = makeFakeSession({ hasForkCapability: false });
 
     const rollback = async () => {
@@ -77,10 +78,13 @@ describe("adapter-factory rollback logic", () => {
         await session.forkSession();
         return;
       }
-      throw new Error("rollback replay not implemented — see spec §7.2");
+      throw new AcpCapabilityUnsupported("rollback", "replay_not_implemented");
     };
 
-    await expect(rollback()).rejects.toThrow("rollback replay not implemented — see spec §7.2");
+    await expect(rollback()).rejects.toMatchObject({
+      name: "AcpCapabilityUnsupported",
+      reason: "replay_not_implemented",
+    });
   });
 });
 

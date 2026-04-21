@@ -1025,8 +1025,11 @@ function createAcpWrappedAdvancedOperations(
       if (runtime.acpAdapter) {
         try {
           return await runtime.acpAdapter.session.extMethod("mcp/serverStatus", {});
-        } catch {
-          throw new UnsupportedOperationError("getMcpServerStatus", _runtimeKey, "unsupported", "acp_not_implemented");
+        } catch (err) {
+          if (err instanceof AcpCapabilityUnsupported) {
+            throw new UnsupportedOperationError("getMcpServerStatus", _runtimeKey, "unsupported", err.reason);
+          }
+          throw err;
         }
       }
       return legacy.getMcpServerStatus(runtime);

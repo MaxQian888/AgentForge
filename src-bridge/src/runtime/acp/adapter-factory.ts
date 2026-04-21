@@ -160,7 +160,7 @@ export function createAcpRuntimeAdapter(
         }
         // Tier 2: loadSession replay — not yet implemented.
         // TODO(T7): implement replay via fresh session + successive prompt calls.
-        throw new Error("rollback replay not implemented — see spec §7.2");
+        throw new AcpCapabilityUnsupported("rollback", "replay_not_implemented");
       },
       async executeCommand(command) {
         // Best-effort: prefer an extension RPC; fall back to a slash-prefix
@@ -184,10 +184,13 @@ export function createAcpRuntimeAdapter(
             ? { command: "cmd", args: ["/c", command], cwd: task.worktreeRoot }
             : { command: "sh", args: ["-c", command], cwd: task.worktreeRoot },
         );
-        const exitInfo = await tm.waitForExit(id);
-        const result = tm.getOutput(id);
-        tm.release(id);
-        return { output: result.output, exitCode: exitInfo.exitCode };
+        try {
+          const exitInfo = await tm.waitForExit(id);
+          const result = tm.getOutput(id);
+          return { output: result.output, exitCode: exitInfo.exitCode };
+        } finally {
+          tm.release(id);
+        }
       },
       dispose: () => session.dispose(),
     };
