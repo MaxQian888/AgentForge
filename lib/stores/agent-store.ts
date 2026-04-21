@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
+import { withDevtools } from "./_devtools";
 import type {
   CodingAgentCatalog,
   CodingAgentInteractionCapabilities,
@@ -679,7 +680,8 @@ function normalizeBridgeHealth(raw: BridgeHealthApiShape | null | undefined): Br
   };
 }
 
-export const useAgentStore = create<AgentState>()((set, get) => ({
+export const useAgentStore = create<AgentState>()(
+  withDevtools((set, get) => ({
   agents: [],
   agentOutputs: new Map(),
   agentToolCalls: new Map(),
@@ -1063,4 +1065,5 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
       };
     });
   },
-}));
+  }), { name: "agent-store" }),
+);

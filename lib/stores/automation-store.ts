@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { withDevtools } from "./_devtools";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -94,7 +95,8 @@ const getToken = () => {
   return state.accessToken ?? state.token ?? null;
 };
 
-export const useAutomationStore = create<AutomationState>()((set) => ({
+export const useAutomationStore = create<AutomationState>()(
+  withDevtools((set) => ({
   rulesByProject: {},
   logsByProject: {},
 
@@ -160,4 +162,5 @@ export const useAutomationStore = create<AutomationState>()((set) => ({
     const { data } = await getApi().get<{ items: AutomationLog[] }>(`/api/v1/projects/${projectId}/automations/logs`, { token });
     set((state) => ({ logsByProject: { ...state.logsByProject, [projectId]: data.items ?? [] } }));
   },
-}));
+  }), { name: "automation-store" }),
+);

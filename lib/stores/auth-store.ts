@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createApiClient, registerTokenRefresh } from "@/lib/api-client";
 import { resolveBackendUrl } from "@/lib/backend-url";
+import { withDevtools } from "./_devtools";
 
 export interface AuthUser {
   id: string;
@@ -79,8 +80,9 @@ async function authenticate(
 }
 
 export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
+  withDevtools(
+    persist(
+      (set, get) => ({
       accessToken: null,
       refreshToken: null,
       user: null,
@@ -215,6 +217,8 @@ export const useAuthStore = create<AuthState>()(
             : "unauthenticated";
       },
     }
+  ),
+  { name: "auth-store" },
   )
 );
 

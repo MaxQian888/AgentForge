@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { createApiClient } from "@/lib/api-client";
 import { resolveBackendUrl } from "@/lib/backend-url";
 import { useAuthStore } from "./auth-store";
+import { withDevtools } from "./_devtools";
 
 export type AuditResourceType =
   | "project" | "member" | "task" | "team_run" | "workflow"
@@ -106,7 +107,8 @@ const emptyPage = (filtersKey: string): AuditPageState => ({
   filtersKey,
 });
 
-export const useAuditStore = create<AuditState>()((set, get) => ({
+export const useAuditStore = create<AuditState>()(
+  withDevtools((set, get) => ({
   byProject: {},
   detailById: {},
   detailLoading: {},
@@ -209,4 +211,5 @@ export const useAuditStore = create<AuditState>()((set, get) => ({
       return { byProject: rest };
     });
   },
-}));
+  }), { name: "audit-store" }),
+);
