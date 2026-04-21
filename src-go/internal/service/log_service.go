@@ -7,6 +7,7 @@ import (
 	"time"
 
 	eventbus "github.com/agentforge/server/internal/eventbus"
+	applog "github.com/agentforge/server/internal/log"
 	"github.com/agentforge/server/internal/model"
 	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
@@ -36,6 +37,13 @@ func (s *LogService) CreateLog(ctx context.Context, input model.CreateLogInput) 
 	}
 	if input.Level == "" {
 		input.Level = model.LogLevelInfo
+	}
+
+	if tid := applog.TraceID(ctx); tid != "" {
+		if input.Detail == nil {
+			input.Detail = map[string]any{}
+		}
+		input.Detail["trace_id"] = tid
 	}
 
 	detailJSON, _ := json.Marshal(input.Detail)
