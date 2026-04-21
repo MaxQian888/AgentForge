@@ -1,32 +1,34 @@
-package core_test
+package core
 
 import (
 	"testing"
-
-	"github.com/agentforge/im-bridge/core"
 )
+
+func resetProviderRegistry() {
+	providerRegistryMu.Lock()
+	defer providerRegistryMu.Unlock()
+	providerRegistry = map[string]ProviderFactory{}
+}
 
 func resetRegistry(t *testing.T) {
 	t.Helper()
-	// TestOnly_ResetProviderRegistry is only exposed to _test.go via a
-	// companion file; provided to let tests run in any order.
-	core.TestOnly_ResetProviderRegistry()
+	resetProviderRegistry()
 }
 
 func TestRegisterAndLookupProvider(t *testing.T) {
 	resetRegistry(t)
 
-	f := core.ProviderFactory{
+	f := ProviderFactory{
 		ID:                      "unittest-platform",
-		SupportedTransportModes: []string{core.TransportModeStub},
+		SupportedTransportModes: []string{TransportModeStub},
 		EnvPrefixes:             []string{"UNITTEST_"},
-		NewStub: func(env core.ProviderEnv) (core.Platform, error) {
+		NewStub: func(env ProviderEnv) (Platform, error) {
 			return nil, nil
 		},
 	}
-	core.RegisterProvider(f)
+	RegisterProvider(f)
 
-	got, ok := core.LookupProvider("unittest-platform")
+	got, ok := LookupProvider("unittest-platform")
 	if !ok {
 		t.Fatalf("LookupProvider unittest-platform: not found")
 	}
@@ -37,10 +39,10 @@ func TestRegisterAndLookupProvider(t *testing.T) {
 
 func TestRegisterDuplicatePanics(t *testing.T) {
 	resetRegistry(t)
-	core.RegisterProvider(core.ProviderFactory{
+	RegisterProvider(ProviderFactory{
 		ID:                      "dup",
-		SupportedTransportModes: []string{core.TransportModeStub},
-		NewStub:                 func(env core.ProviderEnv) (core.Platform, error) { return nil, nil },
+		SupportedTransportModes: []string{TransportModeStub},
+		NewStub:                 func(env ProviderEnv) (Platform, error) { return nil, nil },
 	})
 
 	defer func() {
@@ -48,10 +50,10 @@ func TestRegisterDuplicatePanics(t *testing.T) {
 			t.Error("expected panic on duplicate registration")
 		}
 	}()
-	core.RegisterProvider(core.ProviderFactory{
+	RegisterProvider(ProviderFactory{
 		ID:                      "dup",
-		SupportedTransportModes: []string{core.TransportModeStub},
-		NewStub:                 func(env core.ProviderEnv) (core.Platform, error) { return nil, nil },
+		SupportedTransportModes: []string{TransportModeStub},
+		NewStub:                 func(env ProviderEnv) (Platform, error) { return nil, nil },
 	})
 }
 
@@ -62,12 +64,12 @@ func TestRegisterEmptyIDPanics(t *testing.T) {
 			t.Error("expected panic on empty id")
 		}
 	}()
-	core.RegisterProvider(core.ProviderFactory{ID: "   "})
+	RegisterProvider(ProviderFactory{ID: "   "})
 }
 
 func TestLookupUnknownReturnsFalse(t *testing.T) {
 	resetRegistry(t)
-	if _, ok := core.LookupProvider("nope"); ok {
+	if _, ok := LookupProvider("nope"); ok {
 		t.Error("LookupProvider nope = ok, want false")
 	}
 }
@@ -75,13 +77,13 @@ func TestLookupUnknownReturnsFalse(t *testing.T) {
 func TestRegisteredProvidersStableOrder(t *testing.T) {
 	resetRegistry(t)
 	for _, id := range []string{"c-platform", "a-platform", "b-platform"} {
-		core.RegisterProvider(core.ProviderFactory{
+		RegisterProvider(ProviderFactory{
 			ID:                      id,
-			SupportedTransportModes: []string{core.TransportModeStub},
-			NewStub:                 func(env core.ProviderEnv) (core.Platform, error) { return nil, nil },
+			SupportedTransportModes: []string{TransportModeStub},
+			NewStub:                 func(env ProviderEnv) (Platform, error) { return nil, nil },
 		})
 	}
-	list := core.RegisteredProviders()
+	list := RegisteredProviders()
 	if len(list) != 3 {
 		t.Fatalf("got %d providers, want 3", len(list))
 	}
@@ -95,12 +97,12 @@ func TestRegisteredProvidersStableOrder(t *testing.T) {
 
 func TestRegisterNormalizesID(t *testing.T) {
 	resetRegistry(t)
-	core.RegisterProvider(core.ProviderFactory{
+	RegisterProvider(ProviderFactory{
 		ID:                      "Feishu-live",
-		SupportedTransportModes: []string{core.TransportModeStub},
-		NewStub:                 func(env core.ProviderEnv) (core.Platform, error) { return nil, nil },
+		SupportedTransportModes: []string{TransportModeStub},
+		NewStub:                 func(env ProviderEnv) (Platform, error) { return nil, nil },
 	})
-	got, ok := core.LookupProvider("feishu")
+	got, ok := LookupProvider("feishu")
 	if !ok {
 		t.Fatalf("LookupProvider feishu after registering %q: not found", "Feishu-live")
 	}
