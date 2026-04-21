@@ -1272,6 +1272,34 @@ func (s *IMControlPlane) findDeliveryLocked(deliveryID string) *model.IMDelivery
 	return nil
 }
 
+// QueueBoundProgressRaw is a thin adapter used by the im_forward eventbus
+// observer. It wraps QueueBoundProgress with a simplified call signature so
+// the mods package need not import the service package's request type.
+func (s *IMControlPlane) QueueBoundProgressRaw(ctx context.Context, taskID, content string, isTerminal bool, metadata map[string]string) (bool, error) {
+	return s.QueueBoundProgress(ctx, IMBoundProgressRequest{
+		TaskID:     taskID,
+		Content:    content,
+		IsTerminal: isTerminal,
+		Metadata:   metadata,
+	})
+}
+
+// BoundPlatformForTask returns the IM platform of the bound action for the given
+// task ID, or an empty string if no binding exists. Used by the im_forward
+// observer to determine the folding mode before calling QueueBoundProgress.
+func (s *IMControlPlane) BoundPlatformForTask(taskID string) string {
+	if strings.TrimSpace(taskID) == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.actionByTask[strings.TrimSpace(taskID)]
+	if state == nil || state.binding == nil {
+		return ""
+	}
+	return state.binding.Platform
+}
+
 func (s *IMControlPlane) applyDeliveryAckLocked(ack *model.IMDeliveryAck) {
 	if ack == nil {
 		return
