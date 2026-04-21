@@ -789,3 +789,55 @@ func TestRegisterRoutes_NotFound(t *testing.T) {
 		t.Errorf("GET /nonexistent: expected 404, got %d", rec.Code)
 	}
 }
+
+func TestPprof_NotMounted_WhenTokenUnset(t *testing.T) {
+	t.Setenv("DEBUG_TOKEN", "")
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+
+	// Build the server before registering routes; pprof is mounted in New().
+	e := server.New(cfg, cache)
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/heap", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /debug/pprof/heap with no DEBUG_TOKEN set: expected 404, got %d", rec.Code)
+	}
+}
+
+func TestPprof_RequiresValidToken(t *testing.T) {
+	const secret = "secret123"
+	t.Setenv("DEBUG_TOKEN", secret)
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+
+	e := server.New(cfg, cache)
+
+	// Without X-Debug-Token header → 404 (hide existence).
+	reqNoToken := httptest.NewRequest(http.MethodGet, "/debug/pprof/heap", nil)
+	recNoToken := httptest.NewRecorder()
+	e.ServeHTTP(recNoToken, reqNoToken)
+	if recNoToken.Code != http.StatusNotFound {
+		t.Errorf("GET /debug/pprof/heap without token: expected 404, got %d", recNoToken.Code)
+	}
+
+	// With wrong X-Debug-Token header → 404.
+	reqWrong := httptest.NewRequest(http.MethodGet, "/debug/pprof/heap", nil)
+	reqWrong.Header.Set("X-Debug-Token", "wrongtoken")
+	recWrong := httptest.NewRecorder()
+	e.ServeHTTP(recWrong, reqWrong)
+	if recWrong.Code != http.StatusNotFound {
+		t.Errorf("GET /debug/pprof/heap with wrong token: expected 404, got %d", recWrong.Code)
+	}
+
+	// With correct X-Debug-Token header → 200 (pprof profile index).
+	reqOK := httptest.NewRequest(http.MethodGet, "/debug/pprof/heap", nil)
+	reqOK.Header.Set("X-Debug-Token", secret)
+	recOK := httptest.NewRecorder()
+	e.ServeHTTP(recOK, reqOK)
+	if recOK.Code != http.StatusOK {
+		t.Errorf("GET /debug/pprof/heap with valid token: expected 200, got %d", recOK.Code)
+	}
+}

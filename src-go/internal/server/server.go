@@ -2,6 +2,9 @@
 package server
 
 import (
+	"net/http"
+	_ "net/http/pprof" // registers pprof handlers on http.DefaultServeMux
+	"os"
 	"time"
 
 	"github.com/agentforge/server/internal/config"
@@ -15,6 +18,19 @@ import (
 	echolog "github.com/labstack/gommon/log"
 	log "github.com/sirupsen/logrus"
 )
+
+// requireDebugToken gates a route behind a shared secret via the X-Debug-Token header.
+// If DEBUG_TOKEN is unset, the route should not be mounted at all.
+func requireDebugToken(token string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if c.Request().Header.Get("X-Debug-Token") != token {
+				return c.NoContent(http.StatusNotFound) // hide existence
+			}
+			return next(c)
+		}
+	}
+}
 
 type customValidator struct {
 	validator *validator.Validate
@@ -86,6 +102,13 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 	e.Use(echomiddleware.ContextTimeoutWithConfig(echomiddleware.ContextTimeoutConfig{
 		Timeout: 30 * time.Second,
 	}))
+
+	// pprof — only mounted when DEBUG_TOKEN is set; requires X-Debug-Token header.
+	if token := os.Getenv("DEBUG_TOKEN"); token != "" {
+		pprofGroup := e.Group("/debug/pprof", requireDebugToken(token))
+		pprofGroup.Any("/*", echo.WrapHandler(http.DefaultServeMux))
+		log.WithField("path", "/debug/pprof/*").Info("pprof enabled (admin-gated)")
+	}
 
 	return e
 }
