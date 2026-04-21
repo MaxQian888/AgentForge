@@ -1,0 +1,45 @@
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: email-adapter
+  name: Email Adapter
+  version: 0.1.0
+  description: Sends email notifications via SMTP. Falls back to a stub mode when smtp_host is unconfigured.
+  tags:
+    - builtin
+    - integration
+    - notification
+    - email
+spec:
+  runtime: wasm
+  module: ./dist/email.wasm
+  abiVersion: v1
+  capabilities:
+    - health
+    - send_email
+  configSchema:
+    type: object
+    required: [smtp_host, username, password]
+    properties:
+      smtp_host:
+        type: string
+        description: SMTP server hostname.
+      smtp_port:
+        type: string
+        description: "SMTP port (default: 587)."
+      from:
+        type: string
+        description: Sender email address (defaults to username).
+      username:
+        type: string
+        description: SMTP authentication username.
+      password:
+        type: string
+        description: SMTP authentication password.
+permissions:
+  network:
+    required: true
+    domains: []
+source:
+  type: builtin
+  path: ./plugins/integrations/email-adapter/manifest.yaml
