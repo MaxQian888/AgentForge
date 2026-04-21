@@ -255,6 +255,9 @@ func main() {
 		agentSvc,
 		schedulerSvc,
 	)
+	if routeServices == nil {
+		log.Fatal("server.RegisterRoutes returned nil; cannot wire scheduler handlers")
+	}
 	taskProgressSvc := routeServices.TaskProgress
 	automationSchedulerEngine := routeServices.Automation
 	if taskProgressSvc != nil {
@@ -274,7 +277,7 @@ func main() {
 		scheduler.NewCostReconcileHandler(projectRepo, taskRepo, teamRepo, agentRunRepo),
 	)
 	schedulerSvc.RegisterHandler("scheduler-history-retention", scheduler.NewHistoryRetentionHandler(schedulerSvc))
-	if routeServices != nil && routeServices.Invitation != nil {
+	if routeServices.Invitation != nil {
 		schedulerSvc.RegisterHandler(
 			"invitation-expire-sweeper",
 			scheduler.NewInvitationExpireSweeperHandler(routeServices.Invitation),

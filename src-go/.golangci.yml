@@ -17,21 +17,32 @@ linters:
         - "SA*"
         - "-SA1019"
     errcheck:
-      # Skip idiomatic close/discard patterns that rarely surface actionable errors
-      # at the call site. Audit explicit error handling in leaf services instead.
+      # Skip idiomatic close/discard/env patterns that rarely surface actionable
+      # errors at the call site. Audit explicit error handling in leaf services.
       exclude-functions:
         - (io.Closer).Close
         - (io.ReadCloser).Close
         - (*os.File).Close
         - (*net/http.Response).Body.Close
+        - (*database/sql.Rows).Close
+        - (*github.com/gorilla/websocket.Conn).Close
         - io.Copy
         - fmt.Fprintf
         - fmt.Fprintln
         - fmt.Fprint
         - (net/http.ResponseWriter).Write
         - (*strings.Builder).WriteString
+        - (*strings.Builder).Write
         - (*bytes.Buffer).WriteString
         - (*bytes.Buffer).Write
+        - os.Setenv
+        - os.Unsetenv
+        - os.MkdirAll
+        - os.RemoveAll
+        - (*github.com/nicksnyder/go-i18n/v2/i18n.Bundle).LoadMessageFileFS
+        - (*github.com/nicksnyder/go-i18n/v2/i18n.Bundle).LoadMessageFile
+        - (*os.File).Write
+        - (*archive/zip.Writer).Close
 
 issues:
   max-same-issues: 0

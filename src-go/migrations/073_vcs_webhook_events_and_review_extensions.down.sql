@@ -1,10 +1,18 @@
-ALTER TABLE review_findings
-  DROP COLUMN IF EXISTS active_fix_run_id,
-  DROP COLUMN IF EXISTS inline_comment_id,
-  DROP COLUMN IF EXISTS decided_by,
-  DROP COLUMN IF EXISTS decided_at,
-  DROP COLUMN IF EXISTS decision,
-  DROP COLUMN IF EXISTS suggested_patch;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_name = 'review_findings'
+  ) THEN
+    ALTER TABLE review_findings
+      DROP COLUMN IF EXISTS active_fix_run_id,
+      DROP COLUMN IF EXISTS inline_comment_id,
+      DROP COLUMN IF EXISTS decided_by,
+      DROP COLUMN IF EXISTS decided_at,
+      DROP COLUMN IF EXISTS decision,
+      DROP COLUMN IF EXISTS suggested_patch;
+  END IF;
+END $$;
 
 ALTER TABLE reviews
   DROP COLUMN IF EXISTS automation_decision,

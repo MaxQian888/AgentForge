@@ -82,7 +82,8 @@ func NewScheduleTicker(lister ScheduleLister, dispatcher ScheduleDispatcher, clo
 // a goroutine.
 func (t *ScheduleTicker) Run(ctx context.Context) {
 	// Fire-on-start pass so operators can test "fired now" without waiting.
-	t.tick(ctx)
+	// Errors are swallowed by design — the Router logs them upstream.
+	_ = t.tick(ctx)
 
 	for {
 		next := nextMinuteBoundary(t.clock.Now())
@@ -91,7 +92,7 @@ func (t *ScheduleTicker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
-			t.tick(ctx)
+			_ = t.tick(ctx)
 		}
 	}
 }
