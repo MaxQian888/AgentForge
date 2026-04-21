@@ -92,3 +92,19 @@ func TestRegisteredProvidersStableOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterNormalizesID(t *testing.T) {
+	resetRegistry(t)
+	core.RegisterProvider(core.ProviderFactory{
+		ID:                      "Feishu-live",
+		SupportedTransportModes: []string{core.TransportModeStub},
+		NewStub:                 func(env core.ProviderEnv) (core.Platform, error) { return nil, nil },
+	})
+	got, ok := core.LookupProvider("feishu")
+	if !ok {
+		t.Fatalf("LookupProvider feishu after registering %q: not found", "Feishu-live")
+	}
+	if got.ID != "feishu" {
+		t.Errorf("got.ID = %q, want %q (canonical form)", got.ID, "feishu")
+	}
+}

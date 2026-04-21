@@ -3,7 +3,6 @@ package core
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -64,10 +63,11 @@ var (
 // RegisterProvider records a factory. Panics on empty or duplicate ID so
 // misconfiguration surfaces at process startup.
 func RegisterProvider(f ProviderFactory) {
-	id := strings.TrimSpace(f.ID)
+	id := NormalizePlatformName(f.ID)
 	if id == "" {
 		panic("core.RegisterProvider: empty provider id")
 	}
+	f.ID = id
 	providerRegistryMu.Lock()
 	defer providerRegistryMu.Unlock()
 	if _, dup := providerRegistry[id]; dup {
