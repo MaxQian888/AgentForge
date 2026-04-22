@@ -1,0 +1,43 @@
+{
+  "skill_name": "next-best-practices",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我在写一个 Next.js 页面组件，需要从 URL 参数中获取 id。Next.js 16 中 params 是异步的，我应该怎么正确获取？",
+      "expected_output": "展示 async 组件中 await params 的正确用法，并提醒 params 在 Next.js 15+ 变为异步。同时提供同步场景（如 Client Component 使用 useParams）的替代方案。",
+      "files": [],
+      "expectations": [
+        "展示 async 组件中 await params 的用法",
+        "提到 Next.js 15+ params 变为异步",
+        "提供 Client Component 中使用 useParams 的方案",
+        "没有错误地使用同步方式解构 params"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "我在 Server Component 中需要获取 cookie 值来做一些逻辑判断。正确的做法是什么？",
+      "expected_output": "指导用户使用 async cookies() 函数（Next.js 15+），展示 await cookies() 后调用 .get() 的用法。同时解释为什么不能在 Server Component 中直接访问浏览器 API。",
+      "files": [],
+      "expectations": [
+        "提到使用 async cookies() 函数",
+        "展示 await cookies().get('key') 的用法",
+        "提到 Next.js 15+ cookies() 变为异步",
+        "解释 Server Component 中不能直接访问浏览器 API",
+        "没有错误地推荐使用 document.cookie"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "我有一个表单需要在提交后重定向到另一个页面。应该使用 redirect 还是 router.push？有什么区别？",
+      "expected_output": "解释 redirect 用于 Server Actions 和 Server Components 中的服务器端重定向，router.push 用于客户端导航。根据使用场景推荐正确的方式。",
+      "files": [],
+      "expectations": [
+        "解释 redirect 用于服务器端（Server Actions / Server Components）",
+        "解释 router.push 用于客户端导航",
+        "提到 redirect 会返回 307/308 状态码",
+        "提到 notFound() 和 permanentRedirect() 的适用场景",
+        "没有混淆 server-side 和 client-side 重定向的使用场景"
+      ]
+    }
+  ]
+}

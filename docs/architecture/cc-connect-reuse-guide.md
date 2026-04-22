@@ -6,14 +6,15 @@
 
 ---
 
-## 当前实现快照（2026-03-30）
+## 当前实现快照（2026-04-22）
 
-这份指南的核心判断仍然成立：AgentForge 复用了 cc-connect 的 `platform/` 连接器价值，而不是复用它的本地 CLI agent 执行模型。但当前仓库真相已经比最初草案更进一步：
+本指南核心判断仍然成立：AgentForge 复用 cc-connect 的 `platform/` 连接器价值，而非其本地 CLI agent 执行模型。当前仓库已实现：
 
-- 当前 IM Bridge 仓库已经有真实 platform registry 与 control-plane wiring，而不只是 Feishu-first 草图。
-- 当前受支持的 operator-facing 平台集合已经覆盖 `feishu`、`dingtalk`、`slack`、`telegram`、`discord`、`wecom`、`qq`、`qqbot`。
-- 与 AgentForge 后端的主通信模型已经收敛为 HTTP control-plane + WebSocket 事件流，而不是待选的 `HTTP+SSE vs gRPC vs WebSocket`。
-- Feishu 的 delayed update / native card 能力、以及 QQ / QQ Bot / WeCom 的平台覆盖都已经进入当前仓库资产，而不是停留在后续列表里。
+- IM Bridge 具备真实 platform registry 与 control-plane wiring。
+- 支持的平台集合覆盖 `feishu`、`dingtalk`、`slack`、`telegram`、`discord`、`wecom`、`qq`、`qqbot`。
+- 与 AgentForge 后端的主通信模型收敛为 HTTP control-plane + WebSocket 事件流。
+- Feishu delayed update / native card 能力、QQ / QQ Bot / WeCom 平台覆盖、富媒体投递（附件/回应/线程策略）与 capability matrix 均已落地。
+- 事件类型由后端动态拉取，不再是硬编码清单；delivery 诊断包含平台 badge、降级诊断与 payload 预览。
 
 ---
 
@@ -624,7 +625,7 @@ func (e *Engine) handleTaskCommand(p core.Platform, msg *core.Message, args stri
                             │
   ┌─────────────────────────▼─────────────────────────────────┐
   │                 AgentForge API Gateway                      │
-  │                 (Go · Fiber/Echo)                           │
+  │                 (Go · Echo)                                 │
   │                                                            │
   │  POST /api/v1/im/message    ← IM 消息入口                 │
   │  POST /api/v1/im/command    ← 斜杠命令入口                │
@@ -1448,7 +1449,7 @@ func (c *Client) ProcessNaturalLanguage(sessionKey, content string, opts Process
 | Slack API | <https://api.slack.com/> |
 | Telegram Bot API | <https://core.telegram.org/bots/api> |
 | Discord 开发者文档 | <https://discord.com/developers/docs> |
-| AgentForge PRD | 见 /PRD.md |
+| AgentForge PRD | [`docs/product/prd.md`](../product/prd.md) |
 
 ---
 

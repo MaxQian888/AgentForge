@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-simple-components\\\\test-components\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-simple-components\\\\with_skill\\\\outputs\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-simple-components\\\\without_skill\\\\outputs\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-complex-components\\\\test-components\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-complex-components\\\\with_skill\\\\outputs\")",
+      "Bash(cp \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-complex-components\\\\test-components\\\\composite-card.tsx\" \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-complex-components\\\\without_skill\\\\outputs\\\\composite-card.tsx\")",
+      "Bash(cp \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-complex-components\\\\test-components\\\\hook-heavy.tsx\" \"C:\\\\Users\\\\qwdma\\\\.claude\\\\skills\\\\shadcn-component-migrator-workspace\\\\iteration-1\\\\eval-complex-components\\\\without_skill\\\\outputs\\\\hook-heavy.tsx\")",
+      "Bash(cp /c/Users/qwdma/.claude/skills/shadcn-component-migrator-workspace/iteration-1/eval-simple-components/test-components/custom-button.tsx /c/Users/qwdma/.claude/skills/shadcn-component-migrator-workspace/iteration-1/eval-simple-components/with_skill/outputs/custom-button.tsx)",
+      "Bash(cp /c/Users/qwdma/.claude/skills/shadcn-component-migrator-workspace/iteration-1/eval-simple-components/test-components/custom-badge.tsx /c/Users/qwdma/.claude/skills/shadcn-component-migrator-workspace/iteration-1/eval-simple-components/with_skill/outputs/custom-badge.tsx)",
+      "Bash(cp /c/Users/qwdma/.claude/skills/shadcn-component-migrator-workspace/iteration-1/eval-simple-components/test-components/custom-separator.tsx /c/Users/qwdma/.claude/skills/shadcn-component-migrator-workspace/iteration-1/eval-simple-components/with_skill/outputs/custom-separator.tsx)"
+    ]
+  }
+}

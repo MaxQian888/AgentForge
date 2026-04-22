@@ -1,6 +1,6 @@
 ---
-name: deploying-and-running-agentforge
-description: Use when Codex needs to run, package, or deploy this repository's Next.js 16 frontend, Go sidecar, Tauri desktop shell, Docker-backed local services, or GitHub Actions release flow, especially when choosing between web mode, backend mode, desktop mode, static export delivery, or release artifacts.
+name: deploying-and-running-react-go-quick-starter
+description: Use whenever you need to run, package, build, or deploy this repository's Next.js 16 frontend, Go sidecar, Tauri desktop shell, Docker-backed local services, or GitHub Actions release flow. Make sure to apply this skill when choosing between web mode, backend mode, desktop mode, static export delivery, or release artifacts, even if the user only mentions a single surface like 'start the backend' or 'build the desktop app'.
 ---
 
 # Deploying And Running React Go Quick Starter

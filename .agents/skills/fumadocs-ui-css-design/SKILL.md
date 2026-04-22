@@ -1,6 +1,6 @@
 ---
 name: fumadocs-ui-css-design
-description: Use when building, extending, migrating, or customizing a Fumadocs documentation site, especially when Codex needs current official Fumadocs guidance for scaffolding, Next.js manual installation, content source setup, page tree and navigation, MDX authoring, layouts, search, internationalization, static export, or theme and CSS customization.
+description: Use whenever building, extending, migrating, or customizing a Fumadocs documentation site. Covers scaffolding, Next.js manual installation, content source setup, page tree and navigation, MDX authoring, layouts, search, internationalization, static export, and theme/CSS customization. Make sure to apply this skill for any docs-site work, even if the user only mentions adding a page or tweaking a layout.
 ---
 
 # Fumadocs Complete Workflow

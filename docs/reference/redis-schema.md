@@ -7,7 +7,7 @@ and the adjacent runtime patterns already documented in the repository.
 
 - `src-go/internal/repository/cache.go`
 - `src-go/pkg/database/redis.go`
-- `docs/part/DATA_AND_REALTIME_DESIGN.md`
+- `docs/architecture/data-realtime-design.md`
 
 ## Current Implemented Keys
 

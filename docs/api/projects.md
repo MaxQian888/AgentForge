@@ -227,6 +227,11 @@ restore the project.
 
 ## Invite Note
 
-The OpenSpec task calls out "member management". Current repository truth does
-not expose a dedicated `/api/v1/users/invite` endpoint. The project-scoped
-member creation endpoint above is the invite/onboarding seam used by the app.
+Human member onboarding uses the project-scoped invitation flow. See
+[`invitations.md`](./invitations.md) for the full contract: create, list,
+revoke, resend, accept, and decline.
+
+Direct `POST /api/v1/projects/:pid/members` remains available for agent
+members and IM-identity bindings, but human member creation now returns
+`410 HumanMemberCreationMovedToInvitationFlow` unless the caller uses the
+invitation flow.

@@ -213,7 +213,7 @@ For our use case (task management platform, likely <1000 concurrent users), both
 |---|---|---|
 | **Agent Frameworks** | Google ADK, Genkit, LangChainGo, Eino, Jetify, go-agent | AutoAgents, Rig, ADK-Rust |
 | **Web Frameworks** | Fiber, Echo, Gin, Chi | Axum, Actix, Rocket |
-| **WebSocket** | Gorilla WebSocket, built-in (Fiber/Echo) | tungstenite, actix-web-actors |
+| **WebSocket** | Gorilla WebSocket, built-in (Echo) | tungstenite, actix-web-actors |
 | **Git Integration** | go-git (pure Go, production-proven) | git2-rs (C bindings), gitoxide (maturing) |
 | **LLM Clients** | 10+ provider integrations via LangChainGo | Fewer, growing |
 | **ORM/Database** | GORM, sqlx, Ent | Diesel, SQLx, SeaORM |

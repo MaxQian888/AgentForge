@@ -5,15 +5,16 @@
 
 ---
 
-## 当前实现快照（2026-03-30）
+## 当前实现快照（2026-04-22）
 
-这份文档仍然描述审查流水线的总体蓝图，但当前仓库已经有一条更具体的实现线：
+本文档描述审查流水线的总体蓝图，当前仓库已具备可工作的实现主线：
 
-- Layer 1 前端/仓库工具链当前以 `pnpm lint`、`pnpm test`（Jest）和 Go 侧测试为主，不再是文档中早期示例的 Vitest-only 口径。
-- Layer 2 已经支持通过 ReviewPlugin 扩展点加载官方 built-ins；当前仓库内置的受维护 ReviewPlugin 至少包括 `architecture-check` 与 `performance-check`，并由 `plugins/builtin-bundle.yaml` 统一管理。同时，官方 starter catalog 还补了 `review-control` ToolPlugin 与 `review-escalation-flow` WorkflowPlugin，分别承担 operator 触发/查询入口和 review → approval pause 的顺序升级路径。
-- 审查工作区已经从“仅 PR 后台流水线”扩展到 operator-facing review workspace：`app/(dashboard)/reviews/page.tsx`、`components/review/review-workspace.tsx`、`review-detail-panel.tsx`、`review-decision-actions.tsx`、`review-trigger-form.tsx` 共同承载 backlog、详情、manual deep review 和人工决策。
-- 人工审批态当前已有真实状态机与实时事件：`pending_human` 已在 Go model、service、ws-store 和前端列表/详情面板中落地。
-- GitHub PR 自动化已经有真实分层 workflow：`.github/workflows/agent-review.yml` 负责 `agent/*` 分支的 Layer 1 快速审查与 decision artifact，`.github/workflows/review-layer2.yml` 会在需要时把同一条 PR diff 继续升级到 AgentForge Layer 2 深审入口。
+- Layer 1 前端/仓库工具链以 `pnpm lint`、`pnpm test`（Jest 30）和 Go 侧测试为主。
+- Layer 2 支持通过 ReviewPlugin 扩展点加载官方 built-ins；当前内置 ReviewPlugin 包括 `architecture-check` 与 `performance-check`，由 `plugins/builtin-bundle.yaml` 统一管理。官方 starter catalog 还包含 `review-control` ToolPlugin 与 `review-escalation-flow` WorkflowPlugin，分别承担 operator 触发/查询入口和 review → approval pause 的顺序升级路径。
+- 审查工作区已从”仅 PR 后台流水线”扩展为 operator-facing review workspace：`app/(dashboard)/reviews/page.tsx`、`components/review/review-workspace.tsx`、`review-detail-panel.tsx`、`review-decision-actions.tsx`、`review-trigger-form.tsx` 共同承载 backlog、详情、manual deep review 与人工决策。
+- 人工审批态具备真实状态机与实时事件：`pending_human` 已在 Go model、service、ws-store 和前端列表/详情面板中落地。
+- GitHub PR 自动化具备真实分层 workflow：`.github/workflows/agent-review.yml` 负责 `agent/*` 分支的 Layer 1 快速审查与 decision artifact，`.github/workflows/review-layer2.yml` 在需要时将同一条 PR diff 升级到 AgentForge Layer 2 深审入口。
+- Findings 以 JSONB 数组形式存储于 review 记录中；per-finding 独立决策持久化与 fix run 历史仍在演进中。
 
 ---
 

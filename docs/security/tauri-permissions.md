@@ -19,6 +19,7 @@ Baseline permissions for the `main` window:
 - `shell:allow-execute` for named sidecars only:
   - `server`
   - `bridge`
+  - `im-bridge`
 
 Implications:
 

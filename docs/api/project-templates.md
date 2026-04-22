@@ -2,7 +2,7 @@
 
 Reusable project-configuration snapshots. A project template captures a project's configuration — settings, custom fields, saved views, dashboards, automations, workflow definitions, task statuses, and advisory role placeholders — and lets users clone new projects from that snapshot in a single `POST /projects` call.
 
-Templates do **not** include business data: members, tasks, wiki pages, comments, runs, logs, memory entries, or invitations. See the Author Guide section below for how to decide what goes into a snapshot.
+Templates do **not** include business data: members, tasks, knowledge assets, comments, runs, logs, memory entries, or invitations. See the Author Guide section below for how to decide what goes into a snapshot.
 
 See also:
 - `openspec/changes/2026-04-17-add-project-templates/proposal.md` — the source of truth for scope.

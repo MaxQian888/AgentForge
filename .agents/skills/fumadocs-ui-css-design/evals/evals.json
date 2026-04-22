@@ -1,0 +1,44 @@
+{
+  "skill_name": "fumadocs-ui-css-design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想在现有的 Next.js 项目中集成 Fumadocs 文档站点。项目已经用了 Tailwind CSS。请告诉我手动安装的步骤。",
+      "expected_output": "提供手动集成步骤：安装 fumadocs-core 和 fumadocs-ui，配置 source.config.ts，设置 fumadocs-mdx 插件，创建 lib/source.ts，在 layout 中添加 RootProvider，创建文档路由。",
+      "files": [],
+      "expectations": [
+        "提到安装 fumadocs-core 和 fumadocs-ui",
+        "提到配置 source.config.ts",
+        "提到设置 fumadocs-mdx 插件",
+        "提到创建 loader 或 source 文件",
+        "提到在根 layout 中添加 RootProvider",
+        "提到创建文档路由和 DocsLayout",
+        "没有推荐 create-fumadocs-app（因为是现有项目）"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "我的 Fumadocs 文档站点侧边栏导航顺序不对，默认是按字母排序的。我想自定义几个页面的顺序，应该怎么配置？",
+      "expected_output": "指导用户使用 meta.json 的 pages 字段显式排序，或利用文件夹结构和 root folders 组织导航。优先推荐文件驱动的方式。",
+      "files": [],
+      "expectations": [
+        "提到使用 meta.json 的 pages 字段控制顺序",
+        "优先推荐文件驱动的方式而非硬编码 sidebar 树",
+        "提到避免重复 URL",
+        "没有推荐在代码中硬编码完整的 page tree"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "我想自定义 Fumadocs 的主题颜色，把默认的蓝色主色调改成绿色。应该修改哪些文件？",
+      "expected_output": "指导用户通过 CSS 变量（--color-fd-*）覆盖主题颜色，或修改 tailwindCssFile 中定义的全局 CSS。优先使用官方支持的 CSS 变量方式。",
+      "files": [],
+      "expectations": [
+        "提到使用 CSS 变量（如 --color-fd-primary）",
+        "提到修改 tailwindCssFile 对应的全局 CSS 文件",
+        "优先使用语义化变量而非全局覆盖",
+        "没有推荐直接 fork 或大量复制布局组件代码"
+      ]
+    }
+  ]
+}

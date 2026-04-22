@@ -40,6 +40,31 @@ surfaces.
 | `MaterializedFromPill` | `components/knowledge/MaterializedFromPill.tsx` | `sourceId`, `sourceType` | provenance badge linking a materialized artifact to its source |
 | `SourceUpdatedBanner` | `components/knowledge/SourceUpdatedBanner.tsx` | `assetId`, `updatedAt` | banner prompting re-materialization when source has changed |
 
+## Employee Components
+
+| Component | Path | Key props | Notes |
+| --- | --- | --- | --- |
+| `EmployeeProfileCard` | `components/employees/employee-profile-card.tsx` | `employee`, `onEdit` | identity, role binding, lifecycle |
+| `EmployeeRunHistory` | `components/employees/employee-run-history.tsx` | `employeeId`, `runs`, `loading` | execution run list with status filters |
+| `EmployeeTriggerConfig` | `components/employees/employee-trigger-config.tsx` | `employeeId`, `triggers`, `onSave` | trigger rule editing per employee |
+
+## VCS, Secrets, and Ads Components
+
+| Component | Path | Key contract | Notes |
+| --- | --- | --- | --- |
+| `VCSConnectionPanel` | `components/vcs/vcs-connection-panel.tsx` | `projectId`, `providers`, `connections` | per-project GitHub/GitLab/Gitea connection management |
+| `SecretsManager` | `components/secrets/secrets-manager.tsx` | `projectId`, `secrets`, `onCrud` | per-project secret CRUD with encrypted storage |
+| `QianchuanBindingPanel` | `components/qianchuan/qianchuan-binding-panel.tsx` | `projectId`, `bindings` | ads-platform channel binding management |
+| `QianchuanStrategyEditor` | `components/qianchuan/qianchuan-strategy-editor.tsx` | `projectId`, `strategy`, `onSave` | strategy creation and editing |
+
+## Debug and Observability Components
+
+| Component | Path | Key contract | Notes |
+| --- | --- | --- | --- |
+| `DebugTimeline` | `components/debug/debug-timeline.tsx` | `traceId`, `spans` | execution trace timeline visualization |
+| `LiveLogTail` | `components/debug/live-log-tail.tsx` | `source`, `filter` | real-time log streaming with filtering |
+| `MetricSparkline` | `components/debug/metric-sparkline.tsx` | `data`, `label`, `unit` | compact metric chart for dashboard widgets |
+
 ## Form Components
 
 | Component | Path | Key contract | Notes |

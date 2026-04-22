@@ -21,7 +21,7 @@ Migration `058_create_project_audit_events.up.sql` adds the
 | `actor_user_id`              | nullable when `system_initiated=true`                          |
 | `actor_project_role_at_time` | snapshot at event time (owner/admin/editor/viewer)             |
 | `action_id`                  | exact value from the RBAC ActionID enum                        |
-| `resource_type`              | `project|member|task|team_run|workflow|wiki|settings|automation|dashboard|auth` |
+| `resource_type`              | `project|member|task|team_run|workflow|wiki|settings|automation|dashboard|auth|invitation|secret|qianchuan_binding|vcs_integration` |
 | `resource_id`                | nullable                                                       |
 | `payload_snapshot_json`      | sanitized + size-bounded JSON                                  |
 | `system_initiated`           | true for scheduler/automation auto-trigger paths               |

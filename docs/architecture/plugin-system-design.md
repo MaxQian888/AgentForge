@@ -70,9 +70,20 @@
 | Extism WASM 是跨语言插件的最佳方案 | 长期引入 |
 | 插件市场 + 审核是成熟生态的标配 | 分阶段建设 |
 
-### 1.4 当前 OpenSpec MVP 实现边界
+### 1.4 当前实现边界
 
-这份架构文档覆盖的是插件系统的长期蓝图，但当前仓库真相已经不再停留在最早的 `establish-plugin-runtime-and-registry` MVP。到 `2026-03-30` 为止，仓库已经把统一契约、双宿主运行时映射、Go 权威注册中心、ReviewPlugin 深审扩展、WorkflowPlugin 顺序执行、SDK 与脚手架、catalog/trust 控制面、内置插件 bundle/readiness 校验，以及 repo-local 作者命令推进到同一条实现线上，但它仍然不等同于“公开 marketplace 已完成”。
+本文档覆盖插件系统的长期蓝图。截至 2026-04-22，以下能力已落地：
+
+- 统一契约与双宿主运行时映射（Go-hosted WASM Integration/Workflow plugin、TS-hosted MCP Tool/Review plugin）
+- Go 权威注册中心与 catalog/trust 控制面（`GET /api/v1/plugins/catalog`、`POST /api/v1/plugins/catalog/install`）
+- 外部来源（git、npm、catalog）在 digest + signature 或显式审批前保持阻塞
+- ReviewPlugin 深审扩展与 WorkflowPlugin DAG 执行
+- TypeScript SDK（`src-bridge/src/plugin-sdk/`）与 Go WASM SDK
+- repo-local 脚手架命令：`pnpm create-plugin`、`pnpm plugin:verify`、`pnpm plugin:verify:builtins`
+- 内置插件 bundle/readiness 校验与 `AGENTFORGE_*` 运行时信封
+- Marketplace 已作为独立 Go 微服务（`src-marketplace/`）运行，支持 publish、discover、install、review 与 admin moderation
+
+尚未完成的长期目标：WASM 多语言 guest SDK（Rust/C++）、完整插件间 IPC、公开第三方 marketplace 开放注册。
 
 本次 MVP 的可执行插件映射固定为：
 
@@ -130,11 +141,11 @@ AgentForge 采用 **Tauri + Next.js + Go + TS** 四层架构（参考 agentforge
 │  │                    │  │                              │    │
 │  │ • 仪表盘 UI       │  │ • 任务管理                   │    │
 │  │ • 角色配置面板     │  │ • Agent 生命周期             │    │
-│  │ • 工作流可视化     │  │ • go-plugin 插件管理         │    │
-│  │ • 插件市场 UI     │  │ • Event Bus (Redis PubSub)   │    │
+│  │ • 工作流可视化     │  │ • WASM 插件运行时            │    │
+│  │ • 插件市场 UI     │  │ • Event Bus (内存)           │    │
 │  │                    │  │ • 集成插件运行时             │    │
 │  └────────┬─────────┘  └──────────┬───────────────────┘    │
-│           │ HTTP/WS               │ gRPC                     │
+│           │ HTTP/WS               │ HTTP + WebSocket         │
 │           │                       ▼                          │
 │           │              ┌──────────────────────────────┐   │
 │           └─────────────►│ Layer 3: TS Agent Bridge     │   │
@@ -262,8 +273,8 @@ const server = spawn("uvx", ["mcp-server-sqlite", "--db", "data.db"], { stdio: "
 tauri-app (Rust)
   ├── webview (渲染 Next.js 静态资源)
   ├── go-orchestrator (Bun-compiled sidecar, --port 7777)
-  │     ├── integration-plugin-a (go-plugin 子进程)
-  │     └── integration-plugin-b (go-plugin 子进程)
+  │     ├── integration-plugin-a (WASM, wazero 内存沙箱)
+  │     └── integration-plugin-b (WASM, wazero 内存沙箱)
   └── ts-agent-bridge (Bun-compiled binary, --port 7778)
         ├── mcp-server-a (内嵌, 进程内)
         ├── mcp-server-b (内嵌, 进程内)
@@ -273,8 +284,8 @@ Web/Docker 模式进程树:
 
 Container:
   go-orchestrator (:7777)
-    ├── integration-plugin-a (go-plugin 子进程)
-    └── integration-plugin-b (go-plugin 子进程)
+    ├── integration-plugin-a (WASM, wazero 内存沙箱)
+    └── integration-plugin-b (WASM, wazero 内存沙箱)
   ts-agent-bridge (:7778)
     ├── mcp-server-a (内嵌 / bunx 启动)
     ├── mcp-server-b (内嵌 / bunx 启动)
@@ -361,7 +372,7 @@ Frontend (独立部署):
 | **Integration → Integration** | Go 内部 EventEmitter 路由 | 内存 | 飞书消息 → 触发 GitHub 操作 |
 | **Integration → Tool** | Go ──HTTP──► TS Bridge ──MCP──► Tool | HTTP + MCP | IM 收到指令 → 触发 Agent 工具 |
 | **Workflow → Tool** | Go ──HTTP──► TS Bridge ──MCP──► Tool | HTTP + MCP | 工作流步骤调用 Agent |
-| **Workflow → Integration** | Go 内部调用 (同进程 go-plugin) | go-plugin | 工作流完成 → 发送 IM 通知 |
+| **Workflow → Integration** | Go 内部调用 (WASM invoke) | WASM | 工作流完成 → 发送 IM 通知 |
 | **Review → Tool** | MCP → TS Bridge (同层) | MCP | 审查插件调用分析工具 |
 | **任意插件 → Frontend** | TS ──WS──► Go EventEmitter ──WS──► Frontend | WS 转发 | 插件状态变化推送到 UI |
 | **Frontend → 任意插件** | HTTP API → Go → 路由到目标层 | HTTP | 用户在 UI 配置/操作插件 |
@@ -374,12 +385,12 @@ Frontend (独立部署):
 **适用**: 插件间通知、状态变更、审计日志
 
 ```
-┌────────────┐  go-plugin内部   ┌───────────────────────────────────────┐
+┌────────────┐  WASM invoke     ┌───────────────────────────────────────┐
 │ 飞书 Plugin │ ─────────────► │  Go Orchestrator                       │
 │ (Integration)│                │                                        │
 └────────────┘                │  EventEmitter (内存)                    │
                                │    │                                    │
-┌────────────┐  WS 上报        │    ├── 路由到 go-plugin (GitHub Plugin)│
+┌────────────┐  WS 上报        │    ├── 路由到 WASM (GitHub Plugin)     │
 │ TS Bridge  │ ═══════════════►│    ├── WS Hub ──► Frontend             │
 │ (MCP事件)  │                 │    └── 写入 plugin_events 日志         │
 └────────────┘                └───────────────────────────────────────┘
@@ -638,7 +649,7 @@ export function usePlatformCapability() {
 | 场景 | 检测方 | 策略 |
 |------|--------|------|
 | MCP Server 崩溃 | TS (进程退出) | TS WS 上报 → Go 指令重启 (max 3 次) → 超限 disable |
-| go-plugin 崩溃 | Go (health check) | go-plugin 内置进程监控，自动重启 |
+| WASM 插件崩溃 | Go (health check) | Go 重新加载 WASM 模块 |
 | TS Bridge 崩溃 | Go (WS 连接断开) | Go 重启 TS 进程，等待 WS 重连 |
 | Go ↔ TS WS 断开 | 双方检测 | TS 指数退避重连，Go 标记 MCP 插件为 unknown |
 | Frontend WS 断开 | Frontend | 前端自动重连，Go WS Hub 补发最近 50 条事件 |
@@ -673,7 +684,7 @@ export function usePlatformCapability() {
 │                                                       │
 ├─────────────────────────────────────────────────────┤
 │  Plugin Runtime Layer                                 │
-│  MCP Server | go-plugin (gRPC) | Event Hook | WASM   │
+│  MCP Server | WASM | Event Hook | stdio                │
 ├─────────────────────────────────────────────────────┤
 │  Security Layer                                       │
 │  Manifest 权限声明 | 进程隔离 | 资源限制 | 签名验证    │
@@ -686,9 +697,9 @@ export function usePlatformCapability() {
 |------|--------|--------|---------|---------|
 | **Role** | 声明式 (无代码) | N/A (YAML 配置) | 创建数字员工角色 | ★☆☆☆☆ |
 | **Tool** | TS Bridge | MCP Server | 给 Agent 增加新工具 | ★★☆☆☆ |
-| **Workflow** | Go Orchestrator | go-plugin / YAML | 定义多 Agent 协作流程 | ★★★☆☆ |
-| **Integration** | Go Orchestrator | go-plugin (gRPC) | 对接外部系统 | ★★★☆☆ |
-| **Review** | Go + TS | MCP + go-plugin | 自定义代码审查规则 | ★★★★☆ |
+| **Workflow** | Go Orchestrator | WASM / YAML | 定义多 Agent 协作流程 | ★★★☆☆ |
+| **Integration** | Go Orchestrator | WASM | 对接外部系统 | ★★★☆☆ |
+| **Review** | Go + TS | MCP | 自定义代码审查规则 | ★★★★☆ |
 
 ---
 
@@ -708,7 +719,7 @@ export function usePlatformCapability() {
 │  │                         │  │                            │    │
 │  │ • 仪表盘/看板           │  │ ┌────────────────────────┐ │    │
 │  │ • 角色配置              │  │ │ Plugin Manager         │ │    │
-│  │ • 插件管理              │  │ │ (go-plugin + Role Reg) │ │    │
+│  │ • 插件管理              │  │ │ (WASM + Role Reg)      │ │    │
 │  │ • WebSocket 实时        │  │ └───────────┬────────────┘ │    │
 │  │                         │  │ ┌───────────▼────────────┐ │    │
 │  │                         │  │ │ EventEmitter + WS Hub  │ │    │
@@ -730,7 +741,7 @@ export function usePlatformCapability() {
                     │                          │              │
               ┌─────▼──────┐  ┌───────▼──────┐  ┌───────▼──────┐
               │ Go Plugins │  │ MCP Servers  │  │ MCP Servers  │
-              │ (go-plugin)│  │ (stdio)      │  │ (HTTP)       │
+              │ (WASM)     │  │ (stdio)      │  │ (HTTP)       │
               │            │  │              │  │              │
               │ IM 适配器   │  │ GitHub Tool  │  │ Remote Tool  │
               │ CI/CD Hook │  │ Web Search   │  │              │
@@ -1139,7 +1150,7 @@ spec:
 
 ### 7.1 架构
 
-集成插件运行在 Go Orchestrator 侧，通过 go-plugin (gRPC) 通信。
+集成插件运行在 Go Orchestrator 侧。当前实现采用 Go-hosted WASM 运行时（wazero），而非本节原始描述的 go-plugin (gRPC)。以下 go-plugin/gRPC 内容保留为历史技术调研参考。
 
 ```
 Go Orchestrator
@@ -1302,9 +1313,9 @@ spec:
 |---------|------|------|--------|
 | Role | N/A (YAML 解析) | N/A | Go Orchestrator |
 | Tool | MCP (JSON-RPC 2.0) | stdio / Streamable HTTP | TS Bridge |
-| Workflow | gRPC (go-plugin) 或 YAML | 子进程 | Go Orchestrator |
-| Integration | gRPC (go-plugin) | 子进程 | Go Orchestrator |
-| Review | MCP + gRPC | stdio / 子进程 | 双侧 |
+| Workflow | WASM / YAML | 内存沙箱 | Go Orchestrator |
+| Integration | WASM | 内存沙箱 | Go Orchestrator |
+| Review | MCP | stdio | Go + TS |
 
 ### 9.2 统一 Manifest 格式
 
@@ -1361,9 +1372,8 @@ spec: object                         # 各类型特定配置
 │  未签名插件 → 显示安全警告                  │
 ├──────────────────────────────────────────┤
 │  Layer 3: 进程隔离                        │
-│  go-plugin → 独立子进程                    │
+│  WASM → 沙箱内存隔离                      │
 │  MCP Server → 独立子进程                   │
-│  WASM → 沙箱内存隔离 (长期)               │
 ├──────────────────────────────────────────┤
 │  Layer 4: 资源限制                        │
 │  内存上限 | CPU 时间 | 网络带宽 | 存储配额  │
@@ -1474,8 +1484,8 @@ Go Orchestrator 和 TS Bridge 分别管理不同类型的插件。**状态一致
 ```
 Go Orchestrator (状态权威方)
   │
-  ├── go-plugin 插件: Go 直接管理
-  │     └── 每 30s gRPC health check
+  ├── WASM 插件: Go 直接管理
+  │     └── 每 30s health check (WASM runtime probe)
   │
   └── MCP 工具插件: Go 存储状态，但 TS 管实际进程
         │
@@ -1506,7 +1516,7 @@ Go Orchestrator (状态权威方)
 | MCP Server 崩溃 | TS (进程退出) → WS 上报 Go | Go 指令 TS 重启 (max 3 次) |
 | TS Bridge 崩溃 | Go (WS 连接断开) | Go 重新启动 TS 进程，等待 WS 重连 |
 | Go 重启 | TS (WS 连接断开) | TS 自动重连 Go 的 WS，重新上报所有状态 |
-| go-plugin 崩溃 | Go (gRPC health check 失败) | Go 重启子进程 (go-plugin 内置) |
+| WASM 插件崩溃 | Go (health check 失败) | Go 重新加载 WASM 模块 |
 
 ### 13.4 Token 计费双重控制
 
@@ -2163,6 +2173,6 @@ ALTER TABLE tasks ADD COLUMN workflow_instance_id UUID;
 ---
 
 > 本文档基于 3 份并行调研报告综合设计：
-> - `PLUGIN_RESEARCH_PLATFORMS.md` — 9 大平台插件架构分析
-> - `PLUGIN_RESEARCH_ROLES.md` — 角色自定义最佳实践
-> - `PLUGIN_RESEARCH_TECH.md` — 技术实现方案对比
+> - `docs/research/plugin-research-platforms.md` — 9 大平台插件架构分析
+> - `docs/research/plugin-research-roles.md` — 角色自定义最佳实践
+> - `docs/research/plugin-research-tech.md` — 技术实现方案对比

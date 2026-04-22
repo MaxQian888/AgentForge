@@ -1,0 +1,42 @@
+{
+  "skill_name": "deploying-and-running-react-go-quick-starter",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想在本地运行整个 AgentForge 项目，包括前端、Go 后端和数据库。请告诉我正确的启动步骤和命令顺序。",
+      "expected_output": "给出分步启动指令：先 docker compose up -d postgres redis，再 cd src-go && go run ./cmd/server，最后 pnpm dev。同时说明各服务端口和依赖关系。",
+      "files": [],
+      "expectations": [
+        "优先提到启动 Postgres 和 Redis 依赖（docker compose up -d postgres redis）",
+        "提到 Go 后端启动命令（cd src-go && go run ./cmd/server）",
+        "提到前端启动命令（pnpm dev）",
+        "提到端口 7777（Go 后端）和 3000（Next.js 前端）",
+        "没有错误地推荐 pnpm start 作为生产运行方式"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "我修改了 Go 后端的一些代码，需要验证桌面模式是否还能正常工作。我应该怎么构建和测试？",
+      "expected_output": "指导用户使用 pnpm build:backend:dev 快速编译当前平台的 Go sidecar，然后使用 pnpm tauri:dev 启动桌面模式验证。同时提醒检查 src-tauri/tauri.conf.json 中的 sidecar 配置。",
+      "files": [],
+      "expectations": [
+        "提到 pnpm build:backend:dev 作为快速编译命令",
+        "提到 pnpm tauri:dev 作为桌面开发模式启动命令",
+        "提到需要检查 Tauri 配置和 sidecar 路径",
+        "没有推荐使用通用的 go build 而忽略了项目的构建脚本"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "我要把这个项目部署到生产环境，只需要静态网站部分。请告诉我正确的构建和部署方式。",
+      "expected_output": "说明 pnpm build 会生成静态导出到 out/ 目录，并指出 next.config.ts 中已设置 output: 'export'，因此不能使用 pnpm start（next start）。提供静态托管部署建议。",
+      "files": [],
+      "expectations": [
+        "正确说明 pnpm build 生成静态导出到 out/ 目录",
+        "指出 output: 'export' 已配置在 next.config.ts 中",
+        "明确说明不能使用 pnpm start 或 next start",
+        "提供静态托管部署方案（如 Nginx、CDN、静态托管服务）"
+      ]
+    }
+  ]
+}

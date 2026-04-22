@@ -5,15 +5,17 @@
 
 ---
 
-## 当前实现快照（2026-03-30）
+## 当前实现快照（2026-04-22）
 
-这份文档覆盖的是数据与实时系统的长线设计，但当前仓库已经有一些比早期设计更具体的实现边界：
+本文档覆盖数据与实时系统的长线设计，当前仓库已实现以下边界：
 
-- WebSocket 广播当前由 Go 侧 `internal/ws` hub 统一承接，并按 `project_id` 做过滤广播；这是任务、审查、调度、插件、文档关联等前端实时更新的 live hub。
-- 任务、实体链接、任务评论、调度、插件事件都已经直接走 Go hub 广播，而不是依赖文档里更早期的 Redis Pub/Sub 主链路。
-- 文档/Wiki 相关数据面已经包含 `wiki_space`、`wiki_page`、`page_version`、`page_comment`、`doc_template` 及其页面树、模板、评论、版本能力。
-- 项目设置真实前端工作区已经围绕 `codingAgentCatalog`、预算治理、review policy、webhook 配置和 fallback diagnostics 落地，不再只是早期 `agent_defaults/review/notifications/git` 的概念草图。
-- 审查实时状态已经引入 `pending_human` 等明确状态，并通过 `review.pending_human` 等事件驱动前端工作区。
+- WebSocket 广播由 Go 侧 `internal/ws` hub 统一承接，按 `project_id` 过滤广播；任务、审查、调度、插件、文档关联等前端实时更新均走此 live hub。
+- 任务、实体链接、任务评论、调度、插件事件直接走 Go hub 广播，而非早期设计中的 Redis Pub/Sub 主链路。
+- 事件总线（`internal/eventbus/`）提供内部 pub/sub，含 legacy adapter 与多个 observer（auth、channel router、enrich、persist、metrics、IM forward）。
+- 文档/Wiki 数据面包含 `wiki_space`、`wiki_page`、`page_version`、`page_comment`、`doc_template` 及其页面树、模板、评论、版本能力。
+- 项目设置前端工作区围绕 `codingAgentCatalog`、预算治理、review policy、webhook 配置与 fallback diagnostics 落地。
+- 审查实时状态引入 `pending_human`，通过 `review.pending_human` 等事件驱动前端工作区。
+- 全局通知系统（`notification_handler`）通过事件总线驱动 IM + WebSocket 双通道扇出。
 
 ---
 

@@ -10,8 +10,7 @@ invite equivalent used today.
 - Current repo truth:
   - profile management exists under `/users/me`
   - password change exists under `/users/me/password`
-  - there is no dedicated `/users/invite` endpoint yet
-  - project membership creation is the current invite-equivalent seam
+  - member invitations are project-scoped; see [`invitations.md`](./invitations.md)
 
 ## Endpoint Summary
 
@@ -20,7 +19,7 @@ invite equivalent used today.
 | `GET` | `/api/v1/users/me` | Return the current authenticated user |
 | `PUT` | `/api/v1/users/me` | Update the current user's display name |
 | `PUT` | `/api/v1/users/me/password` | Change the current user's password |
-| `POST` | `/api/v1/projects/:pid/members` | Project-scoped invite/member creation path |
+| `POST` | `/api/v1/projects/:pid/members` | Direct member creation (agents only; humans use invitation flow) |
 
 ## `GET /api/v1/users/me`
 
@@ -73,15 +72,16 @@ Validation:
 
 ## Invite / 邀请说明
 
-The change task mentions `me/invite`. In current code, the equivalent invite
-workflow is project membership creation rather than a standalone user endpoint.
+Human onboarding uses the project-scoped invitation flow:
 
-Use:
+- `POST /api/v1/projects/:pid/invitations` — create an invitation
+- `GET /api/v1/projects/:pid/invitations` — list pending invitations
+- `POST /api/v1/invitations/accept` — accept via token
 
-- `POST /api/v1/projects/:pid/members`
+See [`invitations.md`](./invitations.md) for the full state machine, token
+semantics, and error codes.
 
-to add:
-
-- a human contributor
-- an AI agent member
-- a member with IM identity metadata
+Direct `POST /api/v1/projects/:pid/members` is still available for adding AI
+agent members and members with IM identity metadata, but human member creation
+has moved to the invitation flow (`409 HumanMemberCreationMovedToInvitationFlow`
+is returned for direct human creation attempts).

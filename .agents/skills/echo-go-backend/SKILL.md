@@ -1,6 +1,6 @@
 ---
 name: echo-go-backend
-description: Use when working on a Go backend built with LabStack Echo, especially in `src-go` workspaces or repositories that use a layered `cmd`/`internal`/`pkg` layout. Covers route registration, handlers, middleware, binding, validation, error handling, auth, testing, migrations, and Tauri sidecar-aware backend changes. Apply it before adding or changing Echo routes, middleware, DTOs, services, repositories, or backend build/test flows, and when you need current official Echo guidance without breaking an existing project template.
+description: Use whenever working on a Go backend built with LabStack Echo, especially in `src-go` workspaces or repositories that use a layered `cmd`/`internal`/`pkg` layout. Covers route registration, handlers, middleware, binding, validation, error handling, auth, testing, migrations, and Tauri sidecar-aware backend changes. Make sure to apply this skill before adding or changing Echo routes, middleware, DTOs, services, repositories, or backend build/test flows, even if the user only mentions a small backend tweak.
 ---
 
 # Go Echo Backend

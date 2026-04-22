@@ -1,6 +1,6 @@
 ---
 name: tauri-v2
-description: Use when working in a Tauri v2 app or `src-tauri` workspace and needing current guidance for shared `lib.rs` and `main.rs` entrypoints, `#[tauri::command]` registration, `@tauri-apps/api/core` IPC, capabilities and plugin permissions, desktop/mobile setup, or Tauri-specific failures such as `command not found`, `permission denied`, white screen, missing plugin wiring, or window label mismatch.
+description: Use whenever working in a Tauri v2 app or `src-tauri` workspace. Covers shared `lib.rs` and `main.rs` entrypoints, `#[tauri::command]` registration, `@tauri-apps/api/core` IPC, capabilities and plugin permissions, desktop/mobile setup, and Tauri-specific failures such as `command not found`, `permission denied`, white screen, missing plugin wiring, or window label mismatch. Make sure to apply this skill for any Tauri-related task, even if the user only mentions a small Rust or desktop change.
 ---
 
 # Tauri v2

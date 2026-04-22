@@ -24,6 +24,12 @@ skills:
     canonicalRoot: skills/css-animation
     sourceType: repo-authored
     docsRef: docs/role-yaml.md
+  - id: role-creator
+    family: built-in-runtime
+    verificationProfile: built-in-runtime
+    canonicalRoot: skills/role-creator
+    sourceType: repo-authored
+    docsRef: docs/role-yaml.md
 
   - id: deploying-and-running-agentforge
     family: repo-assistant

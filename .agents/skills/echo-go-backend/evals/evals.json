@@ -1,0 +1,45 @@
+{
+  "skill_name": "echo-go-backend",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我需要在 src-go 中添加一个新的 REST API 端点 /api/v1/projects/:id/members，用于获取项目成员列表。请告诉我应该修改哪些文件，以及代码应该怎么写。",
+      "expected_output": "指导用户在 routes.go 中添加路由，在 handler 中创建处理函数，在 service 中实现业务逻辑，在 repository 中实现数据访问。保持分层架构。",
+      "files": [],
+      "expectations": [
+        "提到在 routes.go 中注册新路由",
+        "提到在 handler 中创建 MembersHandler 或类似结构",
+        "提到在 service 中实现业务逻辑",
+        "提到在 repository 中实现数据库查询",
+        "强调使用 DTO 进行请求绑定和响应映射",
+        "提到使用 go-playground/validator 进行验证",
+        "没有违反分层原则（如直接在 handler 中写 SQL）"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "我需要为一个新的 API 端点添加 JWT 认证保护。我看到项目里有自定义的 JWT 中间件，应该怎么正确使用它？",
+      "expected_output": "指导用户复用 internal/middleware/jwt.go 中的 JWT 中间件，在 routes.go 中为路由组或特定路由添加中间件，并说明黑名单检查的行为。",
+      "files": [],
+      "expectations": [
+        "提到复用现有的 JWT 中间件（internal/middleware/jwt.go）",
+        "提到在 routes.go 中使用 group 或 route-level 中间件",
+        "提到黑名单检查的行为（Redis 不可用时的 fail-closed 策略）",
+        "没有推荐引入 echo-jwt 等第三方库替代现有方案"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "我写了一个新的 handler，想要写单元测试。我看到项目里已经有 tests，我应该遵循什么风格和结构？",
+      "expected_output": "指导用户使用 httptest 和 echo.New() 创建测试，展示如何构造请求和断言响应。建议参考现有的 server_test.go 或 jwt_test.go 作为风格基准。",
+      "files": [],
+      "expectations": [
+        "提到使用 httptest 和 echo.New()",
+        "提到使用 e.NewContext() 创建测试上下文",
+        "建议参考现有测试文件作为风格基准",
+        "强调 handler 测试只测试绑定、验证和响应，不涉及 service 层逻辑",
+        "没有推荐引入新的测试助手库（如 echotest）"
+      ]
+    }
+  ]
+}

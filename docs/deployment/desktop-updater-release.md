@@ -5,8 +5,7 @@ distribution source for `latest.json` and signed updater bundles.
 
 ## Current Implementation Snapshot
 
-As of `2026-03-30`, the updater flow in this repository is no longer a
-check-only stub:
+As of `2026-04-22`, the updater flow is implemented as follows:
 
 - `src-tauri/src/lib.rs` wires the Tauri updater plugin into the desktop shell.
 - `lib/platform-runtime.ts` and `hooks/use-platform-capability.ts` expose the

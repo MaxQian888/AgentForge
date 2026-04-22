@@ -1,6 +1,6 @@
 ---
 name: shadcn
-description: Manages shadcn components and projects — adding, searching, fixing, debugging, styling, and composing UI. Provides project context, component docs, and usage examples. Applies when working with shadcn/ui, component registries, presets, --preset codes, or any project with a components.json file. Also triggers for "shadcn init", "create an app with --preset", or "switch to --preset".
+description: Use whenever working with shadcn/ui components or projects — adding, searching, fixing, debugging, styling, and composing UI. Provides project context, component docs, and usage examples. Make sure to apply this skill when the user mentions shadcn/ui, component registries, presets, --preset codes, components.json, or any UI component work, even if they don't explicitly say 'shadcn'.
 user-invocable: false
 ---
 
@@ -150,7 +150,7 @@ The injected project context contains these key fields:
 - **`framework`** → routing and file conventions (e.g. Next.js App Router vs Vite SPA).
 - **`packageManager`** → use this for any non-shadcn dependency installs (e.g. `pnpm add date-fns` vs `npm install date-fns`).
 
-See [cli.md — `info` command](./cli.md) for the full field reference.
+See [cli.md — `info` command](./references/cli.md) for the full field reference.
 
 ## Component Docs, Examples, and Usage
 
@@ -236,5 +236,5 @@ npx shadcn@latest view @shadcn/button
 - [rules/icons.md](./rules/icons.md) — data-icon, icon sizing, passing icons as objects
 - [rules/styling.md](./rules/styling.md) — Semantic colors, variants, className, spacing, size, truncate, dark mode, cn(), z-index
 - [rules/base-vs-radix.md](./rules/base-vs-radix.md) — asChild vs render, Select, ToggleGroup, Slider, Accordion
-- [cli.md](./cli.md) — Commands, flags, presets, templates
-- [customization.md](./customization.md) — Theming, CSS variables, extending components
+- [cli.md](./references/cli.md) — Commands, flags, presets, templates
+- [customization.md](./references/customization.md) — Theming, CSS variables, extending components

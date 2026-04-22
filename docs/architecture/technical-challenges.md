@@ -7,15 +7,15 @@
 
 ---
 
-## 当前实现快照（2026-03-30）
+## 当前实现快照（2026-04-22）
 
-这份文档分析的是技术难点全景，但当前仓库里已经有几条明确的落地答案，不应再把它们写成悬而未决：
+本文档分析技术难点全景，以下问题已有明确落地答案，不应再视为悬而未决：
 
-- Go↔TS Bridge 的 live contract 已经稳定为 HTTP `/bridge/*` 命令面 + WebSocket 事件流，兼容 alias 只是历史迁移层。
-- TS Bridge 已有多 runtime catalog 与 continuity 语义，不再只是 Claude 单一路径；当前真实运行时包括 `claude_code`、`codex`、`opencode`。
-- 实时事件广播当前由 Go 侧 WebSocket hub 承担 project-scoped fan-out，任务、审查、插件、调度和文档相关事件都走这条主链。
-- 审查工作区、`pending_human` 状态、项目设置 runtime catalog、docs/wiki、以及桌面 window chrome 都已经有真实实现，因此后续章节中把这些面写成纯规划时，应优先服从当前代码真相。
-- **IM Bridge** 自 2026-04 起以 gateway 形态运行（change `add-im-bridge-multi-tenant-gateway`）：`IM_PLATFORMS` 支持多 provider 并发、`IM_TENANTS_CONFIG` 提供 tenant 路由（chat/workspace/domain resolver）、`ClientFactory.For(tenant)` 替代进程级单 client、session history/intent/reply-binding 持久化到 `state.db`、命令插件通过 `IM_BRIDGE_PLUGIN_DIR` 的 YAML 清单加载（invoke: http/mcp/builtin）。控制面 registration 扩展 `Tenants[]` + `TenantManifest[]`，后端 `QueueDelivery` 按 `(bridgeId, providerId, tenantId)` 三元组路由。
+- Go↔TS Bridge 的 live contract 稳定为 HTTP `/bridge/*` 命令面 + WebSocket 事件流，兼容 alias 仅为历史迁移层。
+- TS Bridge runtime catalog 支持 7 个运行时：`claude_code`、`codex`、`opencode`、`cursor`、`gemini`、`qoder`、`iflow`（sunsetting）。各 runtime 暴露 `interaction_capabilities`、`launch_contract` 与 `lifecycle` 元数据。
+- 实时事件广播由 Go 侧 `internal/ws` hub 统一承接，按 `project_id` 过滤广播；任务、审查、插件、调度、文档关联事件均走此主链。
+- 审查工作区、`pending_human` 状态、项目设置 runtime catalog、docs/wiki、桌面 window chrome、员工工作区、VCS 集成、密钥管理、千川广告平台、成本分析、调试页面均已落地。
+- **IM Bridge** 以 gateway 形态运行：`IM_PLATFORMS` 支持多 provider 并发、`IM_TENANTS_CONFIG` 提供 tenant 路由、`ClientFactory.For(tenant)` 替代进程级单 client、session 持久化到 `state.db`、命令插件通过 `IM_BRIDGE_PLUGIN_DIR` 的 YAML 清单加载。控制面 registration 扩展 `Tenants[]` + `TenantManifest[]`，后端 `QueueDelivery` 按 `(bridgeId, providerId, tenantId)` 三元组路由。富媒体投递（附件/回应/线程策略）与 capability matrix 已作为一等公民实现。
 
 ---
 
@@ -53,7 +53,7 @@ AgentForge 的核心矛盾：**Go 是最佳后端语言（goroutine 并发模型
 #### 通信协议选择：HTTP 命令 + WebSocket 事件流（当前 live contract）
 
 ```
-Go Backend (Fiber/Echo)
+Go Backend (Echo)
     │
     ├── HTTP Client ──────────── HTTP Server (TS Bridge)
     │   ├── POST /bridge/execute
@@ -1955,6 +1955,6 @@ func (ic *IntentClassifier) resolveReference(msg *IMMessage, ctx *ConversationCo
 > **文档状态：** 初稿完成，待团队评审
 >
 > **关联文档：**
-> - [PRD](../PRD.md)
+> - [PRD](../product/prd.md)
 > - [后端技术分析](./backend-tech-analysis.md)
-> - [可复用项目调研](../REUSABLE_PROJECTS.md)
+> - [可复用项目调研](../research/reusable-projects.md)

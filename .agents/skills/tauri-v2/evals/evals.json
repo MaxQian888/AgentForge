@@ -1,0 +1,43 @@
+{
+  "skill_name": "tauri-v2",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我在 Tauri v2 项目中添加了一个新的 Rust 命令，但前端调用时提示 'command not found'。可能是什么原因？",
+      "expected_output": "诊断步骤：检查 lib.rs 中是否使用 generate_handler![] 注册了命令，检查前端 invoke 调用名称是否与 Rust 函数名一致，检查 capability 文件是否赋予了权限。",
+      "files": [],
+      "expectations": [
+        "提到检查 generate_handler![] 中是否注册了命令",
+        "提到检查前端 invoke 名称与 Rust 命令名是否一致",
+        "提到检查 capabilities/*.json 权限配置",
+        "没有直接假设是 Tauri 版本问题而不检查基本注册"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "我需要在 Tauri v2 应用中调用系统文件选择对话框。应该怎么添加和配置 dialog 插件？",
+      "expected_output": "指导用户使用 pnpm tauri add dialog 安装插件，在 lib.rs 中注册 .plugin(tauri_plugin_dialog::init())，安装 @tauri-apps/plugin-dialog 前端包，在 capability 中添加 dialog 权限。",
+      "files": [],
+      "expectations": [
+        "提到使用 pnpm tauri add dialog 安装插件",
+        "提到在 lib.rs 中注册插件",
+        "提到安装前端 guest 包 @tauri-apps/plugin-dialog",
+        "提到在 capabilities 中添加具体权限（如 dialog:allow-open）",
+        "没有使用 v1 的 @tauri-apps/api/tauri 导入方式"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "我的 Tauri v2 应用在开发时显示白屏，但构建后正常。可能是什么原因？",
+      "expected_output": "诊断步骤：检查 tauri.conf.json 中的 build.devUrl 是否匹配实际前端 dev server 地址（如 http://localhost:3000），检查 beforeDevCommand 是否正确启动前端，检查 CSP 配置是否阻止了资源加载。",
+      "files": [],
+      "expectations": [
+        "提到检查 build.devUrl 配置",
+        "提到检查 beforeDevCommand 是否正确启动前端",
+        "提到检查 CSP 配置",
+        "区分 dev 和 build 的不同配置路径",
+        "没有直接建议重装 Tauri 而不检查配置"
+      ]
+    }
+  ]
+}
