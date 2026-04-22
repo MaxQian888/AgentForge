@@ -33,7 +33,11 @@ These are enumerated in §11 Backlog so nothing is silently dropped.
 
 Project memory records internal-test stage; `breaking changes` are expressly permitted.
 
-- **DB schema:** breaking changes allowed. New columns: `workflow_executions.idempotency_key`, `workflow_definitions.node_matrix_version`. New table: `wait_event_deliveries`.
+- **DB schema:** breaking changes allowed. Pre-flight migration changes (all covered by one new migration bundle):
+  - `workflow_executions`: add `idempotency_key VARCHAR(128) NOT NULL` with unique index `(workflow_id, idempotency_key)` (§7.1).
+  - `workflow_definitions`: add `node_matrix_version INT NOT NULL DEFAULT 1`; widen `workflow_definitions_status_check` CHECK constraint from `('draft','active','archived','template')` to `('draft','active','archived','template','deprecated')` so §9 v1 retention can flip rows to `'deprecated'` (§9).
+  - `workflow_node_executions`: add `effect_payload JSONB` column alongside the existing `result JSONB` so node output (existing) and effect payloads (§7.9) stay distinguishable.
+  - New table `wait_event_deliveries` (§5.4).
 - **Workflow definitions:** versioned via `node_matrix_version` (1 = old, 2 = new). A one-off migration script bumps built-in seeds; in-flight executions on v1 are drained (see §10).
 - **API/SDK:** `edge.Condition` remains a persisted field for visual layout fidelity, but the scheduler ignores it (§5.2). Client libs must stop relying on it for routing.
 
@@ -132,13 +136,13 @@ Today the codebase mixes five kinds of `{{...}}` references with no formal spec.
 Hard rules:
 
 - **Secrets never enter DataStore, logs, or Live Tail.** A `SecretRef` type carries an opaque handle; the handler calls `resolver.Materialize(ctx, ref)` at the moment of constructing the HTTP/LLM/IM request and discards the clear value immediately. `SecretRef.MarshalJSON` returns `"<secret:<key>>"`.
-- **Unknown references fail fast.** No silent empty-string substitution. Opt-in allowlist via config for legitimate optional placeholders.
+- **Unknown references fail fast.** No silent empty-string substitution for `{{<node_id>.output.*}}`, `{{<template_var>}}`, `{{$event.*}}`, or `{{$run.*}}`. **Exception:** `{{secret.<key>}}` resolves lazily per §7.5 and surfaces a structured `ErrorMode{Code: "secret_missing"}` at runtime; it never fails at save time. Opt-in allowlist via config for legitimate optional placeholders.
 
 **Non-leakage surfaces (all must be covered by E2E — see §13).** The `SecretRef` guarantee is only as strong as the exit points it plugs. The design must scrub, on every code path below:
 
 - Outbound HTTP response bodies included in handler `error()` strings — error wrapping must run through a scrubber that re-applies the `<secret:...>` mask on any substring that matches a materialised secret value (short-lived in-memory set held by the resolver for the duration of the call).
 - Retry replay payloads (`EffectRetryInvoke.Payload`): replays store the original unresolved `SecretRef`, never the materialised value. Re-materialise per attempt.
-- Bridge-side log forwarding: the Bridge's review pipeline already forwards LLM transcripts; the `llm_agent` handler must pass the unresolved `SecretRef` structure to the Bridge with resolution performed **inside the Bridge** at the final HTTP egress, never on the Go side — OR redact Bridge logs with the same scrubber. Choose per P2 handler; document in the handler's test.
+- Bridge-side log forwarding: the Bridge's review pipeline already forwards LLM transcripts. Scope constraint: this spec is Go-orchestrator only; Bridge code changes are out of scope. Therefore the `llm_agent` handler resolves secrets on the Go side *only inside the materialised request body dispatched to the Bridge*, and the Go orchestrator runs the scrubber on all Bridge log output re-ingested via the review pipeline (using the short-lived materialised-secret set held by the resolver for the duration of the call). Bridge-side `SecretRef` native support is captured in §11 Backlog.
 - Live Tail diff panel and `/debug/trace/:id` merged timeline: audit event payloads carry `SecretRef` only; assertions in the E2E suite read the persisted `events` and `logs` rows and grep for known secret cleartext — zero matches required.
 
 ### 5.4 Idempotency and Cancel Cascade
@@ -210,7 +214,7 @@ Template-only changes plus new tests. Does not touch handlers or DB.
 Table defined in §5.4. Retention and garbage collection:
 
 - `FOREIGN KEY (execution_id) REFERENCES workflow_executions(id) ON DELETE CASCADE` so dedup rows die with their run.
-- Janitor job `workflow_wait_event_janitor` (registered with the existing scheduler) runs daily at 03:00 local; deletes `wait_event_deliveries` rows older than `max(executions.completed_at + 14 days, now() - 30 days)`. A completed run keeps its dedup history for two weeks (debugging window), an orphan row (shouldn't happen with the FK, belt-and-braces) is cleaned after 30 days unconditionally.
+- Janitor job `workflow_wait_event_janitor` follows the same pattern as the existing built-in jobs (`task-progress-detector`, `automation-due-date-detector`, `bridge-health-reconcile`): the pre-flight migration seeds a `scheduled_jobs` row with `job_key='workflow_wait_event_janitor'` and a daily 03:00 cron; `cmd/server/main.go` registers the handler at startup via `schedulerSvc.RegisterHandler("workflow_wait_event_janitor", NewWaitEventJanitor(...))`. The handler deletes `wait_event_deliveries` rows older than `max(executions.completed_at + 14 days, now() - 30 days)`.
 
 ### 7.4 Secret Pipeline
 
@@ -282,7 +286,7 @@ type CancelChildPayload struct {
 }
 ```
 
-Persistence: each payload is written to `workflow_node_executions.effect_payload` (existing JSONB column). All payload types implement `MarshalJSON` such that any nested `SecretRef` renders as `<secret:<key>>`; the §13 DoD adds one regression test per payload that asserts no known secret cleartext appears in persisted rows.
+Persistence: each payload is written to `workflow_node_executions.effect_payload` (new JSONB column added by the pre-flight migration in §4 — distinct from the existing `result JSONB` that holds node output). All payload types implement `MarshalJSON` such that any nested `SecretRef` renders as `<secret:<key>>`; the §13 DoD adds one regression test per payload that asserts no known secret cleartext appears in persisted rows.
 
 Scheduler coordination: `SpawnMapIterationsPayload.BodyNodeIDs` are synthesised at effect-emit time and registered into the parent execution's `currentNodes` JSONB so the scheduler's existing traversal logic handles them as first-class nodes (no special case per map — iteration subgraphs are indistinguishable from hand-authored parallel branches).
 
@@ -381,7 +385,8 @@ All rewritten templates bump to `node_matrix_version=2`.
 **v1 retention (correcting the earlier proposal):** `workflow_executions.workflow_id` has `ON DELETE CASCADE` against `workflow_definitions(id)`. Dropping v1 definition rows would cascade-destroy historical execution history, cost rows, memory rows, and review rows that reference those runs. Therefore:
 
 - v1 definition rows are **retained permanently** with `status='deprecated'` so historical `workflow_executions` stay readable.
-- v1 definitions are view-only (cannot be instantiated): `WorkflowDefinitionRepository.Instantiate` rejects rows with `status='deprecated'` at the service layer, not via DB delete.
+- The `workflow_definitions_status_check` CHECK constraint is widened by the §4 pre-flight migration from `('draft','active','archived','template')` to include `'deprecated'`, otherwise the UPDATE to `'deprecated'` would fail constraint validation.
+- v1 definitions are view-only (cannot be instantiated): a new service-layer gate (`WorkflowDefinitionService.Instantiate` — new method introduced in P4) rejects rows with `status IN ('archived','deprecated')`. The repository-level query surface remains unchanged.
 - No FK change, no cascade-delete risk.
 
 ### 9.1 ContentCreation: `loop` vs `map` post-P4
@@ -415,6 +420,7 @@ The operator confirms the dry-run list before executing. In the internal-test en
 - Multi-level `map` (map inside map)
 - Cross-workflow templateVar sharing
 - Per-tenant concurrency quotas inside `map`
+- Bridge-side native `SecretRef` support (opaque ref traversal across the Go↔Bridge boundary), replacing the Go-side scrubber-on-log-reingest in §5.3 bullet 3
 
 ## 12. Testing Matrix
 
@@ -439,7 +445,7 @@ The operator confirms the dry-run list before executing. In the internal-test en
 | SystemCodeReview   | ✔      | decision request_changes | ✔ (review retry=2 → escalate) | ✔ (15m review) | n/a              |
 | CodeFixer          | ✔ prebaked + ✔ generated | validate fails | ✔ (validate retry)      | ✔ (execute timeout)  | n/a                  |
 
-Total: 22 distinct E2E runs. Cell `n/a` means that template does not wrap the relevant behaviour, so the scenario does not exist — not a gap.
+Total: 29 distinct E2E runs (sum of filled cells: 4 + 3 + 4 + 4 + 5 + 4 + 5). Cell `n/a` means that template does not wrap the relevant behaviour, so the scenario does not exist — not a gap.
 
 ## 13. Definition of Done
 
