@@ -169,7 +169,7 @@ Template-only changes plus new tests. Does not touch handlers or DB.
 | Template              | Fix                                                                                                                                                                                                                      | Ground truth                                                            |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `SystemCodeReview`    | `finalize.config` from `{from, to, reason}` → `{targetStatus: "{{decision.output.decision}}", reason: "{{decision.output.comment}}"}`. `decision` human_review declares `decision_schema: {approved: bool, comment: string}` and prompt demands it. | `status_transition` handler only accepts `targetStatus`; current template 100% fails. |
-| `CustomerService`     | Delete `condition` node `urgent_check` and its `edge.Condition`s. Introduce `switch` node with `output.route`. `classify` prompt must emit discrete `urgency_band: "urgent" \| "normal"` (no floats).                   | Avoid float-threshold edge cases + avoid the `condition` false-path crash. |
+| `CustomerService`     | P1 (before `switch` exists): pull `onFalse: skip_downstream` from §7.7 forward into P1 so `urgent_check` no longer errors; `classify` prompt emits discrete `urgency_band: "urgent" \| "normal"` (no floats); `edge.Condition` is kept in this intermediate release and the scheduler's existing edge-condition logic selects `human_review` vs `auto_reply`. P4 rewrites to `switch` and removes `edge.Condition`. | Avoid float-threshold edge cases + avoid the `condition` false-path crash. Two-step migration because §5.2's "edge.Condition retired" cannot land before P2 ships scheduler changes. |
 | `ContentCreation`     | `editor` prompt required output `{approved: bool, feedback: string}`. `edit_loop.exit_condition` preserved. `writer/editor` outputs referenced explicitly (no implicit last-output).                                   | Loop may never exit or exit wrong today.                                |
 | `PlanCodeReview` / `Swarm` | `fan_out.output` schema formalised as `{subtasks: [{id, title, prompt, budget_usd}]}`. P4 replaces this fan-out with a `map` node.                                                                                   | `coder` inputs currently unspecified.                                   |
 | `Pipeline`            | `coder.inputs` explicit: `{plan: "{{planner.output.plan}}"}`.                                                                                                                                                           | No implicit template pass-through.                                      |
@@ -242,6 +242,49 @@ Fix: combine counter write and node reset into a single DB transaction in the ap
 ### 7.8 Observability Baseline
 
 Each P2 change adds metrics: `workflow.retry_total` (reserved), `workflow.cancel_cascade_total`, `workflow.secret_resolve_total`. Structured errors expose `ErrorMode.Code` as a metric label. Live Tail UI is unchanged; the secret placeholder format is the only surface change.
+
+### 7.9 New Effect Payload Schemas
+
+Every new effect persists through the existing `workflow_node_executions` effect row and replays on resume. Payload schemas:
+
+```go
+// Emitted by retry node to schedule the next attempt of an inline child.
+type RetryInvokePayload struct {
+    WrappedNodeID   string            // internal subgraph node id
+    Attempt         int               // 1-based, the attempt about to run
+    MaxAttempts     int
+    BackoffUntil    time.Time         // computed backoff + jitter deadline
+    UnresolvedInput map[string]any    // original {{...}} references, SecretRef kept opaque
+}
+
+// Emitted by timeout node to register a deadline timer.
+type TimeoutSchedulePayload struct {
+    WrappedNodeID string
+    DeadlineAt    time.Time
+    OnTimeout     string   // "fail" | "route:<edge_label>"
+}
+
+// Emitted by map/foreach to spawn N iteration subgraphs.
+type SpawnMapIterationsPayload struct {
+    ParentNodeID string
+    Items        []any     // concrete expanded items (no SecretRef here — scrubbed)
+    ItemVar      string
+    Concurrency  int
+    Collect      string    // "all" | "first_ok" | "fail_fast"
+    BodyNodeIDs  []string  // internal subgraph node ids per iteration
+}
+
+// Emitted by cancel to terminate a specific child.
+type CancelChildPayload struct {
+    ChildRunID uuid.UUID
+    ChildKind  string    // "dag" | "plugin_run" — selects dispatch surface
+    Reason     string
+}
+```
+
+Persistence: each payload is written to `workflow_node_executions.effect_payload` (existing JSONB column). All payload types implement `MarshalJSON` such that any nested `SecretRef` renders as `<secret:<key>>`; the §13 DoD adds one regression test per payload that asserts no known secret cleartext appears in persisted rows.
+
+Scheduler coordination: `SpawnMapIterationsPayload.BodyNodeIDs` are synthesised at effect-emit time and registered into the parent execution's `currentNodes` JSONB so the scheduler's existing traversal logic handles them as first-class nodes (no special case per map — iteration subgraphs are indistinguishable from hand-authored parallel branches).
 
 ## 8. Phase P3 — Node Matrix Expansion
 
@@ -333,7 +376,17 @@ Two reducer kinds:
 | `SystemCodeReview`| P1 fixed `targetStatus`. P4 wraps `review` in `timeout(15m)` and `retry(max=2)`; `on_exhausted: route:manual_escalation` to a new `human_review` branch.                        |
 | `CodeFixer`       | P1 fixed references. P4 wraps `validate` in `retry`; `execute` wrapped in `timeout`.                                                                                           |
 
-All rewritten templates bump to `node_matrix_version=2`. Version-1 definitions become view-only (cannot be instantiated) for a retention window of 30 days, then dropped.
+All rewritten templates bump to `node_matrix_version=2`.
+
+**v1 retention (correcting the earlier proposal):** `workflow_executions.workflow_id` has `ON DELETE CASCADE` against `workflow_definitions(id)`. Dropping v1 definition rows would cascade-destroy historical execution history, cost rows, memory rows, and review rows that reference those runs. Therefore:
+
+- v1 definition rows are **retained permanently** with `status='deprecated'` so historical `workflow_executions` stay readable.
+- v1 definitions are view-only (cannot be instantiated): `WorkflowDefinitionRepository.Instantiate` rejects rows with `status='deprecated'` at the service layer, not via DB delete.
+- No FK change, no cascade-delete risk.
+
+### 9.1 ContentCreation: `loop` vs `map` post-P4
+
+ContentCreation keeps the `loop` node type. Iterative polish semantics (writer → editor → writer → editor until approved or max_iterations) are fundamentally stateful: each iteration depends on the prior attempt's feedback. `map` is stateless parallel-over-collection and cannot express this. The P2-f atomic-counter fix applies to this loop. The P4 change on this template is the `retry` wrap on `editor` and `timeout` wrap on `seo`; the loop body is untouched.
 
 ## 10. Migration and Release Order
 
