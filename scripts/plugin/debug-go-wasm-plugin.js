@@ -69,6 +69,7 @@ function runDebugCommand({
     cwd: resolve(repoRoot, "src-go"),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
 
   let output = null;

@@ -514,6 +514,7 @@ async function ensureApplicationService(service, paths, runtimeState) {
     detached: true,
     shell: false,
     stdio: ["ignore", stdoutFd, stderrFd],
+    windowsHide: true,
     env: {
       ...process.env,
       ...service.start.env,

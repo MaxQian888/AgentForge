@@ -1,7 +1,7 @@
 # Plugin System Expansion Design
 
 **Date:** 2026-04-21  
-**Scope:** Integration Plugin expansion (ChannelAdapter framework) + Workflow mode completion (Hierarchical / Event-Driven) + ToolChain primitive  
+**Scope:** Integration Plugin expansion (CI/CD + notifications) + Workflow mode completion (Hierarchical / Event-Driven) + ToolChain primitive  
 **Approach:** Method B — Common Adapter Framework, strengthening existing capabilities without infrastructure refactor
 
 ---
@@ -10,7 +10,7 @@
 
 AgentForge's plugin system currently supports 5 plugin types with a solid foundation (Go orchestrator as state authority, TS Bridge as stateless executor, MCP for tools, wazero sandbox for WASM). This spec addresses three identified gaps:
 
-1. **Integration Plugin gap** — Only Feishu is implemented; no abstraction makes adding new channels repetitive
+1. **Integration Plugin gap** — No CI/CD event receivers or notification senders exist; IM platform support is already covered by the dedicated IM Bridge service and must not be duplicated
 2. **Workflow mode gap** — Only Sequential mode is live; Hierarchical and Event-Driven are deferred
 3. **Tool composition gap** — Tools are invoked in isolation; no declarative pipeline/chain mechanism
 
@@ -23,141 +23,114 @@ AgentForge's plugin system currently supports 5 plugin types with a solid founda
 Three coordinated additions, all within existing packages:
 
 ```
-src-go/internal/model/plugin.go        ← add ChannelPluginSpec, hierarchical/event-driven fields
+src-go/internal/model/plugin.go        ← add hierarchical/event-driven fields to WorkflowPluginSpec
 src-go/internal/plugin/
-  channel_adapter.go                   ← new: Go-side ChannelAdapter wrapper interface
   workflow_executor.go                 ← new: WorkflowExecutor interface + mode routing
   toolchain_executor.go                ← new: ToolChainExecutor
   toolchain_resolver.go                ← new: template variable resolver
 src-go/internal/service/
   hierarchical_executor.go             ← new: HierarchicalExecutor
   event_driven_executor.go             ← new: EventDrivenExecutor (background subscriber)
+src-go/cmd/
+  github-actions-adapter/             ← new: GitHub webhook → EventBus WASM plugin
+  generic-webhook-adapter/            ← new: configurable webhook → EventBus WASM plugin
+  email-adapter/                      ← new: SMTP outbound WASM plugin
 ```
 
-No changes to external APIs, TS Bridge protocol, or DB schema.
+No changes to external APIs, TS Bridge protocol, DB schema, or IM Bridge.
 
 **Key existing facts that constrain this design:**
 - `WorkflowProcessMode` and `WorkflowPluginSpec.Process` already exist — do not re-define them
-- `IMMessageRequest.Platform` enum already includes all target IM platforms — new adapters must use matching platform identifiers
+- **IM Bridge (`src-im-bridge/`) already handles all 8 IM platforms** (Feishu, Slack, DingTalk, Discord, Telegram, WeChat, QQ, QQ Bot) — IM adapters must NOT be duplicated as WASM plugins
 - MCP tool invocation available as `PluginService.CallMCPTool()` Go function — use directly, not via HTTP
 - Trigger Engine = one-time dispatch; EventDrivenExecutor = persistent subscriber — these are distinct, non-overlapping
 
 ---
 
-## 3. ChannelAdapter Framework
+## 3. Integration Plugin Expansion
 
-### 3.1 Interface
+### 3.1 Scope Boundary (Critical)
 
-`ChannelAdapter` is a **Go-side wrapper interface** over the existing WASM operation-based invocation model. WASM plugins do not implement a Go interface directly; they declare capability names and handle them inside `Invoke()`. The Go runtime wraps each WASM plugin in a `ChannelAdapter` adapter that translates interface method calls to `Invoke` operations.
+The **IM Bridge** (`src-im-bridge/`, port 7779) is a production Go service that already owns the full inbound/outbound lifecycle for all 8 IM platforms (Feishu, Slack, DingTalk, Discord, Telegram, WeChat, QQ, QQ Bot). It handles: transport (webhook/polling/WebSocket), signature validation, credential management, message normalisation, per-platform rendering, durable delivery guarantees, and multi-tenant isolation.
 
-```go
-// src-go/internal/plugin/channel_adapter.go
-// Go-side abstraction over WASM operation routing
-type ChannelAdapter interface {
-    Capabilities() ChannelCapabilities
-    HandleInbound(ctx context.Context, payload map[string]any) (*InboundResult, error)
-    SendOutbound(ctx context.Context, msg OutboundMessage) (*OutboundResult, error)
-    HealthCheck(ctx context.Context) error
-}
+**Integration Plugins must NOT duplicate IM Bridge responsibilities.** Their correct scope is:
 
-type ChannelCapabilities struct {
-    Inbound    bool
-    Outbound   bool
-    Threading  bool
-    Reactions  bool
-    FileAttach bool
-    RichCards  bool
-}
-```
+| Use case | Correct component |
+|----------|-------------------|
+| Receive chat messages from users via IM | IM Bridge — already done |
+| Send IM replies/notifications to users | IM Bridge — already done |
+| Receive CI/CD events from GitHub/GitLab | **Integration Plugin** |
+| Accept arbitrary HTTP webhooks | **Integration Plugin** |
+| Send email notifications (SMTP) | **Integration Plugin** |
+| Fan-out one notification to multiple channels | **Integration Plugin** |
 
-**WASM plugin side contract** — the plugin declares these operation names in its manifest `capabilities` list and routes them in `Invoke()`:
+### 3.2 New Integration Plugins
 
-| Go interface method | WASM `Invocation.Operation` value |
-|---------------------|------------------------------------|
-| `HealthCheck()`     | `health`                           |
-| `HandleInbound()`   | `handle_inbound`                   |
-| `SendOutbound()`    | `send_outbound`                    |
-| `Capabilities()`    | `capabilities` (optional, for self-description) |
+**Phase 1 — CI/CD event receivers**
 
-The Go-side `WASMChannelAdapter` struct implements `ChannelAdapter` by calling `runtime.Invoke()` with the corresponding operation name.
+| Plugin | Runtime | Inbound event | EventBus output |
+|--------|---------|--------------|----------------|
+| `github-actions-adapter` | Go WASM | GitHub webhook (push, PR, release, workflow_run) | `vcs.push`, `vcs.pull_request.opened`, `vcs.release.published`, `vcs.workflow_run.completed` |
+| `generic-webhook-adapter` | Go WASM | Any HTTP POST | `integration.webhook.received` with configurable payload mapping |
 
-### 3.2 Manifest Extension
+**Phase 2 — Notification senders**
 
-`PluginSpec` in `src-go/internal/model/plugin.go` gains a formal `Channel *ChannelPluginSpec` field (not via the `Extra` catch-all):
+| Plugin | Runtime | Purpose |
+|--------|---------|---------|
+| `email-adapter` | Go WASM | SMTP outbound: send email notifications triggered by EventBus events |
+| `notification-fanout` | firstparty-inproc | Route one notification to multiple delivery channels (IM Bridge + email) by rule |
 
-```go
-// src-go/internal/model/plugin.go
-type ChannelPluginSpec struct {
-    Capabilities  []string `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
-    InboundEvents []string `yaml:"inboundEvents,omitempty" json:"inboundEvents,omitempty"`
-    OutboundFmts  []string `yaml:"outboundFormats,omitempty" json:"outboundFormats,omitempty"`
-    Platform      string   `yaml:"platform,omitempty" json:"platform,omitempty"`
-}
+### 3.3 Standard Integration Plugin Manifest
 
-// Added to PluginSpec:
-Channel *ChannelPluginSpec `yaml:"channel,omitempty" json:"channel,omitempty"`
-```
-
-`Channel.Platform` must match an existing value from the `IMMessageRequest.Platform` enum (`feishu`, `dingtalk`, `slack`, `discord`, `wecom`, `email`, etc.) so that inbound events and outbound sends route correctly through the existing IM message model.
-
-Example manifest:
+No new model fields are needed. Existing `PluginSpec.Capabilities` and `PluginSpec.ConfigSchema` are sufficient. The `feishu-adapter` WASM stub is **not modified** — its existing `send_message` capability is already a thin notification sender, and its inbound path belongs to the IM Bridge, not this plugin.
 
 ```yaml
 kind: IntegrationPlugin
 spec:
-  capabilities: [health, handle_inbound, send_outbound]
-  channel:
-    platform: slack
-    capabilities: [inbound, outbound, threading, rich_cards]
-    inboundEvents: [message.received, mention.received]
-    outboundFormats: [text, markdown, card]
+  runtime: wasm
+  module: ./dist/github-actions.wasm
+  abiVersion: v1
+  capabilities:
+    - health
+    - handle_webhook    # receive + validate a GitHub webhook HTTP delivery
+  configSchema:
+    type: object
+    required: [webhook_secret]
+    properties:
+      webhook_secret:
+        type: string
+        description: HMAC-SHA256 secret for GitHub webhook signature verification
+permissions:
+  network:
+    required: false   # webhook receiver does not call external APIs
 ```
 
-### 3.3 Data Flow
+### 3.4 Inbound Webhook Data Flow
 
 ```
-External message / webhook
+GitHub POST /api/v1/integrations/github-actions-adapter/webhook
     ↓
-Integration Plugin WASM  (operation: handle_inbound)
-via WASMChannelAdapter.HandleInbound()
+Go Orchestrator: reads raw body + X-Hub-Signature-256 header
     ↓
-Go EventBus  →  integration.im.message_received  (domain.entity.action pattern)
+WASM plugin Invoke("handle_webhook", {headers, body})
+    → validates HMAC-SHA256 signature
+    → maps GitHub event type to AgentForge event type
+    → returns {event_type: "vcs.pull_request.opened", payload: {...}}
     ↓
-Trigger Engine (one-time triggers) OR EventDrivenExecutor (persistent listeners)
+Go Orchestrator publishes to EventBus
     ↓
-Workflow / Agent execution
-    ↓
-WASMChannelAdapter.SendOutbound()  (operation: send_outbound)
-→ maps to IMSendRequest using existing IM message model
+Trigger Engine / EventDrivenExecutor → Workflow / Agent execution
 ```
 
-### 3.4 Feishu Refactor
+### 3.5 Notification Fanout Data Flow
 
-The Go-side runtime wraps the existing Feishu WASM plugin in a `WASMChannelAdapter`. The Feishu WASM itself gains a new `handle_inbound` capability alongside the existing `send_message` (kept for backward compatibility; `send_outbound` is the new canonical name). Manifest and plugin ID stay unchanged.
+`notification-fanout` is a firstparty-inproc plugin that reads project-level `notification_rules` config. When triggered, it:
 
-### 3.5 Integration Plugin Roadmap
+1. Evaluates which channels are configured for the event (e.g., `on: vcs.pull_request.opened → [slack:#dev, email:team@co]`)
+2. For IM channels: calls `POST /api/v1/im/notify` on the Go Orchestrator, which routes through the IM Bridge
+3. For email: calls `email-adapter.Invoke("send_email", ...)` directly
 
-**Phase 1 — IM**
-
-| Plugin | Runtime | Inbound | Outbound | Notes |
-|--------|---------|---------|----------|-------|
-| `dingtalk-adapter` | Go WASM | ✅ | ✅ | Approval cards, group bot |
-| `slack-adapter` | Go WASM | ✅ | ✅ | Block Kit, slash commands |
-| `discord-adapter` | Go WASM | ✅ | ✅ | Embeds, slash commands, channel routing |
-
-**Phase 2 — CI/CD**
-
-| Plugin | Runtime | Trigger | Output |
-|--------|---------|---------|--------|
-| `github-actions-adapter` | Go WASM | Webhook (push/PR/release) | EventBus event |
-| `generic-webhook-adapter` | Go WASM | HTTP endpoint | Configurable event mapping |
-
-**Phase 3 — Notifications**
-
-| Plugin | Runtime | Purpose |
-|--------|---------|---------|
-| `email-adapter` | Go WASM | SMTP send, template support |
-| `notification-fanout` | firstparty-inproc | Broadcast one notification to multiple channels by rule |
+This keeps the IM Bridge as the single owner of IM delivery; `notification-fanout` is an orchestrator, not a transport layer.
 
 ---
 
@@ -396,7 +369,7 @@ ToolChainExecutor calls `PluginService.CallMCPTool(ctx, pluginID, toolName, args
 │  WorkflowEngine (router)                                │
 │    ├─→ SequentialExecutor   (existing, extracted)       │
 │    ├─→ HierarchicalExecutor (new)                       │
-│    └─→ EventDrivenExecutor  (new)                       │
+│    └─→ EventDrivenExecutor  (new, subscribes EventBus)  │
 │              ↕                                          │
 │    ToolChainExecutor (new, used by any executor)        │
 │              ↕                                          │
@@ -404,16 +377,19 @@ ToolChainExecutor calls `PluginService.CallMCPTool(ctx, pluginID, toolName, args
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│  IntegrationPlugin Runtime                              │
-│    ChannelAdapter interface (new)                       │
-│    ├─→ FeishuAdapter   (refactored)                     │
-│    ├─→ DingtalkAdapter (new)                            │
-│    ├─→ SlackAdapter    (new)                            │
-│    ├─→ DiscordAdapter  (new)                            │
-│    ├─→ GitHubActionsAdapter (new)                       │
-│    ├─→ GenericWebhookAdapter (new)                      │
-│    ├─→ EmailAdapter    (new)                            │
-│    └─→ NotificationFanout (new, firstparty-inproc)      │
+│  Integration Plugin Runtime (WASM)                      │
+│    github-actions-adapter  → EventBus vcs.* events      │
+│    generic-webhook-adapter → EventBus integration.*     │
+│    email-adapter           → SMTP outbound               │
+│    notification-fanout     → routes to IM Bridge + email │
+│                               (firstparty-inproc)        │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  IM Bridge (src-im-bridge/ — UNCHANGED)                 │
+│  Owns all 8 IM platforms: Feishu, Slack, DingTalk,      │
+│  Discord, Telegram, WeChat, QQ, QQ Bot                  │
+│  notification-fanout routes IM delivery through here    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -421,16 +397,14 @@ ToolChainExecutor calls `PluginService.CallMCPTool(ctx, pluginID, toolName, args
 
 ## 7. Implementation Order
 
-1. **ChannelAdapter interface** + Feishu refactor (validates interface)
-2. **SequentialExecutor extraction** (prerequisite for WorkflowExecutor router)
-3. **HierarchicalExecutor** 
-4. **EventDrivenExecutor**
-5. **ToolChainExecutor** + template resolver
-6. **Dingtalk adapter** (first new integration, validates ChannelAdapter for IM)
-7. **Slack adapter**
-8. **Discord adapter**
-9. **GitHub Actions adapter** + Generic webhook adapter
-10. **Email adapter** + Notification fanout
+1. **SequentialExecutor extraction** (prerequisite for WorkflowExecutor router)
+2. **HierarchicalExecutor**
+3. **EventDrivenExecutor**
+4. **ToolChainExecutor** + template resolver
+5. **github-actions-adapter** WASM plugin
+6. **generic-webhook-adapter** WASM plugin
+7. **email-adapter** WASM plugin
+8. **notification-fanout** firstparty-inproc plugin
 
 ---
 
@@ -444,15 +418,15 @@ ToolChainExecutor calls `PluginService.CallMCPTool(ctx, pluginID, toolName, args
 - Existing Sequential workflow manifests (fully backward compatible; `process: sequential` unchanged)
 - Plugin permission/security model
 - `WorkflowProcessMode` type (already defined; this spec adds executor implementations, not new enum values)
-- `IMMessageRequest.Platform` enum values (new adapters declare matching platform identifiers in manifest)
+- **IM Bridge** (`src-im-bridge/`) — no changes; it remains the sole owner of all IM platform transport
+- `feishu-adapter` WASM plugin — no changes; its existing `send_message` capability is sufficient
 
 ## 9. Audit Notes (2026-04-21)
 
 Corrections applied after codebase audit:
 
-1. **ChannelAdapter** — Go-side wrapper pattern over WASM Invoke, not a Go interface WASM plugins implement directly
+1. **ChannelAdapter removed** — The original design proposed WASM plugins for Dingtalk/Slack/Discord. Audit found the IM Bridge (`src-im-bridge/`) already implements full inbound/outbound for all 8 IM platforms. Adding WASM adapters would duplicate transport, signature validation, credential management, and delivery guarantees. The ChannelAdapter interface and all IM WASM plugins have been removed from scope.
 2. **`process_mode`** — Field already exists as `spec.workflow.process` (type `WorkflowProcessMode`); spec only adds executor implementations and new config fields
 3. **ToolChain invocation** — Uses `PluginService.CallMCPTool()` Go function directly, not the HTTP endpoint
-4. **IM platform enum** — New adapters must declare `channel.platform` matching the existing `IMMessageRequest.Platform` enum values
-5. **EventDrivenExecutor boundary** — Does not go through Trigger Engine; subscribes to EventBus directly as a persistent goroutine
-6. **`channel` section** — Formalized as `Channel *ChannelPluginSpec` in `PluginSpec` struct, not via the `Extra` inline catch-all
+4. **EventDrivenExecutor boundary** — Does not go through Trigger Engine; subscribes to EventBus directly as a persistent goroutine
+5. **Integration Plugin correct scope** — CI/CD event receivers and notification senders; IM platform adapters belong to IM Bridge

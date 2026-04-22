@@ -1,10 +1,27 @@
 #![allow(dead_code)]
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Command;
 
 const SIDECAR_IMAGE_PREFIXES: &[&str] = &["server", "bridge", "im-bridge"];
+
+/// Build a `Command` that does not flash a console window on Windows.
+///
+/// On Windows, GUI-subsystem parents spawn console children with an attached
+/// console window by default. `CREATE_NO_WINDOW` (0x0800_0000) suppresses it
+/// without affecting stdio redirection. No-op on non-Windows platforms.
+pub(crate) fn hidden_command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PortConflict {
@@ -137,7 +154,7 @@ pub(crate) fn windows_process_executable_path(pid: u32) -> Option<String> {
     let script = format!(
         "$process = Get-CimInstance Win32_Process -Filter \\\"ProcessId = {pid}\\\" -ErrorAction SilentlyContinue; if ($null -ne $process -and $null -ne $process.ExecutablePath) {{ [Console]::Out.Write($process.ExecutablePath) }}"
     );
-    let output = Command::new("powershell")
+    let output = hidden_command("powershell")
         .args(["-NoLogo", "-NoProfile", "-Command", &script])
         .output()
         .ok()?;

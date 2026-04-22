@@ -41,6 +41,7 @@ function runAndCapture(command, args, options = {}) {
       cwd: options.cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
     }).trim();
   } catch {
     return "";
@@ -181,6 +182,7 @@ function ensureBridgeDependencies(bridgeDir) {
   const result = spawnSync("bun", ["install"], {
     cwd: bridgeDir,
     stdio: "inherit",
+    windowsHide: true,
   });
 
   if (result.status !== 0) {
@@ -205,6 +207,7 @@ function buildTarget(target, { bridgeDir, binariesDir }) {
     {
       cwd: bridgeDir,
       encoding: "utf8",
+      windowsHide: true,
     },
   );
 

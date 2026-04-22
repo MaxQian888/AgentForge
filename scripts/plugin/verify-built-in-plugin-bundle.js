@@ -277,6 +277,7 @@ function runPackageValidate(item, stage, repoRoot) {
     cwd: stage.cwd ?? repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
 
   if (result.error && result.error.code === "ENOENT") {

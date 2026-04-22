@@ -31,6 +31,7 @@ function runVerification({ manifestPath, repoRoot = getRepoRoot() } = {}) {
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     if (result.status !== 0) {

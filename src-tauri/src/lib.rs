@@ -2,7 +2,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
@@ -32,7 +31,8 @@ use crate::runtime_logic::{
     RuntimeStatus, SelectFilesMode, ShellActionKind,
 };
 use process_cleanup::{
-    collect_windows_port_conflicts, format_port_conflict_message, windows_process_executable_path,
+    collect_windows_port_conflicts, format_port_conflict_message, hidden_command,
+    windows_process_executable_path,
 };
 
 #[cfg(test)]
@@ -166,7 +166,7 @@ struct DesktopRuntimeManager {
 fn detect_port_conflict(port: u16) -> Option<(u32, Option<String>)> {
     #[cfg(target_os = "windows")]
     {
-        let output = match Command::new("netstat").args(["-ano", "-p", "TCP"]).output() {
+        let output = match hidden_command("netstat").args(["-ano", "-p", "TCP"]).output() {
             Ok(output) => output,
             Err(error) => {
                 log::warn!("failed to run netstat for port conflict detection: {error}");
@@ -184,7 +184,7 @@ fn detect_port_conflict(port: u16) -> Option<(u32, Option<String>)> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        let output = match Command::new("lsof")
+        let output = match hidden_command("lsof")
             .args(["-nP", "-iTCP", &format!(":{port}"), "-sTCP:LISTEN", "-t"])
             .output()
         {
@@ -219,7 +219,7 @@ fn is_process_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
         // /FI filters by exact PID; "INFO: No tasks" in output means process exited
-        Command::new("tasklist")
+        hidden_command("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
             .output()
             .map(|output| {
@@ -247,7 +247,7 @@ fn graceful_kill(pid: u32, label: &str) {
     #[cfg(windows)]
     {
         // taskkill without /F sends WM_CLOSE, allowing graceful shutdown
-        let _ = Command::new("taskkill")
+        let _ = hidden_command("taskkill")
             .args(["/PID", &pid.to_string()])
             .output();
     }
@@ -267,7 +267,7 @@ fn graceful_kill(pid: u32, label: &str) {
     log::warn!("[{label}] graceful shutdown timed out for PID {pid}, force killing");
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
+        let _ = hidden_command("taskkill")
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .output();
     }
@@ -504,7 +504,7 @@ impl DesktopRuntimeManager {
                 }
                 #[cfg(windows)]
                 {
-                    let _ = Command::new("taskkill")
+                    let _ = hidden_command("taskkill")
                         .args(["/PID", &pid.to_string()])
                         .output();
                 }
@@ -529,7 +529,7 @@ impl DesktopRuntimeManager {
                 log::warn!("[{label}] graceful shutdown timed out for PID {pid}, force killing");
                 #[cfg(windows)]
                 {
-                    let _ = Command::new("taskkill")
+                    let _ = hidden_command("taskkill")
                         .args(["/F", "/T", "/PID", &pid.to_string()])
                         .output();
                 }

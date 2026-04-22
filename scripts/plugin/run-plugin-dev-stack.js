@@ -72,6 +72,7 @@ async function ensureService(service) {
       detached: true,
       shell: process.platform === "win32",
       stdio: "ignore",
+      windowsHide: true,
       env: {
         ...process.env,
         ...service.env,

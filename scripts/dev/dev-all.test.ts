@@ -387,6 +387,7 @@ describe("dev-all workflow contract", () => {
       "im-health",
       "stub-command",
       "reply-capture",
+      "acp-echo-smoke",
     ]);
     expect(runIMStubSmoke).toHaveBeenCalledWith(
       expect.objectContaining({

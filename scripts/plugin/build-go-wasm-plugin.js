@@ -47,6 +47,7 @@ function runBuild(options = {}) {
     {
       cwd: resolve(repoRoot, "src-go"),
       stdio: "inherit",
+      windowsHide: true,
       env: {
         ...process.env,
         GOOS: "wasip1",

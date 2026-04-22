@@ -209,6 +209,15 @@ fn ensure_dev_url_available(dev_url: &str) -> Result<(), String> {
 }
 
 fn resolve_socket_address(host: &str, port: u16) -> Result<SocketAddr, String> {
+    if host.is_empty()
+        || host
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '/' | '\\' | '@'))
+    {
+        return Err(format!(
+            "Failed to resolve frontend host `{host}:{port}`: invalid hostname."
+        ));
+    }
     (host, port)
         .to_socket_addrs()
         .map_err(|error| format!("Failed to resolve frontend host `{host}:{port}`: {error}"))?
@@ -566,8 +575,11 @@ mod tests {
 
     #[test]
     fn resolve_socket_address_reports_invalid_hosts() {
+        // Use a syntactically invalid host (contains whitespace) so the result
+        // does not depend on the ambient DNS resolver — some networks hijack
+        // NXDOMAIN responses and would otherwise return a bogus IP here.
         let error =
-            resolve_socket_address("invalid.invalid.invalid", 3000).expect_err("invalid host");
+            resolve_socket_address("bad host with spaces", 3000).expect_err("invalid host");
         assert!(error.contains("resolve"));
     }
 

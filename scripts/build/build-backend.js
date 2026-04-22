@@ -21,6 +21,7 @@ function runAndCapture(command, args, options = {}) {
       cwd: options.cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
     }).trim();
   } catch {
     return "";
@@ -169,6 +170,7 @@ function buildTarget(target, { goDir, binariesDir, ldflags }) {
         CGO_ENABLED: "0",
       },
       stdio: "inherit",
+      windowsHide: true,
     },
   );
 

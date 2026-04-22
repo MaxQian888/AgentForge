@@ -224,17 +224,17 @@ function needsWindowsCmdWrapper(command) {
 }
 
 function runCommandSync(command, args, options = {}) {
-  if (process.platform === "win32" && needsWindowsCmdWrapper(command)) {
-    return spawnSync("cmd.exe", getWindowsCommandArgs(command, args), {
-      ...options,
-      shell: false,
-    });
-  }
-
-  return spawnSync(command, args, {
+  const baseOptions = {
+    windowsHide: true,
     ...options,
     shell: false,
-  });
+  };
+
+  if (process.platform === "win32" && needsWindowsCmdWrapper(command)) {
+    return spawnSync("cmd.exe", getWindowsCommandArgs(command, args), baseOptions);
+  }
+
+  return spawnSync(command, args, baseOptions);
 }
 
 function isCommandAvailable(command, args = getCommandVersionArgs(command)) {
@@ -455,6 +455,7 @@ function killProcessTree(pid) {
       encoding: "utf8",
       stdio: "pipe",
       timeout: 10000,
+      windowsHide: true,
     });
     return result.status === 0;
   }
@@ -482,6 +483,7 @@ function forceKillProcessTree(pid) {
       encoding: "utf8",
       stdio: "pipe",
       timeout: 10000,
+      windowsHide: true,
     });
     return result.status === 0;
   }
@@ -503,7 +505,7 @@ function getListeningPidForPort(port) {
     const result = spawnSync(
       "cmd.exe",
       ["/d", "/s", "/c", `netstat -ano | findstr LISTENING | findstr :${port}`],
-      { encoding: "utf8", timeout: 5000 },
+      { encoding: "utf8", timeout: 5000, windowsHide: true },
     );
     if (result.status !== 0) return null;
     const lines = (result.stdout ?? "").split(/\r?\n/u).map((l) => l.trim()).filter(Boolean);
@@ -530,7 +532,7 @@ function getPortOwnerInfo(port) {
     const result = spawnSync(
       "cmd.exe",
       ["/d", "/s", "/c", `tasklist /FI "PID eq ${pid}" /FO CSV /NH`],
-      { encoding: "utf8", timeout: 5000 },
+      { encoding: "utf8", timeout: 5000, windowsHide: true },
     );
     const line = (result.stdout ?? "").trim().split(/\r?\n/u)[0] ?? "";
     const match = line.match(/^"([^"]+)"/u);
