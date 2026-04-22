@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,10 +20,6 @@ import (
 )
 
 func TestDispatcher_DefaultCard_SuccessAndFailure(t *testing.T) {
-	type capturedSend struct {
-		body []byte
-	}
-
 	cases := []struct {
 		name       string
 		status     string
@@ -104,10 +101,22 @@ func TestDispatcher_DefaultCard_SuccessAndFailure(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cap := &capturedSend{}
+			var (
+				capMu   sync.Mutex
+				capBody []byte
+			)
+			readBody := func() []byte {
+				capMu.Lock()
+				defer capMu.Unlock()
+				out := make([]byte, len(capBody))
+				copy(out, capBody)
+				return out
+			}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
-				cap.body = body
+				capMu.Lock()
+				capBody = body
+				capMu.Unlock()
 				w.WriteHeader(200)
 				_, _ = w.Write([]byte(`{"status":"sent"}`))
 			}))
@@ -134,16 +143,17 @@ func TestDispatcher_DefaultCard_SuccessAndFailure(t *testing.T) {
 			d.Observe(context.Background(), ev, &eb.PipelineCtx{})
 
 			deadline := time.Now().Add(1 * time.Second)
-			for time.Now().Before(deadline) && len(cap.body) == 0 {
+			for time.Now().Before(deadline) && len(readBody()) == 0 {
 				time.Sleep(10 * time.Millisecond)
 			}
-			if len(cap.body) == 0 {
+			body := readBody()
+			if len(body) == 0 {
 				t.Fatal("dispatcher did not POST to bridge")
 			}
 
 			var sent map[string]any
-			if err := json.Unmarshal(cap.body, &sent); err != nil {
-				t.Fatalf("decode posted body: %v\n%s", err, cap.body)
+			if err := json.Unmarshal(body, &sent); err != nil {
+				t.Fatalf("decode posted body: %v\n%s", err, body)
 			}
 			card := sent["card"].(map[string]any)
 			c.assertCard(t, card, exec.ID.String())

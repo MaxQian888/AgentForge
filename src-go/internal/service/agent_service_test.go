@@ -198,15 +198,26 @@ func (m *mockAgentIMNotifier) Notify(_ context.Context, req *model.IMNotifyReque
 }
 
 type bridgeIMDeliveryListener struct {
+	mu         sync.Mutex
 	deliveries []*model.IMControlDelivery
 }
 
 func (l *bridgeIMDeliveryListener) Send(_ context.Context, delivery *model.IMControlDelivery) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.deliveries = append(l.deliveries, delivery)
 	return nil
 }
 
 func (l *bridgeIMDeliveryListener) Close() error { return nil }
+
+func (l *bridgeIMDeliveryListener) snapshot() []*model.IMControlDelivery {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]*model.IMControlDelivery, len(l.deliveries))
+	copy(out, l.deliveries)
+	return out
+}
 
 type mockAgentTaskRepo struct {
 	task             *model.Task
@@ -1866,23 +1877,24 @@ func TestBridgeWS_PreservesEventOrderingIntoIMDeliveries(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
-	for len(listener.deliveries) < 2 && time.Now().Before(deadline) {
+	for len(listener.snapshot()) < 2 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(listener.deliveries) != 2 {
-		t.Fatalf("listener deliveries = %d, want 2", len(listener.deliveries))
+	deliveries := listener.snapshot()
+	if len(deliveries) != 2 {
+		t.Fatalf("listener deliveries = %d, want 2", len(deliveries))
 	}
-	if listener.deliveries[0].Structured == nil || !strings.Contains(listener.deliveries[0].Structured.Title, "Permission") {
-		t.Fatalf("first delivery = %+v", listener.deliveries[0])
+	if deliveries[0].Structured == nil || !strings.Contains(deliveries[0].Structured.Title, "Permission") {
+		t.Fatalf("first delivery = %+v", deliveries[0])
 	}
-	if listener.deliveries[1].Kind != service.IMDeliveryKindTerminal {
-		t.Fatalf("second delivery kind = %q, want %q", listener.deliveries[1].Kind, service.IMDeliveryKindTerminal)
+	if deliveries[1].Kind != service.IMDeliveryKindTerminal {
+		t.Fatalf("second delivery kind = %q, want %q", deliveries[1].Kind, service.IMDeliveryKindTerminal)
 	}
-	if !strings.Contains(listener.deliveries[1].Content, "运行完成") {
-		t.Fatalf("second delivery content = %q", listener.deliveries[1].Content)
+	if !strings.Contains(deliveries[1].Content, "运行完成") {
+		t.Fatalf("second delivery content = %q", deliveries[1].Content)
 	}
-	if listener.deliveries[0].Cursor >= listener.deliveries[1].Cursor {
-		t.Fatalf("delivery cursors out of order: first=%d second=%d", listener.deliveries[0].Cursor, listener.deliveries[1].Cursor)
+	if deliveries[0].Cursor >= deliveries[1].Cursor {
+		t.Fatalf("delivery cursors out of order: first=%d second=%d", deliveries[0].Cursor, deliveries[1].Cursor)
 	}
 }
 

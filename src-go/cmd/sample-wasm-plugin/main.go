@@ -22,6 +22,7 @@ func (samplePlugin) Describe(ctx *pluginsdk.Context) (*pluginsdk.Descriptor, err
 		Capabilities: []pluginsdk.Capability{
 			{Name: "health", Description: "Report plugin health and current mode"},
 			{Name: "echo", Description: "Return the request payload verbatim"},
+			{Name: "send_message", Description: "Acknowledge an outbound message send"},
 		},
 	}, nil
 }
@@ -42,6 +43,8 @@ func (samplePlugin) Invoke(ctx *pluginsdk.Context, invocation pluginsdk.Invocati
 	switch invocation.Operation {
 	case "echo":
 		return pluginsdk.Success(invocation.Payload), nil
+	case "send_message":
+		return pluginsdk.Success(map[string]any{"status": "sent"}), nil
 	default:
 		return nil, pluginsdk.NewRuntimeError("unsupported_operation", fmt.Sprintf("unsupported operation %s", invocation.Operation)).
 			WithDetail("operation", invocation.Operation)

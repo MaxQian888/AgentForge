@@ -376,7 +376,7 @@ func TestWorkflowTriggerRepository_Integration_TargetKindDefaultsAndDistinct(t *
 	}
 
 	t.Cleanup(func() {
-		_ = db.WithContext(ctx).Exec("DELETE FROM workflow_triggers WHERE workflow_id = ?", workflowID).Error
+		_ = db.WithContext(ctx).Exec("DELETE FROM workflow_triggers WHERE project_id = ?", projectID).Error
 		_ = db.WithContext(ctx).Exec("DELETE FROM workflow_definitions WHERE id = ?", workflowID).Error
 		_ = db.WithContext(ctx).Exec("DELETE FROM projects WHERE id = ?", projectID).Error
 	})
@@ -395,12 +395,15 @@ func TestWorkflowTriggerRepository_Integration_TargetKindDefaultsAndDistinct(t *
 		t.Fatalf("Upsert legacy: %v", err)
 	}
 
+	// Plugin-targeted row uses plugin_id (workflow_id must be NULL per
+	// workflow_triggers_target_identifier_check). Same config as the DAG row
+	// exercises the uniqueness index's target_kind discriminator.
 	pluginTrig := &model.WorkflowTrigger{
-		WorkflowID: &workflowID,
+		PluginID:   "workflow-plugin-review-" + projectID.String(),
 		ProjectID:  projectID,
 		Source:     model.TriggerSourceIM,
 		TargetKind: model.TriggerTargetPlugin,
-		Config:     []byte(`{"command":"/review"}`), // same config, different engine
+		Config:     []byte(`{"command":"/review"}`),
 		Enabled:    true,
 	}
 	if err := repo.Upsert(ctx, pluginTrig); err != nil {
@@ -411,25 +414,17 @@ func TestWorkflowTriggerRepository_Integration_TargetKindDefaultsAndDistinct(t *
 		t.Fatalf("expected distinct IDs for DAG vs plugin targets")
 	}
 
+	// ListByWorkflow is scoped to workflow_id, so it must return only the DAG
+	// row (plugin rows are keyed by plugin_id and have NULL workflow_id).
 	rows, err := repo.ListByWorkflow(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("ListByWorkflow error: %v", err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows (one per target_kind), got %d", len(rows))
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 DAG row for workflow_id, got %d", len(rows))
 	}
-
-	var sawDAG, sawPlugin bool
-	for _, row := range rows {
-		switch row.TargetKind {
-		case model.TriggerTargetDAG:
-			sawDAG = true
-		case model.TriggerTargetPlugin:
-			sawPlugin = true
-		}
-	}
-	if !sawDAG || !sawPlugin {
-		t.Errorf("expected both dag and plugin rows, sawDAG=%v sawPlugin=%v", sawDAG, sawPlugin)
+	if rows[0].ID != legacy.ID || rows[0].TargetKind != model.TriggerTargetDAG {
+		t.Errorf("ListByWorkflow should return only the DAG row, got %+v", rows[0])
 	}
 
 	// ListEnabledBySourceAndKind must scope to the requested kind.

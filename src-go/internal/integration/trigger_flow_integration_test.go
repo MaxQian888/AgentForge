@@ -289,6 +289,16 @@ func (p *recordPluginStarter) StartTriggeredWithEmployee(_ context.Context, plug
 	return &model.WorkflowPluginRun{ID: uuid.New(), PluginID: pluginID, ActingEmployeeID: actingEmployeeID}, nil
 }
 
+func (p *recordPluginStarter) StartTriggeredForProject(_ context.Context, pluginID string, seed map[string]any, triggerID uuid.UUID, actingEmployeeID *uuid.UUID, projectID uuid.UUID) (*model.WorkflowPluginRun, error) {
+	p.calls = append(p.calls, struct {
+		PluginID         string
+		TriggerID        uuid.UUID
+		Seed             map[string]any
+		ActingEmployeeID *uuid.UUID
+	}{pluginID, triggerID, seed, actingEmployeeID})
+	return &model.WorkflowPluginRun{ID: uuid.New(), PluginID: pluginID, ProjectID: projectID, ActingEmployeeID: actingEmployeeID}, nil
+}
+
 // TestTriggerFlow_Integration_DualEngineFanout boots the trigger router with
 // both a DAG engine and a plugin engine, registers two triggers matching the
 // same IM command (one per engine), and asserts a single IM event fires

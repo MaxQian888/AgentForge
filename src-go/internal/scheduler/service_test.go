@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,15 +14,42 @@ import (
 )
 
 type schedulerEventCapture struct {
+	mu    sync.Mutex
 	types []string
 	jobs  []*model.ScheduledJob
 	runs  []*model.ScheduledJobRun
 }
 
 func (c *schedulerEventCapture) BroadcastSchedulerEvent(eventType string, job *model.ScheduledJob, run *model.ScheduledJobRun) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.types = append(c.types, eventType)
 	c.jobs = append(c.jobs, job)
 	c.runs = append(c.runs, run)
+}
+
+func (c *schedulerEventCapture) snapshotTypes() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, len(c.types))
+	copy(out, c.types)
+	return out
+}
+
+func (c *schedulerEventCapture) snapshotRuns() []*model.ScheduledJobRun {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]*model.ScheduledJobRun, len(c.runs))
+	copy(out, c.runs)
+	return out
+}
+
+func (c *schedulerEventCapture) snapshotJobs() []*model.ScheduledJob {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]*model.ScheduledJob, len(c.jobs))
+	copy(out, c.jobs)
+	return out
 }
 
 func TestService_RunDueExecutesEligibleJobsAndFinalizesState(t *testing.T) {
@@ -421,8 +449,9 @@ func TestService_UpdateJobBroadcastsLifecycleChanges(t *testing.T) {
 	if _, err := service.UpdateJob(ctx, job.JobKey, UpdateJobInput{Enabled: &enabled}); err != nil {
 		t.Fatalf("UpdateJob() error = %v", err)
 	}
-	if len(events.types) != 1 || events.types[0] != ws.EventSchedulerJobUpdated {
-		t.Fatalf("events.types = %v, want scheduler job update event", events.types)
+	types := events.snapshotTypes()
+	if len(types) != 1 || types[0] != ws.EventSchedulerJobUpdated {
+		t.Fatalf("events.types = %v, want scheduler job update event", types)
 	}
 }
 
@@ -462,17 +491,19 @@ func TestService_TriggerManualBroadcastsRunLifecycle(t *testing.T) {
 	if run.Status != model.ScheduledJobRunStatusSucceeded {
 		t.Fatalf("run.Status = %q, want succeeded", run.Status)
 	}
-	if len(events.types) != 2 {
-		t.Fatalf("len(events.types) = %d, want 2 lifecycle events", len(events.types))
+	types := events.snapshotTypes()
+	runs := events.snapshotRuns()
+	if len(types) != 2 {
+		t.Fatalf("len(events.types) = %d, want 2 lifecycle events", len(types))
 	}
-	if events.types[0] != ws.EventSchedulerRunStarted {
-		t.Fatalf("events.types[0] = %q, want run started", events.types[0])
+	if types[0] != ws.EventSchedulerRunStarted {
+		t.Fatalf("events.types[0] = %q, want run started", types[0])
 	}
-	if events.types[1] != ws.EventSchedulerRunCompleted {
-		t.Fatalf("events.types[1] = %q, want run completed", events.types[1])
+	if types[1] != ws.EventSchedulerRunCompleted {
+		t.Fatalf("events.types[1] = %q, want run completed", types[1])
 	}
-	if events.runs[1] == nil || events.runs[1].Status != model.ScheduledJobRunStatusSucceeded {
-		t.Fatalf("events.runs[1] = %+v, want completed run payload", events.runs[1])
+	if runs[1] == nil || runs[1].Status != model.ScheduledJobRunStatusSucceeded {
+		t.Fatalf("events.runs[1] = %+v, want completed run payload", runs[1])
 	}
 }
 
@@ -751,14 +782,15 @@ func TestService_CancelJobMarksLifecycleAndBroadcastsTransitions(t *testing.T) {
 		t.Fatalf("storedRuns = %+v, want persisted cancelled run", storedRuns)
 	}
 
-	if len(events.types) != 3 {
-		t.Fatalf("events.types = %v, want 3 lifecycle events", events.types)
+	types := events.snapshotTypes()
+	if len(types) != 3 {
+		t.Fatalf("events.types = %v, want 3 lifecycle events", types)
 	}
-	if events.types[1] != "scheduler.run.cancel_requested" {
-		t.Fatalf("events.types[1] = %q, want cancel-requested event", events.types[1])
+	if types[1] != "scheduler.run.cancel_requested" {
+		t.Fatalf("events.types[1] = %q, want cancel-requested event", types[1])
 	}
-	if events.types[2] != ws.EventSchedulerRunCompleted {
-		t.Fatalf("events.types[2] = %q, want completion event", events.types[2])
+	if types[2] != ws.EventSchedulerRunCompleted {
+		t.Fatalf("events.types[2] = %q, want completion event", types[2])
 	}
 }
 

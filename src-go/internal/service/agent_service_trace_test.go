@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,25 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
+
+// syncBuffer wraps bytes.Buffer with a mutex so logrus writes from background
+// goroutines and the test's String() reads do not race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
 
 // TestAgentService_BackgroundGoroutineInheritsParentTrace verifies the
 // inherit-or-generate trace pattern on the DAG completion goroutine site.
@@ -55,7 +75,7 @@ func TestAgentService_BackgroundGoroutineInheritsParentTrace(t *testing.T) {
 		return svc, runID
 	}
 
-	waitForLog := func(t *testing.T, buf *bytes.Buffer, wantPresent bool, marker string) {
+	waitForLog := func(t *testing.T, buf *syncBuffer, wantPresent bool, marker string) {
 		t.Helper()
 		deadline := time.Now().Add(500 * time.Millisecond)
 		for time.Now().Before(deadline) {
@@ -80,7 +100,7 @@ func TestAgentService_BackgroundGoroutineInheritsParentTrace(t *testing.T) {
 	}
 
 	t.Run("inherits parent trace — no generation log", func(t *testing.T) {
-		var buf bytes.Buffer
+		var buf syncBuffer
 		old := log.StandardLogger().Out
 		log.SetOutput(&buf)
 		t.Cleanup(func() { log.SetOutput(old) })
@@ -99,7 +119,7 @@ func TestAgentService_BackgroundGoroutineInheritsParentTrace(t *testing.T) {
 	})
 
 	t.Run("no parent trace — generates fresh trace and logs it", func(t *testing.T) {
-		var buf bytes.Buffer
+		var buf syncBuffer
 		old := log.StandardLogger().Out
 		log.SetOutput(&buf)
 		t.Cleanup(func() { log.SetOutput(old) })

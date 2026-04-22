@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -111,8 +112,22 @@ func TestDispatcher_RetriesThenEmitsFailureEvent(t *testing.T) {
 	exec := mkExec(t, model.WorkflowExecStatusFailed, map[string]any{
 		"reply_target": map[string]any{"platform": "feishu", "chat_id": "c"},
 	})
-	var emitted []eb.Event
-	bus := &captureBus{onPublish: func(e *eb.Event) { emitted = append(emitted, *e) }}
+	var (
+		emittedMu sync.Mutex
+		emitted   []eb.Event
+	)
+	snapshot := func() []eb.Event {
+		emittedMu.Lock()
+		defer emittedMu.Unlock()
+		out := make([]eb.Event, len(emitted))
+		copy(out, emitted)
+		return out
+	}
+	bus := &captureBus{onPublish: func(e *eb.Event) {
+		emittedMu.Lock()
+		emitted = append(emitted, *e)
+		emittedMu.Unlock()
+	}}
 	d := service.NewOutboundDispatcher(&fakeExecRepo{exec: exec}, srv.URL, "https://fe.example", bus)
 	d.SetRetryDelays(0, 0, 0)
 
@@ -124,14 +139,15 @@ func TestDispatcher_RetriesThenEmitsFailureEvent(t *testing.T) {
 	ev.Payload = payload
 	d.Observe(context.Background(), ev, &eb.PipelineCtx{})
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && (atomic.LoadInt32(&posts) < 3 || len(emitted) == 0) {
+	for time.Now().Before(deadline) && (atomic.LoadInt32(&posts) < 3 || len(snapshot()) == 0) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
 	if got := atomic.LoadInt32(&posts); got != 3 {
 		t.Fatalf("expected 3 attempts, got %d", got)
 	}
-	if len(emitted) != 1 || emitted[0].Type != eb.EventOutboundDeliveryFailed {
-		t.Fatalf("expected one EventOutboundDeliveryFailed, got %+v", emitted)
+	got := snapshot()
+	if len(got) != 1 || got[0].Type != eb.EventOutboundDeliveryFailed {
+		t.Fatalf("expected one EventOutboundDeliveryFailed, got %+v", got)
 	}
 }
