@@ -1127,7 +1127,9 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
   const SCRIPT = path.join(process.cwd(), "scripts/ci/summarize-audit.js");
   const FIXTURES = path.join(process.cwd(), "scripts/ci/__fixtures__");
 
-  function run(argPath: string) { /* same helper as summarize-lint.test.ts */ }
+  // Copy the full `run()` and `writeTmp()` helpers verbatim from Task 17 Step 2's
+  // summarize-lint.test.ts. They are identical; do not re-derive them.
+  function run(argPath: string): { stdout: string; status: number } { /* ...identical to summarize-lint.test.ts... */ }
 
   describe("summarize-audit", () => {
     test("empty fixture emits a neutral success line, exit 0, with ### heading", () => {
