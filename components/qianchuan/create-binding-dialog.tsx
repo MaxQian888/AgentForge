@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -86,6 +87,9 @@ export function CreateBindingDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>新增千川绑定（手动 token）</DialogTitle>
+          <DialogDescription>
+            通过密钥引用填写 access_token 和 refresh_token 完成绑定。
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 py-2">
           <div className="grid gap-1.5">
