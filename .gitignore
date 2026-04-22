@@ -130,3 +130,11 @@ src-go/data/repos/
 .codex/dev-all-state.json
 .codex/runtime-logs/
 .superpowers/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Claude Code local state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
