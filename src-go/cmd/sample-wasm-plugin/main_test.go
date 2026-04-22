@@ -27,8 +27,22 @@ func TestDescribeExposesIntegrationMetadata(t *testing.T) {
 	if descriptor.ABIVersion != pluginsdk.ABIVersion {
 		t.Fatalf("descriptor.ABIVersion = %q, want %q", descriptor.ABIVersion, pluginsdk.ABIVersion)
 	}
-	if len(descriptor.Capabilities) != 2 {
-		t.Fatalf("len(descriptor.Capabilities) = %d, want 2", len(descriptor.Capabilities))
+	if len(descriptor.Capabilities) != 3 {
+		t.Fatalf("len(descriptor.Capabilities) = %d, want 3", len(descriptor.Capabilities))
+	}
+	var sawHealth, sawEcho, sawSend bool
+	for _, c := range descriptor.Capabilities {
+		switch c.Name {
+		case "health":
+			sawHealth = true
+		case "echo":
+			sawEcho = true
+		case "send_message":
+			sawSend = true
+		}
+	}
+	if !sawHealth || !sawEcho || !sawSend {
+		t.Fatalf("descriptor.Capabilities missing one of {health, echo, send_message}: %+v", descriptor.Capabilities)
 	}
 }
 

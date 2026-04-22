@@ -27,7 +27,10 @@ func TestWorkflowTriggerRepository_Integration_UpsertIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgres() error: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (otherwise workflow_triggers
+	// rows leak into cross-package integration tests like TriggerFlow).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -110,7 +113,10 @@ func TestWorkflowTriggerRepository_Integration_UpsertDifferentConfigCreatesNewRo
 	if err != nil {
 		t.Fatalf("NewPostgres() error: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (otherwise workflow_triggers
+	// rows leak into cross-package integration tests like TriggerFlow).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -181,7 +187,10 @@ func TestWorkflowTriggerRepository_Integration_ListEnabledBySource_FiltersDisabl
 	if err != nil {
 		t.Fatalf("NewPostgres() error: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (otherwise workflow_triggers
+	// rows leak into cross-package integration tests like TriggerFlow).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -264,7 +273,10 @@ func TestWorkflowTriggerRepository_Integration_SetEnabledAndDelete(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewPostgres() error: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (otherwise workflow_triggers
+	// rows leak into cross-package integration tests like TriggerFlow).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -356,7 +368,10 @@ func TestWorkflowTriggerRepository_Integration_TargetKindDefaultsAndDistinct(t *
 	if err != nil {
 		t.Fatalf("NewPostgres() error: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (otherwise workflow_triggers
+	// rows leak into cross-package integration tests like TriggerFlow).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -459,7 +474,10 @@ func TestWorkflowTriggerRepository_Integration_UpsertCanonicalizesJSONOrder(t *t
 	if err != nil {
 		t.Fatalf("NewPostgres() error: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (otherwise workflow_triggers
+	// rows leak into cross-package integration tests like TriggerFlow).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()

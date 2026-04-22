@@ -49,7 +49,10 @@ func TestTriggerFlow_Integration_EventSeedsExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgres: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (cross-test workflow_triggers
+	// pollution otherwise trips RouteWithOutcomes counts).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 
@@ -154,7 +157,10 @@ func TestTriggerFlow_Integration_SyncRemovesStaleRowsOnResave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgres: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (cross-test workflow_triggers
+	// pollution otherwise trips RouteWithOutcomes counts).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -313,7 +319,10 @@ func TestTriggerFlow_Integration_DualEngineFanout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgres: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (cross-test workflow_triggers
+	// pollution otherwise trips RouteWithOutcomes counts).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -425,7 +434,10 @@ func TestTriggerFlow_Integration_DualEngineEmployeeAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgres: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (cross-test workflow_triggers
+	// pollution otherwise trips RouteWithOutcomes counts).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -533,7 +545,10 @@ func TestTriggerFlow_Integration_RegistrarRejectsCrossProjectEmployee(t *testing
 	if err != nil {
 		t.Fatalf("NewPostgres: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (cross-test workflow_triggers
+	// pollution otherwise trips RouteWithOutcomes counts).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectA := uuid.New() // employee belongs to this project
@@ -602,7 +617,10 @@ func TestTriggerFlow_Integration_DispatchRejectsArchivedEmployee(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgres: %v", err)
 	}
-	defer func() { _ = database.ClosePostgres(db) }()
+	// Registered first so it runs LAST in LIFO: DELETE cleanups must hit
+	// the live connection, not a closed one (cross-test workflow_triggers
+	// pollution otherwise trips RouteWithOutcomes counts).
+	t.Cleanup(func() { _ = database.ClosePostgres(db) })
 
 	ctx := context.Background()
 	projectID := uuid.New()
