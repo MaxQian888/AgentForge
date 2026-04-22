@@ -1,0 +1,45 @@
+name: Marketplace CI
+
+# ============================================================================
+# Marketplace Microservice CI
+# ============================================================================
+# go-vet:   static analysis
+# go-test:  unit tests (all in-memory, no external services required)
+# ============================================================================
+
+on:
+  pull_request:
+    branches:
+      - master
+      - develop
+  workflow_call:
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_call' && github.run_id || format('marketplace-ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
+
+jobs:
+  marketplace-unit:
+    name: Marketplace Unit Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: src-marketplace
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: src-marketplace/go.mod
+          cache: true
+          cache-dependency-path: src-marketplace/go.sum
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run unit tests
+        run: go test ./... -count=1 -race -timeout 60s

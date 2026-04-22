@@ -61,9 +61,9 @@ jobs:
     name: Desktop Tauri Logic
     uses: ./.github/workflows/desktop-tauri-logic.yml
 
-  # Step 5: TypeScript Bridge typecheck
+  # Step 5: TypeScript Bridge typecheck + unit tests
   bridge-typecheck:
-    name: Bridge Typecheck
+    name: Bridge CI
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -73,10 +73,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      - run: bun test
 
-  # Step 6: IM Bridge build check
+  # Step 6: IM Bridge build + unit tests
   im-bridge-build:
-    name: IM Bridge Build
+    name: IM Bridge CI
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -89,9 +90,15 @@ jobs:
           cache: true
           cache-dependency-path: src-im-bridge/go.sum
       - run: go build ./...
+      - run: go test ./... -count=1 -race -timeout 120s
 
-  # Step 7: Build Tauri Desktop Apps (after all checks pass)
+  # Step 7: Marketplace microservice CI
+  marketplace-ci:
+    name: Marketplace CI
+    uses: ./.github/workflows/marketplace-ci.yml
+
+  # Step 8: Build Tauri Desktop Apps (after all checks pass)
   build-tauri:
     name: Build Tauri
-    needs: [quality, test, go-ci, desktop-tauri-logic, bridge-typecheck, im-bridge-build]
+    needs: [quality, test, go-ci, desktop-tauri-logic, bridge-typecheck, im-bridge-build, marketplace-ci]
     uses: ./.github/workflows/build-tauri.yml
