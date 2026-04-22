@@ -131,25 +131,31 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 **Files:**
 - Create: `CODE_OF_CONDUCT.md` (repo root)
 
-- [ ] **Step 1: Write the file**
+- [ ] **Step 1: Fetch the verbatim Contributor Covenant v2.1 text**
 
-  Use the verbatim Contributor Covenant v2.1 text from <https://www.contributor-covenant.org/version/2/1/code_of_conduct/>. In the **Enforcement** section (the third-to-last heading), set the contact line to:
-
-  ```markdown
-  Instances of abusive, harassing, or otherwise unacceptable behavior may be
-  reported to the community leaders responsible for enforcement at <MAINTAINER_CONTACT>.
-  All complaints will be reviewed and investigated promptly and fairly.
+  ```bash
+  rtk curl -sSf https://www.contributor-covenant.org/version/2/1/code_of_conduct/code_of_conduct.md -o CODE_OF_CONDUCT.md
   ```
 
-  Substitute `<MAINTAINER_CONTACT>` with the value recorded in Task 0 Step 2 (a GitHub handle form, e.g. `@MaxQian`). Do **not** use an email address — this is constrained by the spec's no-SLA Non-Goal.
+  Expected: `CODE_OF_CONDUCT.md` created at repo root, ~100 lines. If the URL 404s, fall back to the GitHub source: `rtk curl -sSf https://raw.githubusercontent.com/EthicalSource/contributor_covenant/release/content/version/2/1/code_of_conduct.md -o CODE_OF_CONDUCT.md`.
 
-- [ ] **Step 2: Verify no placeholder remains**
+- [ ] **Step 2: Replace the contact placeholder**
 
-  Run: `rtk grep -n "MAINTAINER_CONTACT\|<handle>\|example@\|security@" CODE_OF_CONDUCT.md`
+  The downloaded file's Enforcement section reads: `...reported to the community leaders responsible for enforcement at [INSERT CONTACT METHOD]. All complaints will be reviewed...`. Edit it to:
+
+  ```markdown
+  ...reported to the community leaders responsible for enforcement at <MAINTAINER_CONTACT>. All complaints will be reviewed...
+  ```
+
+  Substitute `<MAINTAINER_CONTACT>` with the value recorded in Task 0 Step 2 (a GitHub handle, e.g. `@MaxQian`). Do **not** use an email address — the spec's no-SLA Non-Goal binds us to in-platform channels only.
+
+- [ ] **Step 3: Verify no placeholder remains**
+
+  Run: `rtk grep -n "INSERT CONTACT METHOD\|MAINTAINER_CONTACT\|<handle>\|example@\|security@" CODE_OF_CONDUCT.md`
 
   Expected: no matches. If anything is returned, substitution was incomplete.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
   ```bash
   rtk git add CODE_OF_CONDUCT.md
@@ -221,15 +227,17 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 
 - [ ] **Step 2: Insert the concurrency block**
 
-  Add this block after the `workflow_dispatch:` line and before `jobs:` (mirror `go-ci.yml:18-23`'s conditional form so `workflow_call` invocations from `release.yml` don't get cancelled by PR invocations from `ci.yml`):
+  Add this block after the `workflow_dispatch:` line and before `jobs:`. This mirrors `go-ci.yml:18-23` **exactly** — critical: `build-tauri.yml` has no `pull_request:` trigger (only `workflow_call:` + `workflow_dispatch:`), so `github.event_name == 'pull_request'` would always be false. Use `!= 'workflow_call'` (matches `go-ci.yml:23`) so that workflow_dispatch invocations still cancel older ones, but workflow_call invocations (from `ci.yml` or `release.yml`) never cancel each other because their group key is `github.run_id`.
 
   ```yaml
   concurrency:
-    # For PR: group by ref so older runs are cancelled.
-    # For workflow_call (release.yml invocation): use run_id so parallel
-    # callers never cancel each other, matching go-ci.yml:22.
+    # For PR (indirect via workflow_call from ci.yml): the caller's concurrency
+    # group already handles PR-level cancellation, so our group uses
+    # github.run_id (unique per invocation) to avoid cross-caller cancellation.
+    # For workflow_dispatch: group by ref so older manual triggers are cancelled.
+    # Matches go-ci.yml:22-23.
     group: ${{ github.event_name == 'workflow_call' && github.run_id || format('build-tauri-{0}', github.ref) }}
-    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
   ```
 
 - [ ] **Step 3: Verify YAML parses**
@@ -258,10 +266,12 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 
 - [ ] **Step 2: Insert the same conditional concurrency block**
 
+  Same rationale as Task 4 Step 2 — this workflow is also `workflow_call:` + `workflow_dispatch:` only.
+
   ```yaml
   concurrency:
     group: ${{ github.event_name == 'workflow_call' && github.run_id || format('desktop-tauri-logic-{0}', github.ref) }}
-    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
   ```
 
 - [ ] **Step 3: Verify YAML parses**
@@ -578,8 +588,12 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 
 - [ ] **Step 5: Commit**
 
+  `git mv` has already staged the source deletion; we only need to stage the destination (and the docblock edit to it).
+
   ```bash
-  rtk git add docs/ci-examples/deploy.example.yml .github/workflows/deploy.yml
+  rtk git add docs/ci-examples/deploy.example.yml
+  rtk git status
+  # Expected output shows: renamed: .github/workflows/deploy.yml -> docs/ci-examples/deploy.example.yml, plus modified: docs/ci-examples/deploy.example.yml (from the docblock prepend)
   rtk git commit -m "ci(deploy): archive disabled workflow to docs/ci-examples/"
   ```
 
@@ -588,11 +602,19 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 **Files:**
 - Modify: `CI_CD.md`
 
+- [ ] **Step 0: Discover the actual section boundaries**
+
+  Don't assume the section ordering. Find every top-level heading first:
+
+  ```bash
+  rtk grep -n "^## " CI_CD.md
+  ```
+
+  Record the exact line number where `## Deploy Flow` starts and the exact heading of the *next* `## ` section after it. In the post-Task-8 file, this is expected to be `## Review Automation` but verify. Also find the line of `## Operational Notes` (or whatever the last section is today) — the "Disabled examples" section will be inserted immediately before it.
+
 - [ ] **Step 1: Remove the entire "Deploy Flow" section**
 
-  Run: `rtk grep -n "^## Deploy Flow\|^## Review Automation" CI_CD.md`
-
-  Delete lines from `## Deploy Flow` up to (but not including) `## Review Automation`.
+  Using the Edit tool, replace the entire block from the line `## Deploy Flow` through (but not including) the line with the next `## ` heading identified in Step 0. Use a unique anchor — include the full heading line plus a distinctive sentence from just before the next `## ` heading to make the `old_string` unambiguous.
 
 - [ ] **Step 2: Remove `deploy.yml` from the workflow inventory list**
 
@@ -631,6 +653,14 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 **Files:**
 - Modify: `.github/workflows/ci.yml` (around lines 65-75)
 
+- [ ] **Step 0: Confirm which Bun lockfile this repo uses**
+
+  ```bash
+  ls src-bridge/bun.lock* 2>/dev/null
+  ```
+
+  Expected (as of 2026-04-22): `src-bridge/bun.lock` (text lockfile, Bun's newer format). If `src-bridge/bun.lockb` exists instead (binary), swap the cache key path accordingly in Step 2. This plan assumes `bun.lock`.
+
 - [ ] **Step 1: Read current job definition**
 
   Read `.github/workflows/ci.yml` lines 64-76.
@@ -659,7 +689,7 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
         path: |
           ~/.bun/install/cache
           src-bridge/node_modules
-        key: ${{ runner.os }}-bun-${{ hashFiles('src-bridge/bun.lockb') }}
+        key: ${{ runner.os }}-bun-${{ hashFiles('src-bridge/bun.lock') }}
         restore-keys: |
           ${{ runner.os }}-bun-
     - run: bun install --frozen-lockfile
@@ -903,6 +933,7 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
       const sarif = JSON.stringify({ version: "2.1.0", runs: [{ results: [] }] });
       const { stdout, status } = run(writeTmp("empty.sarif", sarif));
       expect(status).toBe(0);
+      expect(stdout).toMatch(/^###\s/m);
       expect(stdout).toMatch(/no lint (violations|issues)/i);
     });
 
@@ -921,9 +952,12 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
       });
       const { stdout, status } = run(writeTmp("hits.sarif", sarif));
       expect(status).toBe(0);
+      expect(stdout).toMatch(/^###\s/m);
       expect(stdout).toMatch(/Total violations:\s*3/);
       expect(stdout).toMatch(/a\.ts/);
       expect(stdout).toMatch(/no-unused-vars/);
+      expect(stdout).toMatch(/Top files:/);
+      expect(stdout).toMatch(/Top rules:/);
     });
 
     test("malformed input exits 0 with a fallback line (fail-safe)", () => {
@@ -1057,37 +1091,100 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 **Files:**
 - Create: `scripts/ci/summarize-audit.js`
 - Create: `scripts/ci/summarize-audit.test.ts`
+- Create: `scripts/ci/__fixtures__/pnpm-audit-sample.json`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Capture the REAL `pnpm audit --json` schema from this repo**
 
-  Create `scripts/ci/summarize-audit.test.ts`. Mirror the structure of `summarize-lint.test.ts` with these test cases:
-  - **empty advisories → neutral success**: input `{ "advisories": {} }` → stdout matches `/no known vulnerabilities/i`.
-  - **advisories present → severity counts**: input with three entries of different severities (low, high, critical) → stdout contains `critical: 1`, `high: 1`, `low: 1`.
-  - **malformed JSON → fallback, exit 0**.
-  - **missing file → fallback, exit 0**.
+  The legacy npm-v6 schema (`{ advisories: { <id>: {...} } }`) may or may not match modern pnpm 10. Capture the actual shape before writing tests so we don't pin tests to a wrong envelope.
 
-  The exact `pnpm audit --json` schema uses `{ advisories: { <id>: { severity, title, module_name, url }, ... }, metadata: {...} }`. Test with this shape.
+  ```bash
+  mkdir -p scripts/ci/__fixtures__
+  pnpm audit --audit-level=moderate --json > scripts/ci/__fixtures__/pnpm-audit-sample.json || true
+  head -40 scripts/ci/__fixtures__/pnpm-audit-sample.json
+  ```
 
-- [ ] **Step 2: Run, confirm FAIL**
+  Record the **top-level keys** of the emitted JSON (e.g. `advisories`, `metadata`, or just `{}` if no vulns). This captured sample IS the primary test fixture — commit it alongside the test file so the fixture-to-implementation binding is explicit.
+
+  Also capture an empty-case fixture by hand:
+
+  ```bash
+  echo '{}' > scripts/ci/__fixtures__/pnpm-audit-empty.json
+  ```
+
+  (If the real sample is already empty, you can synthesize a non-empty fixture by hand using the observed shape; the plan's goal is that BOTH shapes are exercised.)
+
+- [ ] **Step 2: Write the failing test**
+
+  Create `scripts/ci/summarize-audit.test.ts`. Mirror the structure of `summarize-lint.test.ts` but drive the tests from the captured fixtures:
+
+  ```ts
+  /** @jest-environment node */
+  import { execFileSync } from "node:child_process";
+  import * as fs from "node:fs";
+  import * as os from "node:os";
+  import * as path from "node:path";
+
+  const SCRIPT = path.join(process.cwd(), "scripts/ci/summarize-audit.js");
+  const FIXTURES = path.join(process.cwd(), "scripts/ci/__fixtures__");
+
+  function run(argPath: string) { /* same helper as summarize-lint.test.ts */ }
+
+  describe("summarize-audit", () => {
+    test("empty fixture emits a neutral success line, exit 0, with ### heading", () => {
+      const { stdout, status } = run(path.join(FIXTURES, "pnpm-audit-empty.json"));
+      expect(status).toBe(0);
+      expect(stdout).toMatch(/^###\s/m);
+      expect(stdout).toMatch(/no known vulnerabilities/i);
+    });
+
+    test("real captured fixture parses and emits a summary, exit 0, with ### heading", () => {
+      const { stdout, status } = run(path.join(FIXTURES, "pnpm-audit-sample.json"));
+      expect(status).toBe(0);
+      expect(stdout).toMatch(/^###\s/m);
+      // Do NOT pin the exact content — either "no known vulnerabilities" or a
+      // severity table is acceptable depending on what the repo had when the
+      // fixture was captured.
+      expect(stdout.length).toBeGreaterThan(0);
+    });
+
+    test("malformed input → fallback, exit 0", () => {
+      const p = path.join(os.tmpdir(), `bad-audit-${Date.now()}.json`);
+      fs.writeFileSync(p, "not-json");
+      const { stdout, status } = run(p);
+      expect(status).toBe(0);
+      expect(stdout).toMatch(/unable to parse|could not read/i);
+    });
+
+    test("missing file → fallback, exit 0", () => {
+      const { stdout, status } = run("scripts/ci/__fixtures__/nonexistent.json");
+      expect(status).toBe(0);
+      expect(stdout).toMatch(/unable to parse|could not read/i);
+    });
+  });
+  ```
+
+- [ ] **Step 3: Run, confirm FAIL**
 
   ```bash
   rtk pnpm exec jest scripts/ci/summarize-audit.test.ts
   ```
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 4: Write minimal implementation driven by the captured schema**
 
-  Mirror `summarize-lint.js`. Key logic:
-  - Read + parse JSON; fail-safe to `console.log("### pnpm audit\n\n_unable to parse…_")` and return.
-  - If `advisories` is an empty object, print "✅ no known vulnerabilities.".
-  - Otherwise group by `severity`, print `| Severity | Count |` Markdown table, plus top-5 advisories by severity-rank.
+  Mirror `summarize-lint.js` structure. Key requirements:
+  - Always emit `### pnpm audit` as the first heading line (required so `$GITHUB_STEP_SUMMARY` renders with a section header and so the test's `/^###\s/m` assertion holds).
+  - Fail-safe: any `try/catch` fallback emits `### pnpm audit\n\n_unable to parse…_` and returns without throwing.
+  - For empty or missing `advisories`: print `✅ no known vulnerabilities.`
+  - For non-empty: group by severity, print a Markdown table `| Severity | Count |` plus a top-5 advisories list by severity rank (`critical` > `high` > `moderate` > `low` > `info`). Use whatever field names the captured fixture reveals (likely `severity` + `module_name` + `title` + `url`).
+  - If the captured schema turns out to be entirely different (e.g. no `advisories` key), adapt the implementation to that shape and update the test accordingly. The goal is that the script behaves correctly on this repo's actual output.
 
-- [ ] **Step 4: Run tests to confirm PASS**
+- [ ] **Step 5: Run tests to confirm PASS**
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
   ```bash
-  rtk git add scripts/ci/summarize-audit.js scripts/ci/summarize-audit.test.ts
-  rtk git commit -m "ci(scripts): add summarize-audit.js for pnpm audit JSON output"
+  rtk git add scripts/ci/summarize-audit.js scripts/ci/summarize-audit.test.ts scripts/ci/__fixtures__/pnpm-audit-sample.json scripts/ci/__fixtures__/pnpm-audit-empty.json
+  rtk git commit -m "ci(scripts): add summarize-audit.js with captured pnpm audit fixture"
   ```
 
 ### Task 19: TDD `scripts/ci/summarize-outdated.js`
@@ -1095,30 +1192,44 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 **Files:**
 - Create: `scripts/ci/summarize-outdated.js`
 - Create: `scripts/ci/summarize-outdated.test.ts`
+- Create: `scripts/ci/__fixtures__/pnpm-outdated-sample.json`
 
-- [ ] **Step 1: Write the failing test**
-
-  `pnpm outdated --format json` emits: `{ "<package>": { current, wanted, latest, dependencyType, isDeprecated }, ... }`.
-
-  Test cases:
-  - **empty object → "✅ all dependencies up to date."**
-  - **non-empty → Markdown table with Name / Current / Wanted / Latest / Type columns**.
-  - **malformed JSON → fallback, exit 0**.
-  - **missing file → fallback, exit 0**.
-
-- [ ] **Step 2: Run, confirm FAIL**
-
-- [ ] **Step 3: Write minimal implementation**
-
-  Mirror the previous two. Emit Markdown table with one row per package, cap at 20 rows with a "…and N more" footer line if exceeded.
-
-- [ ] **Step 4: Run tests to confirm PASS**
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 1: Capture the REAL `pnpm outdated --format json` schema**
 
   ```bash
-  rtk git add scripts/ci/summarize-outdated.js scripts/ci/summarize-outdated.test.ts
-  rtk git commit -m "ci(scripts): add summarize-outdated.js for pnpm outdated JSON output"
+  pnpm outdated --format json > scripts/ci/__fixtures__/pnpm-outdated-sample.json || true
+  head -40 scripts/ci/__fixtures__/pnpm-outdated-sample.json
+  echo '{}' > scripts/ci/__fixtures__/pnpm-outdated-empty.json
+  ```
+
+  Note: `pnpm outdated` exits non-zero when outdated packages exist — that's why the `|| true`. Inspect the captured file. The historical shape is `{ "<pkg>": { current, wanted, latest, dependencyType, isDeprecated }, ... }` but pnpm 10 may emit a different envelope. Record the actual top-level shape before writing the test.
+
+- [ ] **Step 2: Write the failing test**
+
+  Same four-case pattern as `summarize-audit.test.ts` (empty / real-captured / malformed / missing), each asserting `status === 0`, each asserting `/^###\s/m` heading is emitted. For the real-captured fixture, don't pin exact content (either table or "up to date" message is acceptable).
+
+- [ ] **Step 3: Run, confirm FAIL**
+
+  ```bash
+  rtk pnpm exec jest scripts/ci/summarize-outdated.test.ts
+  ```
+
+- [ ] **Step 4: Write minimal implementation driven by the captured schema**
+
+  Requirements (identical structure to Task 18):
+  - Always emit `### Outdated Dependencies` as the first heading line.
+  - Fail-safe fallback line on parse/IO error.
+  - Empty / `{}` → `✅ all dependencies up to date.`
+  - Non-empty → Markdown table with the columns revealed by the captured fixture (typically Name / Current / Wanted / Latest / Type).
+  - Cap at 20 rows; if truncated, append `_…and N more_`.
+
+- [ ] **Step 5: Run tests to confirm PASS**
+
+- [ ] **Step 6: Commit**
+
+  ```bash
+  rtk git add scripts/ci/summarize-outdated.js scripts/ci/summarize-outdated.test.ts scripts/ci/__fixtures__/pnpm-outdated-sample.json scripts/ci/__fixtures__/pnpm-outdated-empty.json
+  rtk git commit -m "ci(scripts): add summarize-outdated.js with captured pnpm outdated fixture"
   ```
 
 ### Task 20: Rewrite `quality.yml` — permissions + SARIF + summaries + strict switch
@@ -1126,21 +1237,31 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
 **Files:**
 - Modify: `.github/workflows/quality.yml`
 
-- [ ] **Step 1: Add/verify the SARIF formatter is installed**
+- [ ] **Step 1: Add the SARIF formatter dev dep (do NOT stage yet — Step 6 consolidates staging)**
 
-  The `@microsoft/eslint-formatter-sarif` is a dev-dep. Check:
+  The `@microsoft/eslint-formatter-sarif` is a dev-dep. Check if it's already present:
 
   ```bash
   rtk grep '"@microsoft/eslint-formatter-sarif"' package.json
   ```
 
-  If absent, add it:
+  If absent, add it. `pnpm add -D` updates `package.json` AND `pnpm-lock.yaml` in one go:
 
   ```bash
-  rtk pnpm add -D @microsoft/eslint-formatter-sarif
+  pnpm add -D @microsoft/eslint-formatter-sarif
   ```
 
-  Verify `package.json` and `pnpm-lock.yaml` are updated, then stage them (they'll be committed with the workflow change).
+  **Do not `git add` yet.** Staging is consolidated in Step 6 so the dep bump and the workflow rewrite land as one atomic commit.
+
+- [ ] **Step 1b: Verify `pnpm install --frozen-lockfile` succeeds against the updated lockfile**
+
+  Critical: CI's `quality.yml` runs `pnpm install --frozen-lockfile` and will fail if `package.json` and `pnpm-lock.yaml` are out of sync.
+
+  ```bash
+  pnpm install --frozen-lockfile
+  ```
+
+  Expected: exit 0 with no "lockfile is not up to date" warning. If it fails, your `pnpm add` must be redone — check that you're on pnpm 10 (`pnpm -v`) and that no stray `npm install` was run.
 
 - [ ] **Step 2: Rewrite `quality.yml` — add `permissions:` block and replace lint/audit/outdated steps**
 
@@ -1329,13 +1450,18 @@ The spec uses two placeholders that MUST be substituted before any merge. Decide
   # 4. All three test suites pass
   rtk pnpm exec jest scripts/ci/
 
-  # 5. Malformed-input fail-safe
-  node scripts/ci/summarize-lint.js /dev/null
-  node scripts/ci/summarize-audit.js /dev/null
-  node scripts/ci/summarize-outdated.js /dev/null
+  # 5. Missing-file fail-safe (path-portable — works on Windows git-bash AND Linux CI)
+  node scripts/ci/summarize-lint.js scripts/ci/__fixtures__/__nonexistent__.sarif
+  node scripts/ci/summarize-audit.js scripts/ci/__fixtures__/__nonexistent__.json
+  node scripts/ci/summarize-outdated.js scripts/ci/__fixtures__/__nonexistent__.json
   echo "All three should have printed a fallback line with exit 0; verify with $?"
 
-  # 6. CI_CD.md updated
+  # 6. pnpm install --frozen-lockfile still passes with the new dep
+  pnpm install --frozen-lockfile
+  # Expected: exit 0, no "lockfile is not up to date" warning.
+  # This is the guard that catches package.json/pnpm-lock.yaml drift from Task 20.
+
+  # 7. CI_CD.md updated
   rtk grep -n "SARIF\|step summary\|CI_LINT_STRICT" CI_CD.md
   ```
 
