@@ -42,15 +42,35 @@ Run: Read `src-go/internal/workflow/nodetypes/condition.go` in full.
 
 Confirm what you see: `ConditionHandler.Execute` returns `error("condition not met: <expr>")` when the expression is false; `ConfigSchema()` declares only `expression`; `Capabilities()` returns nil.
 
-- [ ] **Step 1.2: Write the failing test — `onFalse: skip_downstream` returns no error**
+- [ ] **Step 1.2: Read `NodeExecResult` to verify the correct field name**
 
-Add this test at the end of `condition_test.go`:
+Run: Read `src-go/internal/workflow/nodetypes/types.go:31-35`.
+
+Confirm: `NodeExecResult` has `Result json.RawMessage` (node output as JSON) and `Effects []Effect`. There is **no** `Output map[string]any` field. Route signalling must be encoded in `Result` as JSON.
+
+- [ ] **Step 1.3: Write the failing test — `onFalse: skip_downstream` returns no error and emits a JSON route signal**
+
+Add these imports to `condition_test.go` if missing:
+
+```go
+import (
+    "context"
+    "encoding/json"
+    "testing"
+
+    "github.com/agentforge/server/internal/model"
+    "github.com/stretchr/testify/require"
+)
+```
+
+Test:
 
 ```go
 func TestConditionHandler_OnFalseSkipDownstream(t *testing.T) {
     h := ConditionHandler{}
     req := &NodeExecRequest{
-        Node:   &model.WorkflowNode{ID: "gate"},
+        Node:      &model.WorkflowNode{ID: "gate"},
+        Execution: &model.WorkflowExecution{},
         Config: map[string]any{
             "expression": "1 == 2",
             "onFalse":    "skip_downstream",
@@ -59,40 +79,46 @@ func TestConditionHandler_OnFalseSkipDownstream(t *testing.T) {
     res, err := h.Execute(context.Background(), req)
     require.NoError(t, err)
     require.NotNil(t, res)
-    require.Equal(t, "skip", res.Output["_route"])
+    require.NotNil(t, res.Result, "skip_downstream must emit a Result JSON payload")
+
+    var payload map[string]any
+    require.NoError(t, json.Unmarshal(res.Result, &payload))
+    require.Equal(t, "skip", payload["_route"])
 }
 ```
 
-- [ ] **Step 1.3: Run the test to verify it fails**
+- [ ] **Step 1.4: Run the test to verify it fails**
 
 Run: `cd src-go && go test ./internal/workflow/nodetypes/ -run TestConditionHandler_OnFalseSkipDownstream -v`
 
-Expected: FAIL — either the `_route` assertion fails or the handler returns an error on the false expression.
+Expected: FAIL with `Error: Received unexpected error: condition not met: 1 == 2` — handler currently returns an error on false expressions, there is no `onFalse` branch.
 
-- [ ] **Step 1.4: Write the failing test — `onFalse: proceed` succeeds with no route signal**
+- [ ] **Step 1.5: Write the failing test — `onFalse: proceed` succeeds with empty Result**
 
 ```go
 func TestConditionHandler_OnFalseProceed(t *testing.T) {
     h := ConditionHandler{}
     req := &NodeExecRequest{
-        Node:   &model.WorkflowNode{ID: "gate"},
-        Config: map[string]any{"expression": "1 == 2", "onFalse": "proceed"},
+        Node:      &model.WorkflowNode{ID: "gate"},
+        Execution: &model.WorkflowExecution{},
+        Config:    map[string]any{"expression": "1 == 2", "onFalse": "proceed"},
     }
     res, err := h.Execute(context.Background(), req)
     require.NoError(t, err)
     require.NotNil(t, res)
-    require.Empty(t, res.Output["_route"])
+    require.Nil(t, res.Result, "proceed must emit no Result payload")
 }
 ```
 
-- [ ] **Step 1.5: Write the failing test — `onFalse: error` (default) preserves today's behaviour**
+- [ ] **Step 1.6: Write the failing test — `onFalse: error` (default) preserves today's behaviour**
 
 ```go
 func TestConditionHandler_OnFalseErrorIsDefault(t *testing.T) {
     h := ConditionHandler{}
     req := &NodeExecRequest{
-        Node:   &model.WorkflowNode{ID: "gate"},
-        Config: map[string]any{"expression": "1 == 2"}, // no onFalse
+        Node:      &model.WorkflowNode{ID: "gate"},
+        Execution: &model.WorkflowExecution{},
+        Config:    map[string]any{"expression": "1 == 2"}, // no onFalse
     }
     _, err := h.Execute(context.Background(), req)
     require.Error(t, err)
@@ -100,13 +126,13 @@ func TestConditionHandler_OnFalseErrorIsDefault(t *testing.T) {
 }
 ```
 
-- [ ] **Step 1.6: Run all three tests together — all should fail (1, 2) or pass (3)**
+- [ ] **Step 1.7: Run all three tests together**
 
 Run: `cd src-go && go test ./internal/workflow/nodetypes/ -run 'TestConditionHandler_OnFalse' -v`
 
 Expected: Two FAIL (skip_downstream, proceed), one PASS (error default).
 
-- [ ] **Step 1.7: Implement `onFalse` branch in `ConditionHandler.Execute`**
+- [ ] **Step 1.8: Implement `onFalse` branch in `ConditionHandler.Execute`**
 
 Replace the body after the expression evaluation in `condition.go`:
 
@@ -115,13 +141,18 @@ if !EvaluateCondition(ctx, exec, expression, dataStore, h.TaskRepo) {
     onFalse, _ := config["onFalse"].(string)
     switch onFalse {
     case "skip_downstream":
-        return &NodeExecResult{Output: map[string]any{"_route": "skip"}}, nil
+        raw, _ := json.Marshal(map[string]any{"_route": "skip"})
+        return &NodeExecResult{Result: raw}, nil
     case "proceed":
         return &NodeExecResult{}, nil
     case "", "error":
         return nil, fmt.Errorf("condition not met: %s", expression)
     default:
-        return nil, fmt.Errorf("condition node %s has invalid onFalse %q (want error|skip_downstream|proceed)", req.Node.ID, onFalse)
+        nodeID := ""
+        if req != nil && req.Node != nil {
+            nodeID = req.Node.ID
+        }
+        return nil, fmt.Errorf("condition node %s has invalid onFalse %q (want error|skip_downstream|proceed)", nodeID, onFalse)
     }
 }
 return &NodeExecResult{}, nil
@@ -139,19 +170,19 @@ return json.RawMessage(`{
 }`)
 ```
 
-- [ ] **Step 1.8: Run the three tests — all pass**
+- [ ] **Step 1.9: Run the three tests — all pass**
 
 Run: `cd src-go && go test ./internal/workflow/nodetypes/ -run 'TestConditionHandler_OnFalse' -v`
 
 Expected: three PASS.
 
-- [ ] **Step 1.9: Run the whole nodetypes package test to catch regressions**
+- [ ] **Step 1.10: Run the whole nodetypes package test to catch regressions**
 
 Run: `cd src-go && go test ./internal/workflow/nodetypes/ -v`
 
 Expected: all existing tests still pass.
 
-- [ ] **Step 1.10: Commit**
+- [ ] **Step 1.11: Commit**
 
 ```bash
 git add src-go/internal/workflow/nodetypes/condition.go src-go/internal/workflow/nodetypes/condition_test.go
@@ -235,6 +266,12 @@ git commit -m "test(workflow): scaffold structural test file for built-in templa
 **Files:**
 - Modify: `src-go/internal/service/workflow_templates.go` (`SystemCodeReviewTemplate`)
 - Modify: `src-go/internal/service/workflow_templates_test.go`
+
+- [ ] **Step 3.0: Verify `status_transition` canonical config key**
+
+Run: Read `src-go/internal/workflow/nodetypes/status_transition.go:19-34`.
+
+Confirm: `StatusTransitionHandler.Execute` reads `req.Config["targetStatus"].(string)`; keys `from`/`to`/`reason` in the current `SystemCodeReviewTemplate` are ignored by the handler, which errors out `status_transition node finalize missing targetStatus config` every run. This is the bug Task 3 fixes.
 
 - [ ] **Step 3.1: Write failing test that `finalize.config.targetStatus` references the decision output**
 
@@ -605,34 +642,41 @@ git commit -m "fix(workflow): Pipeline coder.inputs references planner.output.pl
 
 ---
 
-## Task 8: Fix `CodeFixer` — `has_prebaked` expression + validate function
+## Task 8a: Fix `CodeFixer` — config key `expr` → `expression` (both condition nodes) + `$event` reference
+
+**Background the implementer must read first.** `ConditionHandler.Execute` only reads `req.Config["expression"]` (see `condition.go:37`). Both CodeFixer condition nodes (`has_prebaked` and `decide`) today ship the key `"expr"` — so `ConditionHandler` reads empty string and the condition is a no-op, silently skipping its intended gate. This is a live bug in addition to the `input.suggested_patch` reference mismatch. Task 8a fixes both condition nodes' keys, and rewrites `has_prebaked` to reference `{{$event.suggested_patch}}`.
 
 **Files:**
 - Modify: `src-go/internal/workflow/system/code_fixer_dag.go` (the CodeFixer template lives here, not in `workflow_templates.go`)
-- Modify: `src-go/internal/service/workflow_templates_test.go` (reaches into the system package's definition)
+- Modify: `src-go/internal/service/workflow_templates_test.go` (imports the `system` package's definition)
 
-- [ ] **Step 8.1: Read the current template to confirm file location**
+- [ ] **Step 8a.1: Read the CodeFixer template to lock the current state**
 
-Run: Read `src-go/internal/workflow/system/code_fixer_dag.go` — confirm it exports `CodeFixerDefinition()`.
+Run: Read `src-go/internal/workflow/system/code_fixer_dag.go` in full. Note: `has_prebaked.config.expr = "input.suggested_patch != null && input.suggested_patch != ''"`; `decide.config.expr = "validate.output.dry_run_ok == true"`. Neither key is `expression`.
 
-- [ ] **Step 8.2: Verify whether the `function` node type has a registered handler**
-
-Run: Grep `src-go/internal/workflow/nodetypes/registry.go` for `NodeTypeFunction`.
-
-If the function type is unregistered, this task decomposes further: either (a) remove the `validate` function node and replace with a direct condition, or (b) register a minimal function handler. Prefer (a) for P1 to keep scope minimal.
-
-Capture the finding before writing the test.
-
-- [ ] **Step 8.3: Write failing test — `has_prebaked` references `$event`, not undefined `input`**
+- [ ] **Step 8a.2: Write failing tests — both condition nodes use the canonical `expression` key; `has_prebaked` references `$event`**
 
 ```go
-func TestCodeFixerTemplate_HasPrebakedReferencesEvent(t *testing.T) {
+func TestCodeFixerTemplate_HasPrebakedExpressionKey(t *testing.T) {
     def := system.CodeFixerDefinition()
     nodes := unmarshalNodes(t, def)
     gate := findNode(t, nodes, "has_prebaked")
     cfg := configOf(t, gate)
+    _, legacyKey := cfg["expr"]
+    require.False(t, legacyKey, `has_prebaked must use "expression", not the legacy "expr" key`)
     expr, _ := cfg["expression"].(string)
-    require.Equal(t, "{{$event.suggested_patch}} != null", expr)
+    require.Equal(t, `{{$event.suggested_patch}} != null && {{$event.suggested_patch}} != ""`, expr)
+}
+
+func TestCodeFixerTemplate_DecideExpressionKey(t *testing.T) {
+    def := system.CodeFixerDefinition()
+    nodes := unmarshalNodes(t, def)
+    decide := findNode(t, nodes, "decide")
+    cfg := configOf(t, decide)
+    _, legacyKey := cfg["expr"]
+    require.False(t, legacyKey, `decide must use "expression", not the legacy "expr" key`)
+    expr, _ := cfg["expression"].(string)
+    require.Equal(t, `{{validate.output.dry_run_ok}} == true`, expr)
 }
 ```
 
@@ -645,21 +689,63 @@ import (
 )
 ```
 
-- [ ] **Step 8.4: Run — expect fail**
+- [ ] **Step 8a.3: Run — expect both FAIL**
 
 Run: `cd src-go && go test ./internal/service/ -run TestCodeFixerTemplate_ -v`
 
-- [ ] **Step 8.5: Patch `code_fixer_dag.go` — replace `input.suggested_patch != null` with `{{$event.suggested_patch}} != null`**
+- [ ] **Step 8a.4: Patch `code_fixer_dag.go` — rename `expr` to `expression` on both condition nodes, rewrite `has_prebaked` to `$event` reference, and rewrite `decide` expression to template-resolved `{{validate.output.dry_run_ok}}`**
 
-Also document at the trigger node that the payload schema declares `suggested_patch` explicitly. If the `validate` function node has no handler (from Step 8.2), remove it and wire the edge direct from `generate` to `decide`; add a comment referring to P3's retry node as the future home for validate-retry semantics.
+```go
+{ID: "has_prebaked", Type: model.NodeTypeCondition, Label: "Has prebaked patch?",
+    Config: buildCfg(map[string]any{
+        "expression": `{{$event.suggested_patch}} != null && {{$event.suggested_patch}} != ""`,
+    })},
+...
+{ID: "decide", Type: model.NodeTypeCondition, Label: "Dry-run OK?",
+    Config: buildCfg(map[string]any{
+        "expression": `{{validate.output.dry_run_ok}} == true`,
+    })},
+```
 
-- [ ] **Step 8.6: Run — pass**
+- [ ] **Step 8a.5: Run both tests — pass**
 
-- [ ] **Step 8.7: Commit**
+Run: `cd src-go && go test ./internal/service/ -run TestCodeFixerTemplate_ -v`
+
+- [ ] **Step 8a.6: Grep sweep — confirm no `"expr"` remains in CodeFixer**
+
+Run: `cd src-go && grep -n '"expr"\s*:' internal/workflow/system/code_fixer_dag.go`
+
+Expected: zero matches. Any remaining match indicates a missed condition node.
+
+- [ ] **Step 8a.7: Commit**
 
 ```bash
 git add src-go/internal/workflow/system/code_fixer_dag.go src-go/internal/service/workflow_templates_test.go
-git commit -m "fix(workflow): CodeFixer has_prebaked references \$event.suggested_patch"
+git commit -m "fix(workflow): CodeFixer condition nodes use canonical expression key + \$event reference"
+```
+
+## Task 8b: Resolve `validate` function-node fate (descope to P3 or remove+rewire)
+
+**Status of `validate`.** The CodeFixer template ships a `validate` node of type `function` with a bogus "url" field. Edges e3, e5 target it; e6 routes its output to `decide`; `execute.body_template` references `{{validate.output.patch}}`; `decide.expression` references `{{validate.output.dry_run_ok}}`. The `function` node type's handler status is unclear — and resolving that correctly is not a P1 concern.
+
+**Decision:** Task 8b leaves `validate` untouched in P1. The P3 node matrix plan will decide whether to (a) register a proper `function` handler or (b) migrate the template to wrap an HTTP call in a `retry` node. Since Task 8a fixed the keys that the engine actually evaluates (the two `condition` nodes), and `validate` referenced-but-unimplemented is a pre-existing state that P1 does not make worse, this is a no-op task preserved here as an explicit handoff anchor.
+
+- [ ] **Step 8b.1: Add a code comment anchoring the deferral**
+
+At the top of `CodeFixerDefinition()` in `code_fixer_dag.go`, add:
+
+```go
+// TODO(workflow-engine-p3): the `validate` function node depends on the
+// function-node handler disposition (P3 plan). Downstream references
+// `{{validate.output.patch}}` and `{{validate.output.dry_run_ok}}` in
+// `execute` / `decide` will resolve correctly once P3 lands.
+```
+
+- [ ] **Step 8b.2: Commit**
+
+```bash
+git add src-go/internal/workflow/system/code_fixer_dag.go
+git commit -m "docs(workflow): anchor CodeFixer validate-node P3 handoff"
 ```
 
 ---
