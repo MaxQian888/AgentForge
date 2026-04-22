@@ -69,6 +69,3 @@ jobs:
         run: pnpm audit --audit-level=moderate
         continue-on-error: true
 
-      - name: Check for outdated dependencies
-        run: pnpm outdated
-        continue-on-error: true

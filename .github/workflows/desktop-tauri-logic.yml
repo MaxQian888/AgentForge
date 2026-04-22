@@ -26,7 +26,9 @@ jobs:
           cache-on-failure: true
 
       - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Stub sidecar binaries for Tauri build.rs validation
         shell: bash
@@ -43,9 +45,6 @@ jobs:
               fi
             done
           done
-
-      - name: Run src-tauri lib tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Enforce runtime logic coverage gate
         run: cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lib --ignore-filename-regex 'lib[.]rs$' --fail-under-lines 80 --fail-under-functions 80

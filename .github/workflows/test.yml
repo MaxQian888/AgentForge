@@ -3,11 +3,11 @@ name: Test Suite
 # ============================================================================
 # Test Suite & Build Verification
 # ============================================================================
-# Runs tests with coverage and builds the Next.js application.
-# This workflow works OUT-OF-THE-BOX without requiring any secrets.
+# Two parallel jobs:
+#   jest       — runs tests with coverage
+#   next-build — builds the Next.js application
 #
-# OPTIONAL: Codecov Integration (commented out by default)
-#   - CODECOV_TOKEN: Token from codecov.io
+# Splitting them reduces wall-clock time from (jest + build) to max(jest, build).
 # ============================================================================
 
 on:
@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test Suite
+  jest:
+    name: Jest Tests
     runs-on: ubuntu-latest
 
     permissions:
@@ -36,7 +36,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -48,15 +48,6 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: "pnpm"
-
-      - name: Cache Next.js build
-        uses: actions/cache@v5
-        with:
-          path: |
-            .next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -73,52 +64,13 @@ jobs:
           tail -n 10 coverage/lcov-report/index.html | grep -oP '(?<=<div class="pad1">).*?(?=</div>)' | head -1 || echo "Coverage report generated" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
-      # Optional: Upload coverage to Codecov (requires CODECOV_TOKEN secret)
-      # Uncomment the following steps to enable Codecov integration:
-      #
-      # - name: Upload coverage reports to Codecov
-      #   uses: codecov/codecov-action@v4
-      #   env:
-      #     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-      #   if: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/master') && env.CODECOV_TOKEN != '' }}
-      #   with:
-      #     token: ${{ env.CODECOV_TOKEN }}
-      #     files: ./coverage/lcov.info
-      #     flags: unittests
-      #     name: codecov-umbrella
-      #     fail_ci_if_error: false
-      #   continue-on-error: true
-      #
-      # - name: Code Coverage Report
-      #   uses: irongut/CodeCoverageSummary@v1.3.0
-      #   if: github.event_name == 'pull_request'
-      #   with:
-      #     filename: coverage/cobertura-coverage.xml
-      #     badge: true
-      #     fail_below_min: false
-      #     format: markdown
-      #     hide_branch_rate: false
-      #     hide_complexity: true
-      #     indicators: true
-      #     output: both
-      #     thresholds: '60 80'
-      #   continue-on-error: true
-      #
-      # - name: Add Coverage PR Comment
-      #   uses: marocchino/sticky-pull-request-comment@v2
-      #   if: github.event_name == 'pull_request'
-      #   with:
-      #     recreate: true
-      #     path: code-coverage-results.md
-      #   continue-on-error: true
-
       - name: Upload test results
         uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results
           path: coverage/junit.xml
-          retention-days: 30
+          retention-days: 7
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v7
@@ -126,7 +78,7 @@ jobs:
         with:
           name: coverage-report
           path: coverage/
-          retention-days: 30
+          retention-days: 7
 
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
@@ -137,6 +89,48 @@ jobs:
           check_name: Test Results
           comment_title: Test Results
         continue-on-error: true
+
+  next-build:
+    name: Next.js Build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    strategy:
+      matrix:
+        node-version: [22.x]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "pnpm"
+
+      - name: Cache Next.js build
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          # Exact key includes commit SHA so today's build is always saved.
+          # Restore-key falls back to the previous commit's cache so Next.js
+          # only recompiles changed files rather than rebuilding from scratch.
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('pnpm-lock.yaml') }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build Next.js application
         run: pnpm build
@@ -151,6 +145,7 @@ jobs:
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
+        if: github.ref == 'refs/heads/master'
         with:
           name: nextjs-build
           path: out/
