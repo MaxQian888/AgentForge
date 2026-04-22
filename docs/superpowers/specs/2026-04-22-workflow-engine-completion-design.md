@@ -143,7 +143,7 @@ Hard rules:
 
 ### 5.4 Idempotency and Cancel Cascade
 
-**Idempotency key.** Every `WorkflowExecution` carries an `idempotency_key` (caller-supplied or `hash(trigger_kind, payload)` as fallback). `DAGWorkflowService.Start` and `WorkflowExecutionService.StartTriggered*` both consult `(workflow_id, idempotency_key)`. On collision, return `{id, status}` of the existing run. Aligned with the existing trigger-engine idempotency (no double-writing).
+**Idempotency key.** Every `WorkflowExecution` carries a non-empty `idempotency_key`; §7.1 defines the full resolution order (caller → trigger hash → uuid). `DAGWorkflowService.Start` and `WorkflowExecutionService.StartTriggered*` both consult `(workflow_id, idempotency_key)`. On collision, return `{id, status}` of the existing run. Aligned with the existing trigger-engine idempotency (no double-writing).
 
 **Cancel cascade.** Cancelling a parent run enumerates its active children via `workflow_run_parent_link` + sub-invocation bookkeeping, then dispatches `EffectCancelChild` to each. Context honouring details are covered in §7.2 (surfaces to change) and §14 Risk 3 (single authoritative SLA). Three levels of nesting are required to pass CI.
 
@@ -423,9 +423,23 @@ The operator confirms the dry-run list before executing. In the internal-test en
 | Contract         | `NodeContract` field schema tests; `ValidateDefinition` negative cases (unknown node_id / templateVar / secret).                                                  |
 | Unit (handler)   | Every node type (existing 16 + new 5): golden path, error, ctx cancel, idempotent re-entry.                                                                       |
 | Integration (DAG)| Idempotency same-key returns existing run; cancel cascade 3 levels deep; wait_event duplicate delivery short-circuits; loop counter recovers after applier crash. |
-| Template E2E     | 7 templates × (golden / failure / retry exhausted / timeout) = 28 scenarios, run against real PG + Redis via testcontainers.                                      |
+| Template E2E     | Per-template scenarios (explicit list — not every template has retry or timeout surface): see §12.1.                                                              |
 | Secret           | LLM / HTTP / IM handlers — outbound requests carry clear value, logs and DataStore never do.                                                                      |
 | Regression       | Existing 20+ tests (including `workflow_legacy_dag_invocation_test.go`) stay green.                                                                                |
+
+### 12.1 Per-Template E2E Scenarios
+
+| Template           | Golden | Failure (business)       | Retry-exhausted         | Timeout fire         | Cancel cascade       |
+| ------------------ | ------ | ------------------------ | ----------------------- | -------------------- | -------------------- |
+| PlanCodeReview     | ✔      | coder LLM bad output     | n/a (no retry wrap)     | ✔ (30m outer)        | ✔ (split branch)     |
+| Pipeline           | ✔      | coder LLM bad output     | ✔ (coder retry=2)       | n/a                  | n/a                  |
+| Swarm              | ✔      | one branch fails         | n/a                     | ✔ (30m outer)        | ✔                    |
+| ContentCreation    | ✔      | editor never approves    | ✔ (editor retry)        | ✔ (seo timeout)      | n/a                  |
+| CustomerService    | ✔ urgent + ✔ normal | classify bad output | ✔ (auto_reply retry) | ✔ (urgent 24h)  | n/a                  |
+| SystemCodeReview   | ✔      | decision request_changes | ✔ (review retry=2 → escalate) | ✔ (15m review) | n/a              |
+| CodeFixer          | ✔ prebaked + ✔ generated | validate fails | ✔ (validate retry)      | ✔ (execute timeout)  | n/a                  |
+
+Total: 22 distinct E2E runs. Cell `n/a` means that template does not wrap the relevant behaviour, so the scenario does not exist — not a gap.
 
 ## 13. Definition of Done
 
@@ -438,10 +452,10 @@ The operator confirms the dry-run list before executing. In the internal-test en
 
 ## 14. Risks
 
-- **Breaking `edge.Condition` routing** may surprise any external consumer reading the field as routing. Mitigation: release note + grep audit before P4.
-- **`node_matrix_version=2` definition migration** might leave orphaned historical runs unreadable. Mitigation: view-only mode for v1 runs is preserved; the historical task+run repositories do not change.
-- **Cancel cascade 10 s SLA** may be too tight for some LLM runtimes. Mitigation: cancellation is best-effort; runs that cannot abort gracefully are force-terminated at 30 s with an alert event, and the SLA stays at 10 s as a target.
-- **Secret leakage via new effects.** Mitigation: all new effects (`EffectRetryInvoke`, `EffectTimeoutSchedule`, `EffectSpawnMapIterations`) carry `SecretRef` only — the payload-audit test asserts no raw secret values appear in any persisted effect row.
+- **Breaking `edge.Condition` routing** may surprise any external consumer reading the field as routing. Mitigation: release note + grep audit before P4; scheduler only stops routing-by-`edge.Condition` in P4 and only for `node_matrix_version=2` definitions — v1 runs continue using `edge.Condition` for their lifetime (the scheduler branches on version).
+- **`node_matrix_version=2` definition cutover** must not cascade-destroy history. Mitigation: v1 definition rows retained permanently with `status='deprecated'` (§9 v1 retention); no FK cascade fires; historical `workflow_executions`, `cost`, `memory`, `reviews` stay readable indefinitely.
+- **Cancel cascade timing.** Single authoritative SLA: 10 s is a best-effort target, 30 s is the hard force-terminate (§7.2). Tests assert the 30 s ceiling; dashboards track the 10 s target.
+- **Secret leakage via new effects.** Mitigation: `RetryInvokePayload`, `TimeoutSchedulePayload`, `SpawnMapIterationsPayload`, and `CancelChildPayload` (§7.9) carry `SecretRef` only; the materialised value never traverses persisted rows. The non-leakage E2E suite (§5.3 non-leakage surfaces) greps the `events`, `logs`, `workflow_node_executions`, and `workflow_executions.data_store` rows for known fixture secrets and asserts zero matches.
 
 ## 15. References
 
