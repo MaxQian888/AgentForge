@@ -99,7 +99,15 @@ function detectHostTriple({ cwd } = {}) {
   });
 }
 
-function resolveTargets({ currentOnly = false, hostTriple } = {}) {
+function resolveTargets({ currentOnly = false, hostTriple, explicitTarget } = {}) {
+  const resolvedExplicit = explicitTarget ?? process.env.TAURI_BUILD_TARGET;
+
+  if (resolvedExplicit) {
+    const target = ALL_TARGETS.find(({ triple }) => triple === resolvedExplicit);
+    if (target) return [target];
+    console.warn(`Unknown explicit target: ${resolvedExplicit} - falling through to default resolution`);
+  }
+
   if (!currentOnly) {
     return [...ALL_TARGETS];
   }
@@ -236,9 +244,11 @@ function buildTarget(target, { bridgeDir, binariesDir }) {
 
 function main(argv = process.argv.slice(2)) {
   const currentOnly = argv.includes("--current-only");
+  const targetIdx = argv.indexOf("--target");
+  const explicitTarget = targetIdx !== -1 ? argv[targetIdx + 1] : undefined;
   const directories = getDirectories();
   const hostTriple = detectHostTriple({ cwd: directories.repoRoot });
-  const targets = resolveTargets({ currentOnly, hostTriple });
+  const targets = resolveTargets({ currentOnly, hostTriple, explicitTarget });
   const ciMode =
     String(process.env.CI || "").toLowerCase() === "true" ||
     process.env.BRIDGE_BUILD_STRICT === "1";

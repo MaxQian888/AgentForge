@@ -105,15 +105,19 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+          cache: true
+          cache-dependency-path: src-bridge/bun.lock
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version-file: src-go/go.mod
           cache: true
           cache-dependency-path: src-go/go.sum
-
-      - name: Build Go sidecar
-        run: node scripts/build/build-backend.js --current-only
 
       - name: Validate updater signing inputs
         if: inputs.updater-enabled
@@ -137,6 +141,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ inputs.updater-pubkey }}
+          TAURI_BUILD_TARGET: ${{ matrix.target }}
         shell: bash
         run: |
           if [ "${{ inputs.updater-enabled }}" = "true" ]; then
