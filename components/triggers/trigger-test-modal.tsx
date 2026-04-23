@@ -5,7 +5,7 @@
  * event payload and renders the dry-run result. Never dispatches a real
  * workflow execution and never mutates the store.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,14 +54,17 @@ export function TriggerTestModal({ open, triggerId, initialSample, onClose }: Pr
   const [running, setRunning] = useState(false);
   const [tab, setTab] = useState<"sample" | "result">("sample");
 
-  useEffect(() => {
+  const [prevTestKey, setPrevTestKey] = useState<string | symbol>(Symbol("init"));
+  const testKey = `${open}:${initialSample ?? ""}`;
+  if (prevTestKey !== testKey) {
+    setPrevTestKey(testKey);
     if (open) {
       setSample(initialSample ?? FALLBACK_SAMPLE);
       setResult(null);
       setParseErr(null);
       setTab("sample");
     }
-  }, [open, initialSample]);
+  }
 
   const onRun = async () => {
     if (!triggerId) return;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useMemo } from "react";
+import React, { useRef } from "react";
 import { X, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {

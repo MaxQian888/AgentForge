@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   DragDropContext,
@@ -460,7 +460,7 @@ export function TaskListView({
       }
       return String(value);
     },
-    [valuesByTask],
+    [valuesByTask, t],
   );
   const customFieldOptions = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -1719,9 +1719,11 @@ export function TaskCalendarView(props: {
     new Date().toISOString();
   const [anchor, setAnchor] = useState(initialAnchor);
 
-  useEffect(() => {
+  const prevAnchorRef = useRef(initialAnchor);
+  if (prevAnchorRef.current !== initialAnchor) {
+    prevAnchorRef.current = initialAnchor;
     setAnchor(initialAnchor);
-  }, [initialAnchor]);
+  }
 
   const slotKeys = useMemo(
     () => calendarSlotKeys(anchor, mode),

@@ -308,28 +308,24 @@ export function TaskDetailContent({
     [milestonesByProject, task.projectId]
   );
 
-  useEffect(() => {
+  const syncKey = `${task.id}:${task.assigneeId}:${task.sprintId ?? ""}:${task.milestoneId ?? ""}:${task.blockedBy.length}`;
+  const [prevSyncKey, setPrevSyncKey] = useState<string | symbol>(Symbol("init"));
+  if (prevSyncKey !== syncKey) {
+    setPrevSyncKey(syncKey);
     setManualAssigneeId(task.assigneeId ?? recommendations[0]?.member.id ?? "");
-  }, [recommendations, task.assigneeId, task.id]);
-
-  useEffect(() => {
     setBlockedBy([...task.blockedBy]);
-  }, [task.blockedBy, task.id]);
-
-  useEffect(() => {
     setSprintId(task.sprintId ?? "");
-  }, [task.id, task.sprintId]);
-
-  useEffect(() => {
     setMilestoneId(task.milestoneId ?? "");
-  }, [task.id, task.milestoneId]);
+  }
 
-  useEffect(() => {
+  const [prevTaskIdForDecomp, setPrevTaskIdForDecomp] = useState<string | symbol>(Symbol("init"));
+  if (prevTaskIdForDecomp !== task.id) {
+    setPrevTaskIdForDecomp(task.id);
     setDecompositionSummary(null);
     setDecompositionError(null);
     setGeneratedSubtasks([]);
     setIsDecomposing(false);
-  }, [task.id]);
+  }
 
   useEffect(() => {
     void fetchCustomFieldDefinitions(task.projectId);

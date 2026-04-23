@@ -150,7 +150,7 @@ export function WorkflowTriggersSection({ workflowId, projectId }: WorkflowTrigg
 function renderActingEmployee(
   tItem: WorkflowTrigger,
   employeesByID: Map<string, Employee>,
-  t: ReturnType<typeof useTranslations>,
+  _t: ReturnType<typeof useTranslations>,
 ): ReactNode {
   if (!tItem.actingEmployeeId) {
     return <span className="text-muted-foreground">—</span>;

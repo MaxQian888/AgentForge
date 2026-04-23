@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Button } from "@/components/ui/button";
@@ -65,17 +65,22 @@ export function Board({
     displayOptions.hiddenBoardColumns ?? [],
   );
 
-  useEffect(() => {
+  const [prevColumnOrder, setPrevColumnOrder] = useState<typeof displayOptions.boardColumnOrder | symbol>(Symbol("init"));
+  if (prevColumnOrder !== displayOptions.boardColumnOrder) {
+    setPrevColumnOrder(displayOptions.boardColumnOrder);
     setColumnOrder(displayOptions.boardColumnOrder ?? DEFAULT_BOARD_COLUMN_ORDER);
-  }, [displayOptions.boardColumnOrder]);
+  }
 
-  useEffect(() => {
+  const [prevHidden, setPrevHidden] = useState<typeof displayOptions.hiddenBoardColumns | symbol>(Symbol("init"));
+  if (prevHidden !== displayOptions.hiddenBoardColumns) {
+    setPrevHidden(displayOptions.hiddenBoardColumns);
     setHiddenColumns(displayOptions.hiddenBoardColumns ?? []);
-  }, [displayOptions.hiddenBoardColumns]);
+  }
 
-  useEffect(() => {
+  const [prevTasks, setPrevTasks] = useState<typeof tasks | symbol>(Symbol("init"));
+  if (prevTasks !== tasks) {
+    setPrevTasks(tasks);
     const tasksById = new Map(tasks.map((task) => [task.id, task]));
-
     setPendingTaskIds((current) =>
       current.filter((taskId) => tasksById.has(taskId)),
     );
@@ -93,7 +98,7 @@ export function Board({
 
       return changed ? next : current;
     });
-  }, [tasks]);
+  }
 
   const visibleTasks = useMemo(
     () =>

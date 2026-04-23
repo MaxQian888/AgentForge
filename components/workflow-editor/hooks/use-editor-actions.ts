@@ -180,7 +180,7 @@ export function useEditorActions(props: UseEditorActionsProps) {
     anchor.click();
     document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
-  }, [buildExportPayload, state.name]);
+  }, [buildExportPayload, state.name, t]);
 
   /**
    * Replaces the current canvas with the contents of `payload`. Dispatches a
@@ -231,7 +231,7 @@ export function useEditorActions(props: UseEditorActionsProps) {
         return { ok: false, error: t("editor.importParseError") };
       }
     },
-    [applyImportPayload]
+    [applyImportPayload, t]
   );
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────

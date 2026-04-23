@@ -41,10 +41,6 @@ function AcceptInvitationInner() {
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    /* eslint-disable react-hooks/set-state-in-effect -- data-fetching effect resets loading/error before async call */
-    setLoading(true);
-    setError(null);
-    /* eslint-enable react-hooks/set-state-in-effect */
     fetchInvitationPreview(token)
       .then((data) => {
         if (!cancelled) setPreview(data);

@@ -108,8 +108,6 @@ export function TeamArtifactsPanel({ teamId }: TeamArtifactsPanelProps) {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
 
-    setLoading(true);
-    setError(null);
     try {
       const api = createApiClient(API_URL);
       const { data } = await api.get<TeamArtifact[]>(
@@ -124,9 +122,25 @@ export function TeamArtifactsPanel({ teamId }: TeamArtifactsPanelProps) {
     }
   }, [teamId, t]);
 
+  const [prevTeamId, setPrevTeamId] = useState<string | symbol>(Symbol("init"));
+  if (prevTeamId !== teamId) {
+    setPrevTeamId(teamId);
+    if (teamId) {
+      setLoading(true);
+      setArtifacts([]);
+      setError(null);
+    }
+  }
+
   useEffect(() => {
-    void fetchArtifacts();
-  }, [fetchArtifacts]);
+    if (!teamId) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- store-managed async fetch
+    void fetchArtifacts().then(() => {
+      if (cancelled) return;
+    });
+    return () => { cancelled = true; };
+  }, [teamId, fetchArtifacts]);
 
   const plannerArtifacts = artifacts.filter((a) => a.role === "planner");
   const coderArtifacts = artifacts.filter((a) => a.role === "coder");

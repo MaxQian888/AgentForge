@@ -223,12 +223,13 @@ function SprintsPageContent() {
     selectedSprintRefreshKey,
   ]);
 
-  useEffect(() => {
+  const [prevSprintSync, setPrevSprintSync] = useState<string | null | symbol>(Symbol("init"));
+  if (prevSprintSync !== selectedSprintId) {
+    setPrevSprintSync(selectedSprintId);
     if (selectedSprintId && !sprints.some((sprint) => sprint.id === selectedSprintId)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing derived selection state
       setSelectedSprintId(null);
     }
-  }, [selectedSprintId, sprints]);
+  }
 
   const resetForm = useCallback(() => {
     setFormName("");
@@ -245,12 +246,14 @@ function SprintsPageContent() {
     setCreateOpen(true);
   }, [resetForm]);
 
-  useEffect(() => {
+  const [prevActionKey, setPrevActionKey] = useState<string | symbol>(Symbol("init"));
+  const actionKey = `${requestedAction}:${projectId}`;
+  if (prevActionKey !== actionKey) {
+    setPrevActionKey(actionKey);
     if (requestedAction === "create-sprint" && projectId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- opening create dialog from deep link
       openCreate();
     }
-  }, [openCreate, projectId, requestedAction]);
+  }
 
   const openEdit = (sprint: Sprint) => {
     setFormError(null);

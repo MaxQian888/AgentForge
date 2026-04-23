@@ -412,22 +412,24 @@ export function TeamManagement({
     onClearBulkUpdateResult?.();
   }, [selectedProjectId, onClearBulkUpdateResult]);
 
-  useEffect(() => {
+  const [prevBulkResult, setPrevBulkResult] = useState<typeof bulkUpdateResult | symbol>(Symbol("init"));
+  if (prevBulkResult !== bulkUpdateResult) {
+    setPrevBulkResult(bulkUpdateResult);
     setLocalBulkUpdateResult(bulkUpdateResult);
-  }, [bulkUpdateResult]);
+  }
 
-  useEffect(() => {
-    if (!selectedProjectId || !initialFocus) {
-      return;
-    }
-
+  const focusKey = `${selectedProjectId}:${initialFocus}`;
+  const [prevFocusKey, setPrevFocusKey] = useState<string | symbol>(Symbol("init"));
+  if (prevFocusKey !== focusKey && selectedProjectId && initialFocus) {
+    setPrevFocusKey(focusKey);
     if (initialFocus === "add-member") {
       setShowCreateForm(true);
-      return;
+    } else {
+      setAttentionFilter(initialFocus);
     }
-
-    setAttentionFilter(initialFocus);
-  }, [initialFocus, selectedProjectId]);
+  } else if (prevFocusKey !== focusKey) {
+    setPrevFocusKey(focusKey);
+  }
 
   const filteredMembers = useMemo(() => {
     return governedMembers.filter((member) => {

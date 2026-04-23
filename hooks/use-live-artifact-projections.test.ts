@@ -390,7 +390,6 @@ describe("useLiveArtifactProjections", () => {
       live_kind: "agent_run",
       target_ref: { kind: "agent_run", id: "run-b1" },
       view_opts: {},
-      last_rendered_at: "",
     });
 
     await waitFor(() =>
@@ -425,7 +424,6 @@ describe("useLiveArtifactProjections", () => {
       live_kind: "agent_run",
       target_ref: { kind: "agent_run", id: "run-b1" },
       view_opts: {},
-      last_rendered_at: "",
     });
 
     await waitFor(() =>
@@ -457,7 +455,6 @@ describe("useLiveArtifactProjections", () => {
       live_kind: "agent_run",
       target_ref: { kind: "agent_run", id: "run-b1" },
       view_opts: {},
-      last_rendered_at: "",
     });
 
     await waitFor(() =>

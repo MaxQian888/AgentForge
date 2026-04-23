@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Puzzle } from "lucide-react";
 import {
@@ -130,18 +130,16 @@ export default function PluginsPage() {
     void fetchBridgeStatus();
   }, [fetchPlugins, discoverBuiltins, fetchMarketplace, fetchRemoteMarketplace, fetchBridgeStatus]);
 
-  const loadDesktopState = useEffectEvent(async () => {
+  useEffect(() => {
     if (!isDesktop) return;
-    const [runtimeStatus, summary] = await Promise.all([
+    Promise.all([
       getDesktopRuntimeStatus(),
       getPluginRuntimeSummary(),
-    ]);
-    setDesktopRuntime(runtimeStatus);
-    setPluginRuntimeSummary(summary);
-  });
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- useEffectEvent wrapper reads latest props without subscribing
-  useEffect(() => { void loadDesktopState(); }, []);
+    ]).then(([runtimeStatus, summary]) => {
+      setDesktopRuntime(runtimeStatus);
+      setPluginRuntimeSummary(summary);
+    });
+  }, [isDesktop, getDesktopRuntimeStatus, getPluginRuntimeSummary]);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -151,7 +149,14 @@ export default function PluginsPage() {
       if (event.runtime) setDesktopRuntime(event.runtime);
       setLastDesktopEvent(event.type);
       if (event.type === "runtime.updated" || event.type === "runtime.terminated") {
-        void loadDesktopState();
+        void Promise.all([
+          getDesktopRuntimeStatus(),
+          getPluginRuntimeSummary(),
+        ]).then(([rs, sm]) => {
+          if (disposed) return;
+          setDesktopRuntime(rs);
+          setPluginRuntimeSummary(sm);
+        });
         return;
       }
       if (event.type === "plugin.lifecycle") {
@@ -168,7 +173,7 @@ export default function PluginsPage() {
     });
     let cleanupRef = () => {};
     return () => { disposed = true; cleanupRef(); };
-  }, [fetchPlugins, isDesktop, subscribeDesktopEvents]);
+  }, [fetchPlugins, getDesktopRuntimeStatus, getPluginRuntimeSummary, isDesktop, subscribeDesktopEvents]);
 
   /* ── Desktop handlers ── */
   const handleDesktopNotification = useCallback(async () => {

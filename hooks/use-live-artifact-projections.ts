@@ -538,7 +538,7 @@ export function useLiveArtifactProjections(
         return null;
       }
     },
-    [],
+    [t],
   );
 
   // BlockNote's `editor.removeBlocks` is invoked from the chrome dropdown

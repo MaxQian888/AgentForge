@@ -358,18 +358,60 @@ export function WorkflowExecutionView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchExecution = useCallback(async () => {
+  const [prevExecId, setPrevExecId] = useState<string | symbol>(Symbol("init"));
+  if (prevExecId !== executionId) {
+    setPrevExecId(executionId);
+    setLoading(true);
+    setError(null);
+  }
+
+  useEffect(() => {
+    if (!executionId) return;
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
 
+    let cancelled = false;
+    const api = createApiClient(API_URL);
+    api.get<
+      ExecutionDetailResponse | (WorkflowExecution & { nodeExecutions?: WorkflowNodeExecution[] })
+    >(`/api/v1/executions/${executionId}`, { token })
+      .then(({ data }) => {
+        if (cancelled) return;
+        const wrapped = (data as ExecutionDetailResponse).execution !== undefined
+          ? (data as ExecutionDetailResponse)
+          : null;
+        if (wrapped) {
+          setExecution(wrapped.execution);
+          setNodeExecs(wrapped.nodeExecutions ?? []);
+          setSubInvocations(wrapped.subInvocations ?? []);
+          setInvokedByParent(wrapped.invokedByParent ?? null);
+        } else {
+          const legacy = data as WorkflowExecution & { nodeExecutions?: WorkflowNodeExecution[] };
+          setExecution(legacy);
+          setNodeExecs(legacy.nodeExecutions ?? []);
+          setSubInvocations([]);
+          setInvokedByParent(null);
+        }
+        setError(null);
+      })
+      .catch(() => {
+        if (!cancelled) setError(t("execution.unableToLoad"));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [executionId, t]);
+
+  const fetchForPoll = useCallback(async () => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
     try {
       const api = createApiClient(API_URL);
       const { data } = await api.get<
         ExecutionDetailResponse | (WorkflowExecution & { nodeExecutions?: WorkflowNodeExecution[] })
       >(`/api/v1/executions/${executionId}`, { token });
-      // The backend returns a wrapped envelope (execution + nodeExecutions +
-      // subInvocations + invokedByParent). Legacy deployments may still return
-      // the flat WorkflowExecution shape, so we handle both.
       const wrapped = (data as ExecutionDetailResponse).execution !== undefined
         ? (data as ExecutionDetailResponse)
         : null;
@@ -385,24 +427,17 @@ export function WorkflowExecutionView({
         setSubInvocations([]);
         setInvokedByParent(null);
       }
-      setError(null);
-    } catch {
-      setError(t("execution.unableToLoad"));
-    } finally {
-      setLoading(false);
-    }
-  }, [executionId, t]);
+    } catch { /* poll errors silently */ }
+  }, [executionId]);
 
   useEffect(() => {
-    void fetchExecution();
-    // Poll while running
     const interval = setInterval(() => {
       if (execution?.status === "running" || execution?.status === "pending") {
-        void fetchExecution();
+        void fetchForPoll();
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [fetchExecution, execution?.status]);
+  }, [fetchForPoll, execution?.status]);
 
   const handleCancel = useCallback(async () => {
     const token = useAuthStore.getState().accessToken;
@@ -410,11 +445,11 @@ export function WorkflowExecutionView({
     try {
       const api = createApiClient(API_URL);
       await api.post(`/api/v1/executions/${executionId}/cancel`, {}, { token });
-      void fetchExecution();
+      void fetchForPoll();
     } catch {
       // ignore
     }
-  }, [executionId, fetchExecution]);
+  }, [executionId, fetchForPoll]);
 
   if (engine !== "dag") {
     return null;
@@ -562,7 +597,7 @@ export function WorkflowExecutionView({
                   nodeExec={nodeExecMap.get(node.id)}
                   isActive={activeNodes.has(node.id)}
                   executionId={execution.id}
-                  onRefresh={fetchExecution}
+                  onRefresh={fetchForPoll}
                 />
               ))}
             </div>

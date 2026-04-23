@@ -89,50 +89,56 @@ export function SpawnAgentDialog({
     void fetchRoles();
   }, [fetchBridgeHealth, fetchRoles, fetchRuntimeCatalog, open]);
 
-  useEffect(() => {
-    if (!runtimeCatalog) {
-      return;
-    }
+  const [prevCatalog, setPrevCatalog] = useState<typeof runtimeCatalog | symbol>(Symbol("init"));
+  if (prevCatalog !== runtimeCatalog && runtimeCatalog) {
+    setPrevCatalog(runtimeCatalog);
     setSelection(runtimeCatalog.defaultSelection);
-  }, [runtimeCatalog]);
+  }
 
-  useEffect(() => {
-    if (!open || taskId) {
-      return;
-    }
-
+  const taskKey = `${open}:${taskId}:${defaultTaskId}:${taskOptions?.length}`;
+  const [prevTaskKey, setPrevTaskKey] = useState<string | symbol>(Symbol("init"));
+  if (prevTaskKey !== taskKey && open && !taskId) {
+    setPrevTaskKey(taskKey);
     const nextTaskId =
       (defaultTaskId &&
       taskOptions?.some((option) => option.id === defaultTaskId)
         ? defaultTaskId
         : taskOptions?.[0]?.id) ?? "";
-
     setSelectedTaskId(nextTaskId);
-  }, [defaultTaskId, open, taskId, taskOptions]);
+  } else if (prevTaskKey !== taskKey) {
+    setPrevTaskKey(taskKey);
+  }
 
-  useEffect(() => {
-    if (!open || memberId) {
-      return;
-    }
-
+  const memberKey = `${open}:${memberId}:${defaultMemberId}:${memberOptions?.length}`;
+  const [prevMemberKey, setPrevMemberKey] = useState<string | symbol>(Symbol("init"));
+  if (prevMemberKey !== memberKey && open && !memberId) {
+    setPrevMemberKey(memberKey);
     const nextMemberId =
       (defaultMemberId &&
       memberOptions?.some((option) => option.id === defaultMemberId)
         ? defaultMemberId
         : memberOptions?.[0]?.id) ?? "";
-
     setSelectedMemberId(nextMemberId);
-  }, [defaultMemberId, memberId, memberOptions, open]);
+  } else if (prevMemberKey !== memberKey) {
+    setPrevMemberKey(memberKey);
+  }
+
+  const preflightKey = `${open}:${currentProjectId}`;
+  const [prevPreflightKey, setPrevPreflightKey] = useState<string | symbol>(Symbol("init"));
+  if (prevPreflightKey !== preflightKey) {
+    setPrevPreflightKey(preflightKey);
+    if (!open || !currentProjectId) {
+      setPreflight(null);
+    }
+  }
 
   useEffect(() => {
     if (!open || !currentProjectId) {
-      setPreflight(null);
       return;
     }
     const tid = taskId ?? selectedTaskId;
     const mid = memberId ?? selectedMemberId;
     if (!tid || !mid) {
-      setPreflight(null);
       return;
     }
     const budgetUsd = parseFloat(budget);

@@ -13,8 +13,6 @@ import type {
   RoleSkillResolution,
 } from "@/lib/roles/role-management";
 import {
-  ROLE_WORKSPACE_GUIDANCE,
-  ROLE_WORKSPACE_SECTIONS,
   type RoleWorkspaceSectionId,
 } from "./role-workspace-sections";
 

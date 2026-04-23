@@ -273,34 +273,34 @@ function EmployeeDrawer({ open, onOpenChange, editing, onSave }: EmployeeDrawerP
   const [config, setConfig] = useState<string>("{}");
   const [skillsText, setSkillsText] = useState<string>("");
 
-  useEffect(() => {
-    // Reset form when the drawer opens or the edited record changes. React
-    // batches the updates below into a single render; the cascading-render
-    // lint warning is a false positive in this setState-reset pattern.
-    if (!open) return;
-    if (editing) {
+  const [prevDrawerKey, setPrevDrawerKey] = useState<string | symbol>(Symbol("init"));
+  const currentDrawerKey = `${open}:${editing?.id}`;
+  if (prevDrawerKey !== currentDrawerKey) {
+    setPrevDrawerKey(currentDrawerKey);
+    if (!open) {
+      // drawer closed, nothing to do
+    } else if (editing) {
       setName(editing.name);
       setDisplayName(editing.displayName ?? "");
       setRoleId(editing.roleId);
       setRuntimePrefs(JSON.stringify(editing.runtimePrefs ?? {}, null, 2));
       setConfig(JSON.stringify(editing.config ?? {}, null, 2));
       setSkillsText((editing.skills ?? []).map((s) => s.skillPath).join("\n"));
-      return;
+    } else {
+      setName("");
+      setDisplayName("");
+      setRoleId("code-reviewer");
+      setRuntimePrefs(
+        JSON.stringify(
+          { runtime: "claude_code", provider: "anthropic", model: "claude-opus-4-7", budgetUsd: 5 },
+          null,
+          2,
+        ),
+      );
+      setConfig("{}");
+      setSkillsText("");
     }
-    setName("");
-    setDisplayName("");
-    setRoleId("code-reviewer");
-    setRuntimePrefs(
-      JSON.stringify(
-        { runtime: "claude_code", provider: "anthropic", model: "claude-opus-4-7", budgetUsd: 5 },
-        null,
-        2,
-      ),
-    );
-    setConfig("{}");
-    setSkillsText("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing?.id, open]);
+  }
 
   const handleSave = async () => {
     let parsedPrefs: Record<string, unknown> = {};

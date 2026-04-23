@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,12 +80,12 @@ export function StartTeamDialog({
   const runtimeDiagnostics = selectedRuntime?.diagnostics ?? [];
   const hasBlockingDiagnostics = runtimeDiagnostics.some((item) => item.blocking);
 
-  useEffect(() => {
-    if (!catalog) {
-      return;
-    }
+  const catalogKey = `${catalog ? "y" : "n"}:${JSON.stringify(defaultSelection)}`;
+  const [prevCatalogKey, setPrevCatalogKey] = useState<string | symbol>(Symbol("init"));
+  if (prevCatalogKey !== catalogKey && catalog) {
+    setPrevCatalogKey(catalogKey);
     setSelection(defaultSelection);
-  }, [catalog, defaultSelection]);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

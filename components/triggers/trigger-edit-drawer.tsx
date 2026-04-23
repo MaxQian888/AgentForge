@@ -7,7 +7,7 @@
  * container) because the branch per source (`im` vs `schedule`) is the
  * only user decision; everything else is a straight-line form.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,15 +93,19 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
   const [jsonErr, setJsonErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    if (trigger) {
-      setForm(hydrateForm(trigger));
-    } else {
-      setForm(defaultForm);
+  const [prevFormKey, setPrevFormKey] = useState<string | symbol>(Symbol("init"));
+  const formKey = `${open}:${trigger?.id ?? "new"}`;
+  if (prevFormKey !== formKey) {
+    setPrevFormKey(formKey);
+    if (open) {
+      if (trigger) {
+        setForm(hydrateForm(trigger));
+      } else {
+        setForm(defaultForm);
+      }
+      setJsonErr(null);
     }
-    setJsonErr(null);
-  }, [open, trigger]);
+  }
 
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((s) => ({ ...s, [k]: v }));

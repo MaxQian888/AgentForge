@@ -181,23 +181,27 @@ export function AgentWorkspace({
     ? dispatchHistoryByTask[visualizationFocusTaskId] ?? []
     : [];
 
-  useEffect(() => {
+  const [prevIsDesktop, setPrevIsDesktop] = useState<boolean | symbol>(Symbol("init"));
+  if (prevIsDesktop !== isDesktop) {
+    setPrevIsDesktop(isDesktop);
     setSidebarOpen(isDesktop);
-  }, [isDesktop]);
+  }
+
+  const [prevFocusId, setPrevFocusId] = useState<string | null | symbol>(Symbol("init"));
+  if (prevFocusId !== visualizationFocusTaskId) {
+    setPrevFocusId(visualizationFocusTaskId);
+    if (!visualizationFocusTaskId || dispatchHistoryByTask[visualizationFocusTaskId] !== undefined) {
+      setVisualizationHistoryTaskId(null);
+    } else {
+      setVisualizationHistoryTaskId(visualizationFocusTaskId);
+    }
+  }
 
   useEffect(() => {
-    if (!visualizationFocusTaskId) {
-      setVisualizationHistoryTaskId(null);
-      return;
-    }
-
-    if (dispatchHistoryByTask[visualizationFocusTaskId] !== undefined) {
-      setVisualizationHistoryTaskId(null);
-      return;
-    }
+    if (!visualizationFocusTaskId) return;
+    if (dispatchHistoryByTask[visualizationFocusTaskId] !== undefined) return;
 
     let cancelled = false;
-    setVisualizationHistoryTaskId(visualizationFocusTaskId);
     void fetchDispatchHistory(visualizationFocusTaskId).finally(() => {
       if (!cancelled) {
         setVisualizationHistoryTaskId((current) =>

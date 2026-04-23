@@ -69,7 +69,7 @@ export function PublicFormPageClient({ slug }: { slug: string }) {
     return () => {
       active = false;
     };
-  }, [fetchFormBySlug, hasHydrated, router, slug, status]);
+  }, [fetchFormBySlug, hasHydrated, router, slug, status, t]);
 
   if (
     !hasHydrated ||
