@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, PackageSearch, Plus, Store } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useMarketplaceStore, resolveMarketplaceConsumptionRecord, typeDisplayLabel } from "@/lib/stores/marketplace-store";
 import { MarketplaceFilterPanel } from "@/components/marketplace/marketplace-filter-panel";
@@ -17,6 +18,7 @@ import { usePlatformCapability } from "@/hooks/use-platform-capability";
 import { toast } from "sonner";
 
 export default function MarketplacePage() {
+  const t = useTranslations("marketplace");
   const {
     items,
     builtInItems,
@@ -93,29 +95,29 @@ export default function MarketplacePage() {
       const result = await selectFiles({
         directory: true,
         multiple: false,
-        title: "Select a local plugin directory",
+        title: t("selectFilesTitle"),
       });
 
       if (result.ok && result.mode === "desktop" && result.paths[0]) {
         try {
           await installLocalPlugin(result.paths[0]);
-          toast.success("Local plugin installed. Open the plugin console to continue managing it.");
+          toast.success(t("sideLoadSuccess"));
         } catch (error) {
-          toast.error(error instanceof Error ? error.message : "Failed to side-load local plugin");
+          toast.error(error instanceof Error ? error.message : t("sideLoadFailed"));
         }
         return;
       }
 
       if (result.ok && result.mode !== "desktop") {
-        toast.info("Desktop file selection is unavailable in the current host. Enter the local path from the plugin console instead.");
+        toast.info(t("sideLoadUnavailable"));
         return;
       }
 
       if (!isDesktop) {
-        toast.info("Local side-load in the marketplace workspace currently requires the desktop host.");
+        toast.info(t("sideLoadDesktopOnly"));
       }
     },
-    [installLocalPlugin, isDesktop, selectFiles],
+    [installLocalPlugin, isDesktop, selectFiles, t],
   );
 
   const handleTagClick = useCallback(
@@ -132,13 +134,13 @@ export default function MarketplacePage() {
     async (item: { id: string; type: string }) => {
       try {
         await uninstallItem(item.id, item.type);
-        toast.success(`${typeDisplayLabel(item.type)} uninstalled successfully.`);
+        toast.success(t("uninstallSuccess", { type: typeDisplayLabel(item.type) }));
         selectItem(null);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Uninstall failed");
+        toast.error(error instanceof Error ? error.message : t("uninstallFailed"));
       }
     },
-    [uninstallItem, selectItem],
+    [uninstallItem, selectItem, t],
   );
 
   const updatesByItemId = useMemo(() => {
@@ -195,9 +197,9 @@ export default function MarketplacePage() {
           <div className="flex min-w-0 items-center gap-2">
             <Store className="size-5 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
-              <h1 className="text-sm font-semibold">Marketplace</h1>
+              <h1 className="text-sm font-semibold">{t("pageTitle")}</h1>
               <p className="text-xs text-muted-foreground">
-                Publish, moderate, install, and hand off marketplace assets into their downstream workspaces.
+                {t("pageDescription")}
               </p>
             </div>
           </div>
@@ -210,7 +212,7 @@ export default function MarketplacePage() {
           </div>
           <Button size="sm" onClick={() => setPublishDialogOpen(true)}>
             <Plus className="mr-1 size-4" />
-            Publish
+            {t("publish.submitLabel")}
           </Button>
         </div>
 
@@ -218,9 +220,9 @@ export default function MarketplacePage() {
           {serviceStatus === "unavailable" && filteredBuiltInItems.length === 0 && !builtInLoading ? (
             <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center">
               <AlertTriangle className="size-5 text-amber-500" />
-              <p className="text-sm font-medium">Marketplace service unavailable</p>
+              <p className="text-sm font-medium">{t("serviceUnavailable")}</p>
               <p className="max-w-md text-xs text-muted-foreground">
-                {serviceMessage ?? "The configured marketplace service could not be reached."}
+                {serviceMessage ?? t("serviceUnavailableDesc")}
               </p>
             </div>
           ) : (
@@ -229,10 +231,10 @@ export default function MarketplacePage() {
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-left">
                   <div className="flex items-center gap-2 text-sm font-medium text-amber-900">
                     <AlertTriangle className="size-4" />
-                    Remote marketplace unavailable
+                    {t("remoteUnavailable")}
                   </div>
                   <p className="mt-1 text-xs text-amber-800">
-                    {serviceMessage ?? "The standalone marketplace service could not be reached."}
+                    {serviceMessage ?? t("remoteUnavailableDesc")}
                   </p>
                 </div>
               ) : null}
@@ -252,7 +254,7 @@ export default function MarketplacePage() {
               ) : filteredBuiltInItems.length > 0 ? (
                 <div>
                   <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {filters.type !== "all" ? `Built-in ${filters.type === "workflow_template" ? "workflows" : `${filters.type}s`}` : "Built-in items"}
+                    {filters.type !== "all" ? (filters.type === "workflow_template" ? t("builtInTypeWorkflows") : t("builtInItems")) : t("builtInItems")}
                   </h2>
                   <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
                     {filteredBuiltInItems.map((item) => (
@@ -274,7 +276,7 @@ export default function MarketplacePage() {
               {featuredWithoutSelectionNoise.length > 0 && !searchQuery ? (
                 <div>
                   <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Featured
+                    {t("featured")}
                   </h2>
                   <div className="flex gap-3 overflow-x-auto pb-1">
                     {featuredWithoutSelectionNoise.slice(0, 5).map((item) => (
@@ -296,7 +298,7 @@ export default function MarketplacePage() {
 
               {serviceStatus === "unavailable" ? (
                 <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                  Remote marketplace items are temporarily unavailable.
+                  {t("remoteUnavailableDesc")}
                 </div>
               ) : loading ? (
                 <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
@@ -307,9 +309,9 @@ export default function MarketplacePage() {
               ) : items.length === 0 ? (
                 <EmptyState
                   icon={PackageSearch}
-                  title="No items found"
-                  description="Adjust the filters or publish a new item to get started."
-                  action={{ label: "Publish", onClick: () => setPublishDialogOpen(true) }}
+                  title={t("noItems")}
+                  description={t("noItemsDesc")}
+                  action={{ label: t("publish.submitLabel"), onClick: () => setPublishDialogOpen(true) }}
                 />
               ) : (
                 <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
@@ -336,7 +338,7 @@ export default function MarketplacePage() {
                     disabled={filters.page <= 1}
                     onClick={() => setFilters({ page: filters.page - 1 })}
                   >
-                    ← Prev
+                    ← {t("prev")}
                   </Button>
                   <span className="text-xs text-muted-foreground">
                     {filters.page} / {totalPages}
@@ -347,7 +349,7 @@ export default function MarketplacePage() {
                     disabled={filters.page >= totalPages}
                     onClick={() => setFilters({ page: filters.page + 1 })}
                   >
-                    Next →
+                    {t("next")} →
                   </Button>
                 </div>
               ) : null}

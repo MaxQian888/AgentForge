@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +26,7 @@ import type { WorkflowTrigger } from "@/lib/stores/workflow-trigger-store";
 export default function EmployeeTriggersPage() {
   const params = useParams<{ id: string }>();
   const employeeId = params?.id ?? "";
+  const t = useTranslations("employees");
   const triggers = useEmployeeTriggerStore(
     (s) => s.triggersByEmployee[employeeId] ?? [],
   );
@@ -46,28 +48,27 @@ export default function EmployeeTriggersPage() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>触发器 (Triggers)</CardTitle>
+          <CardTitle>{t("triggerTitle")}</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            管理派发到该员工的 IM 命令 / 定时任务触发器。FE-authored triggers
-            (createdVia=manual) 可任意编辑或删除；DAG 节点产出的触发器为只读。
+            {t("triggerDescription")}
           </p>
         </div>
         <Button
           onClick={() => setEditing({ open: true, trigger: null })}
           disabled={!employeeId}
         >
-          <Plus className="h-4 w-4 mr-1" /> 新建触发器
+          <Plus className="h-4 w-4 mr-1" /> {t("createTrigger")}
         </Button>
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">加载中…</p>
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
         ) : (
           <TriggerListTable
             employeeId={employeeId}
             triggers={triggers}
-            onEdit={(t) => setEditing({ open: true, trigger: t })}
-            onTest={(t) => setTesting({ open: true, trigger: t })}
+            onEdit={(tr) => setEditing({ open: true, trigger: tr })}
+            onTest={(tr) => setTesting({ open: true, trigger: tr })}
           />
         )}
       </CardContent>

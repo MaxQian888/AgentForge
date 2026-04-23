@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -36,9 +37,8 @@ interface Props {
   onChange: (c: Record<string, unknown>) => void;
 }
 
-const DATASTORE_HELP = "Templating: {{$dataStore.<nodeId>.<field>}} resolves at execution time.";
-
 export function IMSendConfig({ config, onChange }: Props) {
+  const t = useTranslations("workflow");
   const target = (config.target as Target | undefined) ?? "reply_to_trigger";
   const explicit = (config.explicit_target as Record<string, string> | undefined) ?? {};
   const card = useMemo<CardConfig>(() => (config.card as CardConfig | undefined) ?? {}, [config.card]);
@@ -59,12 +59,12 @@ export function IMSendConfig({ config, onChange }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Target</Label>
+        <Label className="text-xs">{t("nodeConfig.imSend.target")}</Label>
         <Select value={target} onValueChange={(v) => update({ target: v })}>
-          <SelectTrigger aria-label="Target"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label={t("nodeConfig.imSend.target")}><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="reply_to_trigger">Reply to triggering message</SelectItem>
-            <SelectItem value="explicit">Explicit chat / thread</SelectItem>
+            <SelectItem value="reply_to_trigger">{t("nodeConfig.imSend.replyToTrigger")}</SelectItem>
+            <SelectItem value="explicit">{t("nodeConfig.imSend.explicitChat")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -72,17 +72,17 @@ export function IMSendConfig({ config, onChange }: Props) {
       {target === "explicit" && (
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Provider</Label>
+            <Label className="text-xs">{t("nodeConfig.imSend.provider")}</Label>
             <Input value={explicit.provider ?? ""}
-              onChange={(e) => updateExplicit({ provider: e.target.value })} placeholder="feishu" />
+              onChange={(e) => updateExplicit({ provider: e.target.value })} placeholder={t("nodeConfig.imSend.providerPlaceholder")} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Chat ID</Label>
+            <Label className="text-xs">{t("nodeConfig.imSend.chatId")}</Label>
             <Input value={explicit.chat_id ?? ""}
-              onChange={(e) => updateExplicit({ chat_id: e.target.value })} placeholder="oc_xxx" />
+              onChange={(e) => updateExplicit({ chat_id: e.target.value })} placeholder={t("nodeConfig.imSend.chatIdPlaceholder")} />
           </div>
           <div className="flex flex-col gap-1.5 col-span-2">
-            <Label className="text-xs">Thread ID (optional)</Label>
+            <Label className="text-xs">{t("nodeConfig.imSend.threadId")}</Label>
             <Input value={explicit.thread_id ?? ""}
               onChange={(e) => updateExplicit({ thread_id: e.target.value })} />
           </div>
@@ -90,13 +90,13 @@ export function IMSendConfig({ config, onChange }: Props) {
       )}
 
       <div className="border-t pt-3 flex flex-col gap-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Card</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("nodeConfig.imSend.card")}</p>
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Title</Label>
+          <Label className="text-xs">{t("nodeConfig.imSend.title")}</Label>
           <Input value={card.title ?? ""} onChange={(e) => updateCard({ title: e.target.value })} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Status</Label>
+          <Label className="text-xs">{t("nodeConfig.imSend.status")}</Label>
           <Select value={card.status ?? "info"}
             onValueChange={(v) => updateCard({ status: v as CardConfig["status"] })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -108,23 +108,23 @@ export function IMSendConfig({ config, onChange }: Props) {
           </Select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Summary</Label>
+          <Label className="text-xs">{t("nodeConfig.imSend.summary")}</Label>
           <Textarea rows={3} value={card.summary ?? ""}
             onChange={(e) => updateCard({ summary: e.target.value })} />
-          <p className="text-[11px] text-muted-foreground">{DATASTORE_HELP}</p>
+          <p className="text-[11px] text-muted-foreground">{t("nodeConfig.imSend.datastoreHelp")}</p>
         </div>
 
         {/* Fields editor */}
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Fields</Label>
+          <Label className="text-xs">{t("nodeConfig.imSend.fields")}</Label>
           {fields.map((f, i) => (
             <div key={i} className="flex gap-1.5">
-              <Input className="flex-1" value={f.label} placeholder="Label"
+              <Input className="flex-1" value={f.label} placeholder={t("nodeConfig.imSend.fieldLabelPlaceholder")}
                 onChange={(e) => {
                   const next = fields.slice(); next[i] = { ...f, label: e.target.value };
                   updateCard({ fields: next });
                 }} />
-              <Input className="flex-1" value={f.value} placeholder="Value"
+              <Input className="flex-1" value={f.value} placeholder={t("nodeConfig.imSend.fieldValuePlaceholder")}
                 onChange={(e) => {
                   const next = fields.slice(); next[i] = { ...f, value: e.target.value };
                   updateCard({ fields: next });
@@ -137,22 +137,22 @@ export function IMSendConfig({ config, onChange }: Props) {
           ))}
           <Button variant="ghost" size="sm" className="self-start"
             onClick={() => updateCard({ fields: [...fields, { label: "", value: "" }] })}>
-            <Plus className="mr-1 h-3.5 w-3.5" /> Add field
+            <Plus className="mr-1 h-3.5 w-3.5" /> {t("nodeConfig.imSend.addField")}
           </Button>
         </div>
 
         {/* Actions editor */}
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Actions (buttons)</Label>
+          <Label className="text-xs">{t("nodeConfig.imSend.actions")}</Label>
           {actions.map((a, i) => (
             <div key={i} className="border rounded p-2 flex flex-col gap-1.5">
               <div className="flex gap-1.5">
-                <Input className="flex-1" placeholder="Action id (e.g. approve)" value={a.id}
+                <Input className="flex-1" placeholder={t("nodeConfig.imSend.actionIdPlaceholder")} value={a.id}
                   onChange={(e) => {
                     const next = actions.slice(); next[i] = { ...a, id: e.target.value };
                     updateCard({ actions: next });
                   }} />
-                <Input className="flex-1" placeholder="Label" value={a.label}
+                <Input className="flex-1" placeholder={t("nodeConfig.imSend.actionLabelPlaceholder")} value={a.label}
                   onChange={(e) => {
                     const next = actions.slice(); next[i] = { ...a, label: e.target.value };
                     updateCard({ actions: next });
@@ -169,18 +169,18 @@ export function IMSendConfig({ config, onChange }: Props) {
                 }}>
                   <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="callback">Callback</SelectItem>
-                    <SelectItem value="url">URL</SelectItem>
+                    <SelectItem value="callback">{t("nodeConfig.imSend.callback")}</SelectItem>
+                    <SelectItem value="url">{t("nodeConfig.imSend.url")}</SelectItem>
                   </SelectContent>
                 </Select>
                 {a.type === "url" ? (
-                  <Input className="flex-[2]" placeholder="https://..." value={a.url ?? ""}
+                  <Input className="flex-[2]" placeholder={t("nodeConfig.imSend.urlPlaceholder")} value={a.url ?? ""}
                     onChange={(e) => {
                       const next = actions.slice(); next[i] = { ...a, url: e.target.value };
                       updateCard({ actions: next });
                     }} />
                 ) : (
-                  <Input className="flex-[2]" placeholder='Payload JSON: {"k":"v"}'
+                  <Input className="flex-[2]" placeholder={t("nodeConfig.imSend.payloadPlaceholder")}
                     value={a.payload ? JSON.stringify(a.payload) : ""}
                     onChange={(e) => {
                       const next = actions.slice();
@@ -199,12 +199,12 @@ export function IMSendConfig({ config, onChange }: Props) {
             onClick={() => updateCard({
               actions: [...actions, { id: "", label: "", type: "callback", payload: {} }],
             })}>
-            <Plus className="mr-1 h-3.5 w-3.5" /> Add action
+            <Plus className="mr-1 h-3.5 w-3.5" /> {t("nodeConfig.imSend.addAction")}
           </Button>
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Footer (optional)</Label>
+          <Label className="text-xs">{t("nodeConfig.imSend.footer")}</Label>
           <Input value={card.footer ?? ""} onChange={(e) => updateCard({ footer: e.target.value })} />
         </div>
       </div>

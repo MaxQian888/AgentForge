@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
 import { withDevtools } from "./_devtools";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -114,8 +115,9 @@ export const useAutomationStore = create<AutomationState>()(
       const { data } = await getApi().post<AutomationRule>(`/api/v1/projects/${projectId}/automations`, input, { token });
       set((state) => ({ rulesByProject: { ...state.rulesByProject, [projectId]: [...(state.rulesByProject[projectId] ?? []), data] } }));
     } catch (error) {
-      toast.error("Failed to create automation rule", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "创建自动化规则失败" : "Failed to create automation rule", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
     }
   },
@@ -132,8 +134,9 @@ export const useAutomationStore = create<AutomationState>()(
         },
       }));
     } catch (error) {
-      toast.error("Failed to update automation rule", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "更新自动化规则失败" : "Failed to update automation rule", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
     }
   },
@@ -150,8 +153,9 @@ export const useAutomationStore = create<AutomationState>()(
         },
       }));
     } catch (error) {
-      toast.error("Failed to delete automation rule", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "删除自动化规则失败" : "Failed to delete automation rule", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
     }
   },

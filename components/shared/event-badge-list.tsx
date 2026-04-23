@@ -5,12 +5,14 @@ type EventBadgeListProps = {
   events: string[];
   className?: string;
   emptyLabel?: string;
+  getEventLabel?: (event: string) => string;
 };
 
 export function EventBadgeList({
   events,
   className,
   emptyLabel,
+  getEventLabel,
 }: EventBadgeListProps) {
   if (events.length === 0 && emptyLabel) {
     return <span className="text-xs text-muted-foreground">{emptyLabel}</span>;
@@ -20,7 +22,7 @@ export function EventBadgeList({
     <div className={cn("flex flex-wrap gap-1", className)}>
       {events.map((event) => (
         <Badge key={event} variant="secondary" className="text-xs">
-          {event}
+          {getEventLabel ? getEventLabel(event) : event}
         </Badge>
       ))}
     </div>

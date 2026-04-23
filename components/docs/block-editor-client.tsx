@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { BlockNoteSchema, filterSuggestionItems } from "@blocknote/core";
 import {
   SuggestionMenuController,
@@ -92,6 +93,7 @@ export function BlockEditorClient({
     }
   }, [editor, value]);
 
+  const t = useTranslations("docs");
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
   const blocks = useMemo(
     () =>
@@ -145,14 +147,14 @@ export function BlockEditorClient({
       {editable && blocks.length > 0 ? (
         <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-medium text-foreground">Selected blocks</span>
+            <span className="font-medium text-foreground">{t("blockEditor.selectedBlocks")}</span>
             <button
               type="button"
               className="rounded-md border px-2 py-1 text-xs hover:bg-accent"
               disabled={selectedBlockIds.length === 0}
               onClick={() => onCreateTasksFromSelection?.(selectedBlockIds)}
             >
-              Create Tasks
+              {t("blockEditor.createTasks")}
             </button>
           </div>
           <div className="mt-2 space-y-2">
@@ -175,7 +177,7 @@ export function BlockEditorClient({
                 <span className="flex items-center gap-2">
                   {taskCountsByBlock[block.id] ? (
                     <span className="rounded-full border px-2 py-0.5">
-                      {taskCountsByBlock[block.id]} tasks
+                      {t("blockEditor.taskCount", { count: taskCountsByBlock[block.id] })}
                     </span>
                   ) : null}
                   <span className="truncate">{block.label}</span>
@@ -187,7 +189,7 @@ export function BlockEditorClient({
       ) : null}
       {commentedBlockIds.length > 0 ? (
         <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          Inline comment anchors: {commentedBlockIds.join(", ")}
+          {t("blockEditor.inlineCommentAnchors")} {commentedBlockIds.join(", ")}
         </div>
       ) : null}
       {usesProvider ? (

@@ -23,6 +23,7 @@ function formatCost(value: number): string {
 
 export function AgentFleetWidget({ agents }: AgentFleetWidgetProps) {
   const t = useTranslations("dashboard");
+  const agentsT = useTranslations("agents");
 
   return (
     <Card>
@@ -60,7 +61,7 @@ export function AgentFleetWidget({ agents }: AgentFleetWidgetProps) {
                   <TableCell>
                     <div className="flex items-center gap-1.5">
                       <StatusDot status={agent.status} size="sm" />
-                      <span className="text-sm">{agent.status}</span>
+                      <span className="text-sm">{agentsT(`status.${agent.status}`)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="text-right text-sm">

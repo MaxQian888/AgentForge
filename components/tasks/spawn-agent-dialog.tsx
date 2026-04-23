@@ -19,6 +19,7 @@ import type { CodingAgentSelection } from "@/lib/stores/project-store";
 import { useAgentStore, type DispatchPreflightSummary } from "@/lib/stores/agent-store";
 import { useRoleStore } from "@/lib/stores/role-store";
 import { useProjectStore } from "@/lib/stores/project-store";
+import { useTranslations } from "next-intl";
 
 interface SpawnAgentDialogProps {
   taskId?: string;
@@ -70,6 +71,7 @@ export function SpawnAgentDialog({
   const roles = useRoleStore((state) => state.roles);
   const fetchRoles = useRoleStore((state) => state.fetchRoles);
   const currentProjectId = useProjectStore((state) => state.currentProject?.id ?? "");
+  const t = useTranslations("tasks");
   const [selection, setSelection] = useState<CodingAgentSelection>(EMPTY_SELECTION);
   const [budget, setBudget] = useState("5.00");
   const [selectedRoleId, setSelectedRoleId] = useState("");
@@ -193,9 +195,9 @@ export function SpawnAgentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Start Agent</DialogTitle>
+          <DialogTitle>{t("spawn.title")}</DialogTitle>
           <DialogDescription>
-            Launch a single agent for: {effectiveTaskTitle}
+            {t("spawn.description", { task: effectiveTaskTitle })}
           </DialogDescription>
         </DialogHeader>
 
@@ -203,9 +205,9 @@ export function SpawnAgentDialog({
           {bridgeDegraded ? (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Bridge Degraded</AlertTitle>
+              <AlertTitle>{t("spawn.bridgeDegraded")}</AlertTitle>
               <AlertDescription>
-                Spawn is temporarily unavailable until health checks recover.
+                {t("spawn.bridgeDegradedDescription")}
               </AlertDescription>
             </Alert>
           ) : null}
@@ -221,27 +223,27 @@ export function SpawnAgentDialog({
               )}
               <AlertTitle>
                 {preflight.budgetBlocked
-                  ? "Blocked"
+                  ? t("spawn.blocked")
                   : preflight.dispatchOutcomeHint === "queued"
-                    ? "Will be queued"
-                    : "Ready to dispatch"}
+                    ? t("spawn.willBeQueued")
+                    : t("spawn.readyToDispatch")}
               </AlertTitle>
               <AlertDescription className="text-xs">
                 {preflight.budgetBlocked?.message ??
                   preflight.budgetWarning?.message ??
                   (preflight.dispatchOutcomeHint === "queued"
-                    ? `Pool has ${preflight.poolAvailable ?? 0} slots available, ${preflight.poolQueued ?? 0} already queued.`
-                    : `Pool has ${preflight.poolAvailable ?? 0} slots available.`)}
+                    ? t("spawn.poolQueued", { available: preflight.poolAvailable ?? 0, queued: preflight.poolQueued ?? 0 })
+                    : t("spawn.poolAvailable", { available: preflight.poolAvailable ?? 0 }))}
               </AlertDescription>
             </Alert>
           )}
 
           {!taskId && taskOptions?.length ? (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="spawn-agent-task">Task</Label>
+              <Label htmlFor="spawn-agent-task">{t("spawn.taskLabel")}</Label>
               <select
                 id="spawn-agent-task"
-                aria-label="Task"
+                aria-label={t("spawn.taskLabel")}
                 className="h-10 rounded-md border bg-background px-3 text-sm"
                 value={selectedTaskId}
                 onChange={(event) => setSelectedTaskId(event.target.value)}
@@ -257,10 +259,10 @@ export function SpawnAgentDialog({
 
           {!memberId && memberOptions?.length ? (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="spawn-agent-member">Member</Label>
+              <Label htmlFor="spawn-agent-member">{t("spawn.memberLabel")}</Label>
               <select
                 id="spawn-agent-member"
-                aria-label="Member"
+                aria-label={t("spawn.memberLabel")}
                 className="h-10 rounded-md border bg-background px-3 text-sm"
                 value={selectedMemberId}
                 onChange={(event) => setSelectedMemberId(event.target.value)}
@@ -275,7 +277,7 @@ export function SpawnAgentDialog({
           ) : null}
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="spawn-agent-budget">Budget (USD)</Label>
+            <Label htmlFor="spawn-agent-budget">{t("spawn.budgetLabel")}</Label>
             <Input
               id="spawn-agent-budget"
               type="number"
@@ -287,15 +289,15 @@ export function SpawnAgentDialog({
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="spawn-agent-role">Role</Label>
+            <Label htmlFor="spawn-agent-role">{t("spawn.roleLabel")}</Label>
             <select
               id="spawn-agent-role"
-              aria-label="Role"
+              aria-label={t("spawn.roleLabel")}
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={selectedRoleId}
               onChange={(e) => setSelectedRoleId(e.target.value)}
             >
-              <option value="">No role (default)</option>
+              <option value="">{t("spawn.noRole")}</option>
               {roles.map((role) => (
                 <option key={role.metadata.id} value={role.metadata.id}>
                   {role.metadata.name}
@@ -314,10 +316,10 @@ export function SpawnAgentDialog({
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("spawn.cancel")}
             </Button>
             <Button type="submit" disabled={submitting || !canSubmit}>
-              {submitting ? "Starting..." : "Start Agent"}
+              {submitting ? t("spawn.starting") : t("spawn.startAgent")}
             </Button>
           </DialogFooter>
         </form>

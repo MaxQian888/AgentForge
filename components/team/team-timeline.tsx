@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { useAgentStore, type Agent } from "@/lib/stores/agent-store";
 import type { AgentTeam } from "@/lib/stores/team-store";
@@ -105,6 +106,7 @@ interface TeamTimelineProps {
 }
 
 export function TeamTimeline({ team }: TeamTimelineProps) {
+  const t = useTranslations("teams");
   const agents = useAgentStore((s) => s.agents);
   const [now] = useState(() => Date.now());
 
@@ -126,7 +128,7 @@ export function TeamTimeline({ team }: TeamTimelineProps) {
     if (plannerAgent) {
       const { start, end } = getAgentTimeRange(plannerAgent, now);
       result.push({
-        label: "Plan",
+        label: t("pipeline.plan"),
         role: "planner",
         status: plannerAgent.status,
         agent: plannerAgent,
@@ -138,7 +140,7 @@ export function TeamTimeline({ team }: TeamTimelineProps) {
       });
     } else if (team.status === "planning" || team.status === "pending") {
       result.push({
-        label: "Plan",
+        label: t("pipeline.plan"),
         role: "planner",
         status: team.status === "planning" ? "running" : "pending",
         startMs: teamStart,
@@ -168,7 +170,7 @@ export function TeamTimeline({ team }: TeamTimelineProps) {
       const anyFailed = coderAgents.some((a) => a.status === "failed");
 
       result.push({
-        label: `Execute (${coderAgents.length})`,
+        label: `${t("pipeline.execute")} (${coderAgents.length})`,
         role: "coder",
         status: allCompleted
           ? anyFailed
@@ -195,7 +197,7 @@ export function TeamTimeline({ team }: TeamTimelineProps) {
         ? getAgentTimeRange(plannerAgent, now).end
         : teamStart;
       result.push({
-        label: "Execute",
+        label: t("pipeline.execute"),
         role: "coder",
         status: team.status === "executing" ? "running" : "pending",
         startMs: plannerEnd,
@@ -210,7 +212,7 @@ export function TeamTimeline({ team }: TeamTimelineProps) {
     if (reviewerAgent) {
       const { start, end } = getAgentTimeRange(reviewerAgent, now);
       result.push({
-        label: "Review",
+        label: t("pipeline.review"),
         role: "reviewer",
         status: reviewerAgent.status,
         agent: reviewerAgent,
@@ -226,7 +228,7 @@ export function TeamTimeline({ team }: TeamTimelineProps) {
           ? Math.max(...coderAgents.map((a) => getAgentTimeRange(a, now).end))
           : now;
       result.push({
-        label: "Review",
+        label: t("pipeline.review"),
         role: "reviewer",
         status: "running",
         startMs: coderEnd,
@@ -245,7 +247,7 @@ export function TeamTimeline({ team }: TeamTimelineProps) {
   if (segments.length === 0) {
     return (
       <div className="rounded-lg border p-4 text-center text-sm text-muted-foreground">
-        No timeline data available yet.
+        {t("timeline.noData")}
       </div>
     );
   }
@@ -254,7 +256,7 @@ export function TeamTimeline({ team }: TeamTimelineProps) {
     <TooltipProvider delayDuration={200}>
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <span>Timeline</span>
+          <span>{t("timeline.label")}</span>
           <span className="ml-auto">{formatDuration(totalDuration)}</span>
         </div>
 

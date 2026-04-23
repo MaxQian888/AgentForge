@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { ApiError, createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -147,7 +148,8 @@ export const useQianchuanStrategiesStore = create<QianchuanStrategiesState>()((s
         { token },
       );
       set((s) => ({ strategies: [data, ...s.strategies] }));
-      toast.success(`策略 ${data.name} 已创建（v${data.version}）`);
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? `策略 ${data.name} 已创建（v${data.version}）` : `Strategy ${data.name} created (v${data.version})`);
       return data;
     } catch (err) {
       const e = extractError(err);
@@ -171,7 +173,8 @@ export const useQianchuanStrategiesStore = create<QianchuanStrategiesState>()((s
         strategies: s.strategies.map((row) => (row.id === id ? data : row)),
         selected: s.selected?.id === id ? data : s.selected,
       }));
-      toast.success("策略已更新");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "策略已更新" : "Strategy updated");
       return data;
     } catch (err) {
       const e = extractError(err);
@@ -194,7 +197,8 @@ export const useQianchuanStrategiesStore = create<QianchuanStrategiesState>()((s
         strategies: s.strategies.map((row) => (row.id === id ? data : row)),
         selected: s.selected?.id === id ? data : s.selected,
       }));
-      toast.success("策略已发布");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "策略已发布" : "Strategy published");
       return data;
     } catch (err) {
       const e = extractError(err);
@@ -217,7 +221,8 @@ export const useQianchuanStrategiesStore = create<QianchuanStrategiesState>()((s
         strategies: s.strategies.map((row) => (row.id === id ? data : row)),
         selected: s.selected?.id === id ? data : s.selected,
       }));
-      toast.success("策略已归档");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "策略已归档" : "Strategy archived");
       return data;
     } catch (err) {
       const e = extractError(err);
@@ -233,7 +238,8 @@ export const useQianchuanStrategiesStore = create<QianchuanStrategiesState>()((s
     try {
       await getApi().delete(`/api/v1/qianchuan/strategies/${id}`, { token });
       set((s) => ({ strategies: s.strategies.filter((row) => row.id !== id) }));
-      toast.success("策略已删除");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "策略已删除" : "Strategy deleted");
       return true;
     } catch (err) {
       const e = extractError(err);

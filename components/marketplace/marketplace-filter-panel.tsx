@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type {
   MarketplaceFilters,
   MarketplaceItemType,
@@ -22,20 +23,22 @@ interface Props {
   onChange: (f: Partial<MarketplaceFilters>) => void;
 }
 
-const TYPES: { value: MarketplaceItemType; label: string }[] = [
-  { value: "all", label: "All Types" },
-  { value: "plugin", label: "Plugins" },
-  { value: "skill", label: "Skills" },
-  { value: "role", label: "Roles" },
-  { value: "workflow_template", label: "Workflows" },
-];
-
 export function MarketplaceFilterPanel({ filters, onChange }: Props) {
+  const t = useTranslations("marketplace");
+
+  const types: { value: MarketplaceItemType; labelKey: string }[] = [
+    { value: "all", labelKey: "filter.typeAll" },
+    { value: "plugin", labelKey: "filter.typePlugin" },
+    { value: "skill", labelKey: "filter.typeSkill" },
+    { value: "role", labelKey: "filter.typeRole" },
+    { value: "workflow_template", labelKey: "filter.typeWorkflow" },
+  ];
+
   return (
     <div className="space-y-4 p-3">
       <div>
         <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
-          Type
+          {t("filter.type")}
         </Label>
         <RadioGroup
           value={filters.type}
@@ -43,11 +46,11 @@ export function MarketplaceFilterPanel({ filters, onChange }: Props) {
             onChange({ type: v as MarketplaceItemType, page: 1 })
           }
         >
-          {TYPES.map((t) => (
-            <div key={t.value} className="flex items-center space-x-2">
-              <RadioGroupItem value={t.value} id={`type-${t.value}`} />
-              <Label htmlFor={`type-${t.value}`} className="text-sm cursor-pointer">
-                {t.label}
+          {types.map((tItem) => (
+            <div key={tItem.value} className="flex items-center space-x-2">
+              <RadioGroupItem value={tItem.value} id={`type-${tItem.value}`} />
+              <Label htmlFor={`type-${tItem.value}`} className="text-sm cursor-pointer">
+                {t(tItem.labelKey as Parameters<typeof t>[0])}
               </Label>
             </div>
           ))}
@@ -55,10 +58,10 @@ export function MarketplaceFilterPanel({ filters, onChange }: Props) {
       </div>
       <div>
         <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
-          Category
+          {t("filter.category")}
         </Label>
         <Input
-          placeholder="e.g. testing"
+          placeholder={t("filter.categoryPlaceholder")}
           value={filters.category}
           onChange={(e) => onChange({ category: e.target.value, page: 1 })}
           className="h-8 text-sm"
@@ -66,7 +69,7 @@ export function MarketplaceFilterPanel({ filters, onChange }: Props) {
       </div>
       <div>
         <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
-          Sort by
+          {t("filter.sort")}
         </Label>
         <Select
           value={filters.sort}
@@ -78,16 +81,16 @@ export function MarketplaceFilterPanel({ filters, onChange }: Props) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="downloads">Most Downloaded</SelectItem>
-            <SelectItem value="rating">Top Rated</SelectItem>
-            <SelectItem value="created_at">Newest</SelectItem>
+            <SelectItem value="downloads">{t("filter.sortDownloads")}</SelectItem>
+            <SelectItem value="rating">{t("filter.sortRating")}</SelectItem>
+            <SelectItem value="created_at">{t("filter.sortNewest")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
       {filters.tags.length > 0 ? (
         <div>
           <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
-            Tags
+            {t("filter.tags")}
           </Label>
           <div className="flex flex-wrap gap-1">
             {filters.tags.map((tag) => (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useSavedViewStore } from "@/lib/stores/saved-view-store";
 import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
@@ -8,6 +9,7 @@ import { SaveViewDialog } from "./save-view-dialog";
 import { ViewShareDialog } from "./view-share-dialog";
 
 export function ViewSwitcher({ projectId }: { projectId: string }) {
+  const t = useTranslations("views");
   const fetchViews = useSavedViewStore((state) => state.fetchViews);
   const viewsByProject = useSavedViewStore((state) => state.viewsByProject);
   const currentViewByProject = useSavedViewStore((state) => state.currentViewByProject);
@@ -62,7 +64,7 @@ export function ViewSwitcher({ projectId }: { projectId: string }) {
           }
         }}
       >
-        <option value="">Unsaved view</option>
+        <option value="">{t("viewSwitcher.unsavedView")}</option>
         {views.map((view) => (
           <option key={view.id} value={view.id}>
             {view.name}
@@ -70,7 +72,7 @@ export function ViewSwitcher({ projectId }: { projectId: string }) {
         ))}
       </select>
       <Button type="button" size="sm" variant="outline" onClick={() => setSaveOpen(true)}>
-        Save View
+        {t("viewSwitcher.saveView")}
       </Button>
       <Button
         type="button"
@@ -79,7 +81,7 @@ export function ViewSwitcher({ projectId }: { projectId: string }) {
         disabled={!selectedView}
         onClick={() => setShareOpen(true)}
       >
-        Share
+        {t("viewSwitcher.share")}
       </Button>
       <Button
         type="button"
@@ -88,7 +90,7 @@ export function ViewSwitcher({ projectId }: { projectId: string }) {
         disabled={!selectedView}
         onClick={() => selectedView && void setDefaultView(projectId, selectedView.id)}
       >
-        Set Default
+        {t("viewSwitcher.setDefault")}
       </Button>
       <SaveViewDialog open={saveOpen} onOpenChange={setSaveOpen} projectId={projectId} config={currentConfig} />
       <ViewShareDialog open={shareOpen} onOpenChange={setShareOpen} projectId={projectId} view={selectedView} />

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -55,10 +56,11 @@ const stepStatusColors: Record<string, string> = {
 };
 
 export function WorkflowPluginRunBody({ body }: { body: unknown }) {
+  const t = useTranslations("workflow");
   if (!body || typeof body !== "object") {
     return (
       <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-        Plugin run body unavailable
+        {t("pluginRun.unavailable")}
       </div>
     );
   }
@@ -70,12 +72,12 @@ export function WorkflowPluginRunBody({ body }: { body: unknown }) {
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium">Plugin Run</CardTitle>
+          <CardTitle className="text-sm font-medium">{t("pluginRun.title")}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-3 text-xs">
             <Badge variant="outline">{pluginID}</Badge>
-            <span className="text-muted-foreground">Status:</span>
+            <span className="text-muted-foreground">{t("pluginRun.status")}:</span>
             <Badge variant="secondary">{run.status}</Badge>
           </div>
           {run.error && (
@@ -86,13 +88,13 @@ export function WorkflowPluginRunBody({ body }: { body: unknown }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">
-            Steps ({steps.length})
+            {t("pluginRun.stepsTitle")} ({steps.length})
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-2">
             {steps.length === 0 && (
-              <p className="text-xs text-muted-foreground">No steps recorded</p>
+              <p className="text-xs text-muted-foreground">{t("pluginRun.noSteps")}</p>
             )}
             {steps.map((step) => (
               <div
@@ -109,12 +111,12 @@ export function WorkflowPluginRunBody({ body }: { body: unknown }) {
                   </Badge>
                   {step.roleId && (
                     <span className="text-muted-foreground">
-                      role: {step.roleId}
+                      {t("pluginRun.role")}: {step.roleId}
                     </span>
                   )}
                   {step.retryCount ? (
                     <span className="text-muted-foreground">
-                      retries: {step.retryCount}
+                      {t("pluginRun.retries")}: {step.retryCount}
                     </span>
                   ) : null}
                 </div>
@@ -123,7 +125,7 @@ export function WorkflowPluginRunBody({ body }: { body: unknown }) {
                 )}
                 {step.attempts && step.attempts.length > 1 && (
                   <div className="text-[10px] text-muted-foreground">
-                    {step.attempts.length} attempts
+                    {t("pluginRun.attempts", { count: step.attempts.length })}
                   </div>
                 )}
               </div>

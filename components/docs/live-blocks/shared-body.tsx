@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { ProjectionFragment } from "./projection-fragment";
 import type { BlockNoteBlock, ProjectionResult } from "./types";
 
@@ -24,6 +25,7 @@ export function SharedBody({
   notFoundMessage,
   forbiddenMessage,
 }: SharedBodyProps) {
+  const t = useTranslations("docs");
   if (!projection) {
     return <Shimmer />;
   }
@@ -36,7 +38,7 @@ export function SharedBody({
     }
     return (
       <p className="text-xs italic text-muted-foreground">
-        Showing last-known data is unavailable.
+        {t("liveArtifact.sharedBody.lastKnownUnavailable")}
       </p>
     );
   }
@@ -49,7 +51,7 @@ export function SharedBody({
           onClick={onRemove}
           className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent"
         >
-          Remove block
+          {t("liveArtifact.sharedBody.removeBlock")}
         </button>
       </div>
     );
@@ -60,11 +62,12 @@ export function SharedBody({
 }
 
 export function Shimmer() {
+  const t = useTranslations("docs");
   return (
     <div
       className="flex flex-col gap-2"
       role="status"
-      aria-label="Loading live artifact"
+      aria-label={t("liveArtifact.sharedBody.loadingLabel")}
     >
       <div className="h-4 w-32 animate-pulse rounded bg-muted" />
       <div className="h-3 w-full animate-pulse rounded bg-muted" />

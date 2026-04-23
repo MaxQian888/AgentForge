@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -128,7 +129,8 @@ export const useQianchuanBindingsStore = create<State>()((set, get) => ({
         },
       }));
     } catch (e) {
-      toast.error(`加载千川绑定失败：${(e as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `加载千川绑定失败：${(e as Error).message}` : `Failed to load Qianchuan bindings: ${(e as Error).message}`);
     } finally {
       set((s) => ({ loading: { ...s.loading, [projectId]: false } }));
     }
@@ -151,10 +153,12 @@ export const useQianchuanBindingsStore = create<State>()((set, get) => ({
         { token },
       );
       await get().fetchBindings(projectId);
-      toast.success("绑定已创建");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "绑定已创建" : "Binding created");
       return data ? fromWire(data) : null;
     } catch (e) {
-      toast.error(`创建失败：${(e as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `创建失败：${(e as Error).message}` : `Failed to create binding: ${(e as Error).message}`);
       return null;
     }
   },
@@ -179,7 +183,8 @@ export const useQianchuanBindingsStore = create<State>()((set, get) => ({
         }
       }
     } catch (e) {
-      toast.error(`更新失败：${(e as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `更新失败：${(e as Error).message}` : `Failed to update binding: ${(e as Error).message}`);
     }
   },
 
@@ -189,9 +194,11 @@ export const useQianchuanBindingsStore = create<State>()((set, get) => ({
     try {
       await getApi().delete(`/api/v1/qianchuan/bindings/${id}`, { token });
       await get().fetchBindings(projectId);
-      toast.success("绑定已删除");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "绑定已删除" : "Binding deleted");
     } catch (e) {
-      toast.error(`删除失败：${(e as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `删除失败：${(e as Error).message}` : `Failed to delete binding: ${(e as Error).message}`);
     }
   },
 
@@ -200,15 +207,18 @@ export const useQianchuanBindingsStore = create<State>()((set, get) => ({
     if (!token) return;
     try {
       await getApi().post(`/api/v1/qianchuan/bindings/${id}/sync`, {}, { token });
-      toast.success("已触发同步");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "已触发同步" : "Sync triggered");
     } catch (e) {
-      toast.error(`同步失败：${(e as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `同步失败：${(e as Error).message}` : `Sync failed: ${(e as Error).message}`);
     }
   },
 
   testBinding: async (id) => {
     const token = getToken();
-    if (!token) return { ok: false, detail: "未登录" };
+    const locale = getPreferredLocale();
+    if (!token) return { ok: false, detail: locale === "zh-CN" ? "未登录" : "Not logged in" };
     try {
       await getApi().post(`/api/v1/qianchuan/bindings/${id}/test`, {}, { token });
       return { ok: true };

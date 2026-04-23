@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Loader2, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,15 +18,10 @@ import {
   type EmployeeRunKind,
 } from "@/lib/stores/employee-runs-store";
 
-const KIND_FILTERS: { value: EmployeeRunKind; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "workflow", label: "Workflows" },
-  { value: "agent", label: "Agents" },
-];
-
 export default function EmployeeRunsPage() {
   const params = useParams<{ id: string }>();
   const employeeId = params.id;
+  const t = useTranslations("employees");
   const rows = useEmployeeRunsStore(
     (s) => s.runsByEmployee[employeeId] ?? [],
   );
@@ -43,6 +39,12 @@ export default function EmployeeRunsPage() {
   );
   const fetchRuns = useEmployeeRunsStore((s) => s.fetchRuns);
 
+  const kindFilters: { value: EmployeeRunKind; labelKey: string }[] = [
+    { value: "all", labelKey: "all" },
+    { value: "workflow", labelKey: "workflows" },
+    { value: "agent", labelKey: "agents" },
+  ];
+
   useEffect(() => {
     if (!employeeId) return;
     void fetchRuns(employeeId, 1, kind);
@@ -51,16 +53,16 @@ export default function EmployeeRunsPage() {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>执行历史 (Runs)</CardTitle>
+        <CardTitle>{t("runHistory")}</CardTitle>
         <div className="flex gap-1">
-          {KIND_FILTERS.map((f) => (
+          {kindFilters.map((f) => (
             <Button
               key={f.value}
               size="sm"
               variant={kind === f.value ? "default" : "outline"}
               onClick={() => fetchRuns(employeeId, 1, f.value)}
             >
-              {f.label}
+              {t(f.labelKey)}
             </Button>
           ))}
         </div>
@@ -69,22 +71,22 @@ export default function EmployeeRunsPage() {
         {loading && rows.length === 0 ? (
           <div className="p-8 flex items-center justify-center text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            加载中...
+            {t("loading")}
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
             icon={Inbox}
-            title="暂无执行记录"
-            description="该员工还没有驱动过任何 workflow 或 agent run。绑定 trigger 后即可在此看到回放。"
+            title={t("noRuns")}
+            description={t("noRunsDescription")}
           />
         ) : (
           <>
             <div className="grid grid-cols-12 items-center gap-3 px-4 py-2 border-b bg-muted/40 text-xs font-medium uppercase text-muted-foreground">
-              <div className="col-span-2">类型</div>
-              <div className="col-span-4">名称 / ID</div>
-              <div className="col-span-2">状态</div>
-              <div className="col-span-2">开始时间</div>
-              <div className="col-span-2 text-right">耗时</div>
+              <div className="col-span-2">{t("colType")}</div>
+              <div className="col-span-4">{t("colNameId")}</div>
+              <div className="col-span-2">{t("colStatus")}</div>
+              <div className="col-span-2">{t("colStartedAt")}</div>
+              <div className="col-span-2 text-right">{t("colDuration")}</div>
             </div>
             {rows.map((row) => (
               <EmployeeRunRow key={`${row.kind}-${row.id}`} row={row} />
@@ -100,7 +102,7 @@ export default function EmployeeRunsPage() {
                   {loading ? (
                     <Loader2 className="h-3 w-3 animate-spin mr-1" />
                   ) : null}
-                  加载更多
+                  {t("loadingMore")}
                 </Button>
               </div>
             )}

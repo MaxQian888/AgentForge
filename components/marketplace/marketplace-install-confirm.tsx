@@ -18,6 +18,7 @@ import {
   typeDisplayLabel,
 } from "@/lib/stores/marketplace-store";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 interface Props {
   item: MarketplaceItem | null;
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export function MarketplaceInstallConfirm({ item, consumption, onClose }: Props) {
+  const t = useTranslations("marketplace");
   const { installItem, checkUpdates } = useMarketplaceStore();
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +40,7 @@ export function MarketplaceInstallConfirm({ item, consumption, onClose }: Props)
 
   const handleInstall = async () => {
     if (!item.latest_version) {
-      toast.error("No version available");
+      toast.error(t("install.noVersion"));
       return;
     }
     setLoading(true);
@@ -46,14 +48,14 @@ export function MarketplaceInstallConfirm({ item, consumption, onClose }: Props)
       await installItem(item.id, item.latest_version);
       toast.success(
         isUpdate
-          ? `${item.name} updated to v${item.latest_version}`
-          : `${item.name} installed successfully`,
+          ? t("install.toastUpdated", { name: item.name, version: item.latest_version })
+          : t("install.toastInstalled", { name: item.name }),
       );
       void checkUpdates();
       onClose();
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Installation failed",
+        err instanceof Error ? err.message : t("install.toastFailed"),
       );
     } finally {
       setLoading(false);
@@ -65,34 +67,40 @@ export function MarketplaceInstallConfirm({ item, consumption, onClose }: Props)
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {isUpdate ? `Update ${item.name}?` : `Install ${item.name}?`}
+            {isUpdate
+              ? t("install.updateTitle", { name: item.name })
+              : t("install.installTitle", { name: item.name })}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {isUpdate ? (
               <>
-                This will update {item.name} from v
-                {consumption?.provenance?.selectedVersion ?? "unknown"} to v
-                {item.latest_version ?? "latest"}.
+                {t("install.updateDesc", {
+                  name: item.name,
+                  fromVersion: consumption?.provenance?.selectedVersion ?? "unknown",
+                  toVersion: item.latest_version ?? "latest",
+                })}
               </>
             ) : (
               <>
-                This will download and install version{" "}
-                {item.latest_version ?? "latest"} of {item.name} ({typeDisplayLabel(item.type)}) into
-                AgentForge.
+                {t("install.installDesc", {
+                  name: item.name,
+                  version: item.latest_version ?? "latest",
+                  type: typeDisplayLabel(item.type),
+                })}
               </>
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onClose}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel onClick={onClose}>{t("install.cancel")}</AlertDialogCancel>
           <AlertDialogAction onClick={handleInstall} disabled={loading}>
             {loading
               ? isUpdate
-                ? "Updating..."
-                : "Installing..."
+                ? t("install.updating")
+                : t("install.installing")
               : isUpdate
-                ? `Update to v${item.latest_version}`
-                : "Install"}
+                ? t("install.updateTo", { version: item.latest_version ?? "" })
+                : t("install.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

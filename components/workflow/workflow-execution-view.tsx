@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Play,
   CheckCircle,
@@ -126,6 +127,7 @@ function NodeCard({
   executionId,
   onRefresh,
 }: NodeCardProps) {
+  const t = useTranslations("workflow");
   const status = nodeExec?.status ?? "pending";
   const StatusIcon = nodeStatusIcons[status] ?? Clock;
 
@@ -148,18 +150,18 @@ function NodeCard({
           .getState()
           .resolveReview(executionId, node.id, decision, reviewComment);
         toast.success(
-          `Review ${decision === "approved" ? "approved" : "rejected"} successfully`
+          decision === "approved" ? t("review.approvedToast") : t("review.rejectedToast")
         );
         setShowReviewForm(false);
         setReviewComment("");
         onRefresh();
       } catch {
-        toast.error("Failed to submit review");
+        toast.error(t("review.failedToast"));
       } finally {
         setReviewSubmitting(false);
       }
     },
-    [executionId, node.id, reviewComment, onRefresh]
+    [executionId, node.id, reviewComment, onRefresh, t]
   );
 
   const handleSendEvent = useCallback(async () => {
@@ -168,7 +170,7 @@ function NodeCard({
     try {
       parsed = JSON.parse(eventPayload);
     } catch {
-      setEventError("Invalid JSON");
+      setEventError(t("event.invalidJson"));
       return;
     }
     setEventSubmitting(true);
@@ -176,16 +178,16 @@ function NodeCard({
       await useWorkflowStore
         .getState()
         .sendExternalEvent(executionId, node.id, parsed);
-      toast.success("Event sent successfully");
+      toast.success(t("event.sentToast"));
       setShowEventForm(false);
       setEventPayload("");
       onRefresh();
     } catch {
-      toast.error("Failed to send event");
+      toast.error(t("event.failedToast"));
     } finally {
       setEventSubmitting(false);
     }
-  }, [executionId, node.id, eventPayload, onRefresh]);
+  }, [executionId, node.id, eventPayload, onRefresh, t]);
 
   return (
     <div
@@ -214,7 +216,7 @@ function NodeCard({
               variant="outline"
               className={cn("text-[10px] shrink-0", nodeTypeColors[node.type])}
             >
-              {node.type.replace(/_/g, " ")}
+              {t(`node.type.${node.type}` as const) ?? node.type.replace(/_/g, " ")}
             </Badge>
           </div>
           {nodeExec?.errorMessage && (
@@ -236,12 +238,12 @@ function NodeCard({
       {status === "waiting" && node.type === "human_review" && (
         <div className="mt-2 space-y-2">
           <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px]">
-            Awaiting Review
+            {t("node.awaitingReview")}
           </Badge>
           {showReviewForm && (
             <div className="space-y-2">
               <Textarea
-                placeholder="Optional comment..."
+                placeholder={t("node.optionalComment")}
                 value={reviewComment}
                 onChange={(e) => setReviewComment(e.target.value)}
                 className="text-xs"
@@ -254,7 +256,7 @@ function NodeCard({
                   disabled={reviewSubmitting}
                   onClick={() => handleReview("approved")}
                 >
-                  Approve
+                  {t("review.approve")}
                 </Button>
                 <Button
                   variant="destructive"
@@ -263,7 +265,7 @@ function NodeCard({
                   disabled={reviewSubmitting}
                   onClick={() => handleReview("rejected")}
                 >
-                  Reject
+                  {t("review.reject")}
                 </Button>
               </div>
             </div>
@@ -275,7 +277,7 @@ function NodeCard({
               className="text-xs h-7"
               onClick={() => setShowReviewForm(true)}
             >
-              Review
+              {t("node.reviewButton")}
             </Button>
           )}
         </div>
@@ -285,12 +287,12 @@ function NodeCard({
       {status === "waiting" && node.type === "wait_event" && (
         <div className="mt-2 space-y-2">
           <Badge className="bg-slate-500/15 text-slate-700 dark:text-slate-400 text-[10px]">
-            Waiting for Event
+            {t("node.waitingForEvent")}
           </Badge>
           {showEventForm && (
             <div className="space-y-2">
               <Textarea
-                placeholder='{"event": "value"}'
+                placeholder={t("node.eventPayloadPlaceholder")}
                 value={eventPayload}
                 onChange={(e) => setEventPayload(e.target.value)}
                 className="text-xs font-mono"
@@ -305,7 +307,7 @@ function NodeCard({
                 disabled={eventSubmitting}
                 onClick={handleSendEvent}
               >
-                Send Event
+                {t("event.sendEvent")}
               </Button>
             </div>
           )}
@@ -316,7 +318,7 @@ function NodeCard({
               className="text-xs h-7"
               onClick={() => setShowEventForm(true)}
             >
-              Send Event
+              {t("node.sendEventButton")}
             </Button>
           )}
         </div>
@@ -342,6 +344,7 @@ export function WorkflowExecutionView({
   nodes,
   engine = "dag",
 }: WorkflowExecutionViewProps) {
+  const t = useTranslations("workflow");
   const [execution, setExecution] = useState<WorkflowExecution | null>(null);
   const [nodeExecs, setNodeExecs] = useState<WorkflowNodeExecution[]>([]);
   const [subInvocations, setSubInvocations] = useState<SubWorkflowLinkDTO[]>([]);
@@ -384,11 +387,11 @@ export function WorkflowExecutionView({
       }
       setError(null);
     } catch {
-      setError("Unable to load execution");
+      setError(t("execution.unableToLoad"));
     } finally {
       setLoading(false);
     }
-  }, [executionId]);
+  }, [executionId, t]);
 
   useEffect(() => {
     void fetchExecution();
@@ -430,7 +433,7 @@ export function WorkflowExecutionView({
     return (
       <div className="flex items-center gap-2 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
         <AlertCircle className="size-4" />
-        {error ?? "Execution not found"}
+        {error ?? t("execution.notFound")}
       </div>
     );
   }
@@ -455,32 +458,32 @@ export function WorkflowExecutionView({
           <Play className="size-5 text-muted-foreground" />
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-medium">Execution</span>
+              <span className="font-medium">{t("execution.title")}</span>
               <ExecutionStatusBadge status={execution.status} />
               {outboundDeliveryFailed && (
                 <Badge
                   variant="destructive"
                   className="text-[10px]"
-                  title="后端尝试 3 次仍未把结果回帖到 IM 线程"
+                  title={t("execution.deliveryFailed.imTitle")}
                 >
-                  回帖失败
+                  {t("execution.deliveryFailed.im")}
                 </Badge>
               )}
               {vcsDeliveryFailed && (
                 <Badge
                   variant="destructive"
                   className="text-[10px]"
-                  title="PR comment delivery failed after 3 retries"
+                  title={t("execution.deliveryFailed.vcsTitle")}
                 >
-                  PR comment 发送失败
+                  {t("execution.deliveryFailed.vcs")}
                 </Badge>
               )}
             </div>
             <span className="text-xs text-muted-foreground">
-              Started{" "}
+              {t("execution.started")}{" "}
               {execution.startedAt
                 ? new Date(execution.startedAt).toLocaleString()
-                : "pending"}
+                : t("execution.pending")}
             </span>
           </div>
         </div>
@@ -488,7 +491,7 @@ export function WorkflowExecutionView({
           execution.status === "pending") && (
           <Button variant="destructive" size="sm" onClick={handleCancel}>
             <XCircle className="mr-1 size-4" />
-            Cancel
+            {t("execution.cancel")}
           </Button>
         )}
       </div>
@@ -509,7 +512,7 @@ export function WorkflowExecutionView({
         >
           {invokedByParent && (
             <Badge variant="outline" className="gap-1">
-              <span className="text-muted-foreground">Invoked by parent</span>
+              <span className="text-muted-foreground">{t("execution.subWorkflow.invokedByParent")}</span>
               <span className="font-mono">
                 {invokedByParent.parentExecutionId.slice(0, 8)}
               </span>
@@ -519,7 +522,7 @@ export function WorkflowExecutionView({
           )}
           {subInvocations.length > 0 && (
             <Badge variant="outline" className="gap-1">
-              <span className="text-muted-foreground">Sub-invocations</span>
+              <span className="text-muted-foreground">{t("execution.subWorkflow.subInvocations")}</span>
               <span className="font-mono">{subInvocations.length}</span>
             </Badge>
           )}
@@ -547,7 +550,7 @@ export function WorkflowExecutionView({
       {/* Node execution flow */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium">Node Execution</CardTitle>
+          <CardTitle className="text-sm font-medium">{t("execution.nodeExecution")}</CardTitle>
         </CardHeader>
         <CardContent>
           <ScrollArea className="max-h-[400px]">
@@ -572,7 +575,7 @@ export function WorkflowExecutionView({
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium">
-              Execution Log
+              {t("execution.executionLog")}
             </CardTitle>
           </CardHeader>
           <CardContent>

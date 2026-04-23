@@ -1,7 +1,4 @@
 import { render, screen } from "@testing-library/react";
-jest.mock("next-intl", () => ({
-  useTranslations: () => (_key: string) => _key,
-}));
 import { PluginDetailOverview } from "./plugin-detail-overview";
 import type { PluginRecord } from "@/lib/stores/plugin-store";
 

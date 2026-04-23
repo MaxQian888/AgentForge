@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -104,6 +105,7 @@ function AgentRunPickerBody({
   onInsert,
   agentsOverride,
 }: AgentRunPickerDialogProps) {
+  const t = useTranslations("docs");
   const storeAgents = useAgentStore((state) => state.agents);
   const fetchAgents = useAgentStore((state) => state.fetchAgents);
   const [search, setSearch] = useState("");
@@ -146,22 +148,21 @@ function AgentRunPickerBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Embed live agent run</DialogTitle>
+        <DialogTitle>{t("liveArtifact.dialogs.agentRun.title")}</DialogTitle>
         <DialogDescription>
-          Pick a recent agent run. The block will stay in sync with its status,
-          steps, and cost.
+          {t("liveArtifact.dialogs.agentRun.desc")}
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-3">
         <Input
-          aria-label="Search agent runs"
-          placeholder="Filter by id, task, status, runtime"
+          aria-label={t("liveArtifact.dialogs.agentRun.searchAriaLabel")}
+          placeholder={t("liveArtifact.dialogs.agentRun.searchPlaceholder")}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
         <div
           role="listbox"
-          aria-label="Agent runs"
+          aria-label={t("liveArtifact.dialogs.agentRun.listAriaLabel")}
           className="max-h-72 space-y-2 overflow-y-auto"
         >
           {filteredRuns.map((agent) => {
@@ -185,25 +186,24 @@ function AgentRunPickerBody({
                   </span>
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {agent.taskTitle || agent.taskId} · started {formatDate(agent.startedAt)} · $
-                  {Number(agent.cost ?? 0).toFixed(4)}
+                  {agent.taskTitle || agent.taskId} · {t("liveArtifact.dialogs.agentRun.started")} {formatDate(agent.startedAt)} · {t("liveArtifact.dialogs.agentRun.cost", { amount: Number(agent.cost ?? 0).toFixed(4) })}
                 </div>
               </button>
             );
           })}
           {filteredRuns.length === 0 ? (
             <div className="rounded-lg border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
-              No agent runs match this search.
+              {t("liveArtifact.dialogs.agentRun.empty")}
             </div>
           ) : null}
         </div>
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>
-          Cancel
+          {t("liveArtifact.dialogs.cancel")}
         </Button>
         <Button onClick={handleConfirm} disabled={confirmDisabled}>
-          Insert
+          {t("liveArtifact.dialogs.insert")}
         </Button>
       </DialogFooter>
     </>
@@ -236,6 +236,7 @@ function CostSummaryFilterBody({
   projectId,
   onInsert,
 }: CostSummaryFilterDialogProps) {
+  const t = useTranslations("docs");
   const membersByProject = useMemberStore((state) => state.membersByProject);
   const fetchMembers = useMemberStore((state) => state.fetchMembers);
 
@@ -281,16 +282,15 @@ function CostSummaryFilterBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Embed live cost summary</DialogTitle>
+        <DialogTitle>{t("liveArtifact.dialogs.costSummary.title")}</DialogTitle>
         <DialogDescription>
-          Aggregate spend for a date range. Filters and group-by are stored in
-          the block and re-projected on every render.
+          {t("liveArtifact.dialogs.costSummary.desc")}
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-3">
         <div className="grid grid-cols-2 gap-3">
           <div className="grid gap-1">
-            <Label htmlFor="cost-range-start">Start date</Label>
+            <Label htmlFor="cost-range-start">{t("liveArtifact.dialogs.costSummary.startDate")}</Label>
             <Input
               id="cost-range-start"
               type="date"
@@ -299,7 +299,7 @@ function CostSummaryFilterBody({
             />
           </div>
           <div className="grid gap-1">
-            <Label htmlFor="cost-range-end">End date</Label>
+            <Label htmlFor="cost-range-end">{t("liveArtifact.dialogs.costSummary.endDate")}</Label>
             <Input
               id="cost-range-end"
               type="date"
@@ -310,14 +310,14 @@ function CostSummaryFilterBody({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="grid gap-1">
-            <Label htmlFor="cost-runtime">Runtime</Label>
+            <Label htmlFor="cost-runtime">{t("liveArtifact.dialogs.costSummary.runtime")}</Label>
             <select
               id="cost-runtime"
               className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
               value={runtime}
               onChange={(event) => setRuntime(event.target.value)}
             >
-              <option value="">Any runtime</option>
+              <option value="">{t("liveArtifact.dialogs.costSummary.anyRuntime")}</option>
               {RUNTIME_OPTIONS.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -326,14 +326,14 @@ function CostSummaryFilterBody({
             </select>
           </div>
           <div className="grid gap-1">
-            <Label htmlFor="cost-provider">Provider</Label>
+            <Label htmlFor="cost-provider">{t("liveArtifact.dialogs.costSummary.provider")}</Label>
             <select
               id="cost-provider"
               className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
               value={provider}
               onChange={(event) => setProvider(event.target.value)}
             >
-              <option value="">Any provider</option>
+              <option value="">{t("liveArtifact.dialogs.costSummary.anyProvider")}</option>
               {PROVIDER_OPTIONS.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -344,14 +344,14 @@ function CostSummaryFilterBody({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="grid gap-1">
-            <Label htmlFor="cost-member">Member</Label>
+            <Label htmlFor="cost-member">{t("liveArtifact.dialogs.costSummary.member")}</Label>
             <select
               id="cost-member"
               className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
               value={memberId}
               onChange={(event) => setMemberId(event.target.value)}
             >
-              <option value="">Any member</option>
+              <option value="">{t("liveArtifact.dialogs.costSummary.anyMember")}</option>
               {members.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.name ?? member.id}
@@ -360,7 +360,7 @@ function CostSummaryFilterBody({
             </select>
           </div>
           <div className="grid gap-1">
-            <Label htmlFor="cost-group-by">Group by</Label>
+            <Label htmlFor="cost-group-by">{t("liveArtifact.dialogs.costSummary.groupBy")}</Label>
             <select
               id="cost-group-by"
               className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
@@ -371,14 +371,14 @@ function CostSummaryFilterBody({
             >
               {GROUP_BY_OPTIONS.map((opt) => (
                 <option key={opt || "none"} value={opt}>
-                  {opt || "No grouping"}
+                  {opt || t("liveArtifact.dialogs.costSummary.noGrouping")}
                 </option>
               ))}
             </select>
           </div>
         </div>
         <div className="grid gap-1">
-          <Label htmlFor="cost-top-n">Top N rows</Label>
+          <Label htmlFor="cost-top-n">{t("liveArtifact.dialogs.costSummary.topN")}</Label>
           <Input
             id="cost-top-n"
             type="number"
@@ -394,10 +394,10 @@ function CostSummaryFilterBody({
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>
-          Cancel
+          {t("liveArtifact.dialogs.cancel")}
         </Button>
         <Button onClick={handleConfirm} disabled={confirmDisabled}>
-          Insert
+          {t("liveArtifact.dialogs.insert")}
         </Button>
       </DialogFooter>
     </>
@@ -432,6 +432,7 @@ function ReviewPickerBody({
   onInsert,
   reviewsOverride,
 }: ReviewPickerDialogProps) {
+  const t = useTranslations("docs");
   const allReviews = useReviewStore((state) => state.allReviews);
   const fetchAllReviews = useReviewStore((state) => state.fetchAllReviews);
   const [search, setSearch] = useState("");
@@ -474,21 +475,21 @@ function ReviewPickerBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Embed live review</DialogTitle>
+        <DialogTitle>{t("liveArtifact.dialogs.review.title")}</DialogTitle>
         <DialogDescription>
-          Link a review. Status, risk level, and finding counts stay in sync.
+          {t("liveArtifact.dialogs.review.desc")}
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-3">
         <Input
-          aria-label="Search reviews"
-          placeholder="Filter by id, task, status, risk"
+          aria-label={t("liveArtifact.dialogs.review.searchAriaLabel")}
+          placeholder={t("liveArtifact.dialogs.review.searchPlaceholder")}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
         <div
           role="listbox"
-          aria-label="Reviews"
+          aria-label={t("liveArtifact.dialogs.review.listAriaLabel")}
           className="max-h-72 space-y-2 overflow-y-auto"
         >
           {filteredReviews.map((review) => {
@@ -512,7 +513,7 @@ function ReviewPickerBody({
                   </span>
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  risk: {review.riskLevel || "unknown"} · task {shortId(review.taskId)}
+                  {t("liveArtifact.dialogs.review.risk", { level: review.riskLevel || t("liveArtifact.dialogs.review.unknown") })} · task {shortId(review.taskId)}
                   {review.summary ? ` · ${review.summary.slice(0, 60)}` : ""}
                 </div>
               </button>
@@ -520,17 +521,17 @@ function ReviewPickerBody({
           })}
           {filteredReviews.length === 0 ? (
             <div className="rounded-lg border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
-              No reviews match this search.
+              {t("liveArtifact.dialogs.review.empty")}
             </div>
           ) : null}
         </div>
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>
-          Cancel
+          {t("liveArtifact.dialogs.cancel")}
         </Button>
         <Button onClick={handleConfirm} disabled={confirmDisabled}>
-          Insert
+          {t("liveArtifact.dialogs.insert")}
         </Button>
       </DialogFooter>
     </>
@@ -566,6 +567,7 @@ function TaskGroupFilterBody({
   onInsert,
   savedViewsOverride,
 }: TaskGroupFilterDialogProps) {
+  const t = useTranslations("docs");
   const viewsByProject = useSavedViewStore((state) => state.viewsByProject);
   const fetchViews = useSavedViewStore((state) => state.fetchViews);
 
@@ -618,16 +620,15 @@ function TaskGroupFilterBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Embed live task group</DialogTitle>
+        <DialogTitle>{t("liveArtifact.dialogs.taskGroup.title")}</DialogTitle>
         <DialogDescription>
-          Pick a saved view or define an inline filter. Rows update as tasks
-          change.
+          {t("liveArtifact.dialogs.taskGroup.desc")}
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-3">
         <div
           role="tablist"
-          aria-label="Filter mode"
+          aria-label={t("liveArtifact.dialogs.taskGroup.filterModeAriaLabel")}
           className="grid grid-cols-2 gap-1 rounded-md border border-border/60 p-1"
         >
           <button
@@ -642,7 +643,7 @@ function TaskGroupFilterBody({
                 : "text-muted-foreground")
             }
           >
-            Saved view
+            {t("liveArtifact.dialogs.taskGroup.savedViewTab")}
           </button>
           <button
             type="button"
@@ -656,20 +657,20 @@ function TaskGroupFilterBody({
                 : "text-muted-foreground")
             }
           >
-            Inline filter
+            {t("liveArtifact.dialogs.taskGroup.inlineFilterTab")}
           </button>
         </div>
 
         {mode === "saved_view" ? (
           <div className="grid gap-1">
-            <Label htmlFor="task-group-saved-view">Saved view</Label>
+            <Label htmlFor="task-group-saved-view">{t("liveArtifact.dialogs.taskGroup.savedViewLabel")}</Label>
             <select
               id="task-group-saved-view"
               className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
               value={savedViewId}
               onChange={(event) => setSavedViewId(event.target.value)}
             >
-              <option value="">Select a saved view</option>
+              <option value="">{t("liveArtifact.dialogs.taskGroup.selectSavedView")}</option>
               {savedViews.map((view) => (
                 <option key={view.id} value={view.id}>
                   {view.name}
@@ -678,7 +679,7 @@ function TaskGroupFilterBody({
             </select>
             {savedViews.length === 0 ? (
               <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-                No saved views exist for this project yet.
+                {t("liveArtifact.dialogs.taskGroup.noSavedViews")}
               </div>
             ) : null}
           </div>
@@ -686,19 +687,19 @@ function TaskGroupFilterBody({
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1">
-                <Label htmlFor="task-group-status">Status</Label>
+                <Label htmlFor="task-group-status">{t("liveArtifact.dialogs.taskGroup.status")}</Label>
                 <Input
                   id="task-group-status"
-                  placeholder="e.g. in_progress"
+                  placeholder={t("liveArtifact.dialogs.taskGroup.statusPlaceholder")}
                   value={status}
                   onChange={(event) => setStatus(event.target.value)}
                 />
               </div>
               <div className="grid gap-1">
-                <Label htmlFor="task-group-assignee">Assignee</Label>
+                <Label htmlFor="task-group-assignee">{t("liveArtifact.dialogs.taskGroup.assignee")}</Label>
                 <Input
                   id="task-group-assignee"
-                  placeholder="member id"
+                  placeholder={t("liveArtifact.dialogs.taskGroup.assigneePlaceholder")}
                   value={assignee}
                   onChange={(event) => setAssignee(event.target.value)}
                 />
@@ -706,7 +707,7 @@ function TaskGroupFilterBody({
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="grid gap-1">
-                <Label htmlFor="task-group-tag">Tag</Label>
+                <Label htmlFor="task-group-tag">{t("liveArtifact.dialogs.taskGroup.tag")}</Label>
                 <Input
                   id="task-group-tag"
                   value={tag}
@@ -714,7 +715,7 @@ function TaskGroupFilterBody({
                 />
               </div>
               <div className="grid gap-1">
-                <Label htmlFor="task-group-sprint">Sprint</Label>
+                <Label htmlFor="task-group-sprint">{t("liveArtifact.dialogs.taskGroup.sprint")}</Label>
                 <Input
                   id="task-group-sprint"
                   value={sprintId}
@@ -722,7 +723,7 @@ function TaskGroupFilterBody({
                 />
               </div>
               <div className="grid gap-1">
-                <Label htmlFor="task-group-milestone">Milestone</Label>
+                <Label htmlFor="task-group-milestone">{t("liveArtifact.dialogs.taskGroup.milestone")}</Label>
                 <Input
                   id="task-group-milestone"
                   value={milestoneId}
@@ -734,7 +735,7 @@ function TaskGroupFilterBody({
         )}
 
         <div className="grid gap-1">
-          <Label htmlFor="task-group-page-size">Rows per page</Label>
+          <Label htmlFor="task-group-page-size">{t("liveArtifact.dialogs.taskGroup.rowsPerPage")}</Label>
           <Input
             id="task-group-page-size"
             type="number"
@@ -750,10 +751,10 @@ function TaskGroupFilterBody({
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>
-          Cancel
+          {t("liveArtifact.dialogs.cancel")}
         </Button>
         <Button onClick={handleConfirm} disabled={confirmDisabled}>
-          Insert
+          {t("liveArtifact.dialogs.insert")}
         </Button>
       </DialogFooter>
     </>

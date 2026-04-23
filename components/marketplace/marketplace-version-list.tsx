@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { useMarketplaceStore } from "@/lib/stores/marketplace-store";
+import { useTranslations } from "next-intl";
 import { formatDistanceToNow } from "date-fns";
 
 const MARKETPLACE_URL =
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export function MarketplaceVersionList({ itemId, canManage = false }: Props) {
+  const t = useTranslations("marketplace");
   const { fetchItemVersions, selectedItemVersions, yankVersion } = useMarketplaceStore();
 
   useEffect(() => {
@@ -25,7 +27,7 @@ export function MarketplaceVersionList({ itemId, canManage = false }: Props) {
   if (selectedItemVersions.length === 0) {
     return (
       <p className="text-xs text-muted-foreground p-4">
-        No versions published yet.
+        {t("versions.noVersions")}
       </p>
     );
   }
@@ -39,10 +41,10 @@ export function MarketplaceVersionList({ itemId, canManage = false }: Props) {
               <Badge variant="outline" className="text-xs font-mono">
                 {v.version}
               </Badge>
-              {v.is_latest && <Badge className="text-xs">latest</Badge>}
+              {v.is_latest && <Badge className="text-xs">{t("versions.latest")}</Badge>}
               {v.is_yanked && (
                 <Badge variant="destructive" className="text-xs">
-                  yanked
+                  {t("versions.yanked")}
                 </Badge>
               )}
             </div>
@@ -61,7 +63,7 @@ export function MarketplaceVersionList({ itemId, canManage = false }: Props) {
                 download
               >
                 <Download className="w-3 h-3" />
-                Download
+                {t("versions.download")}
               </a>
               {canManage ? (
                 <Button
@@ -71,7 +73,7 @@ export function MarketplaceVersionList({ itemId, canManage = false }: Props) {
                   className="h-7 text-xs"
                   onClick={() => void yankVersion(itemId, v.version)}
                 >
-                  Yank
+                  {t("versions.yank")}
                 </Button>
               ) : null}
             </div>

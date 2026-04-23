@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -483,9 +484,10 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       set({ projectId, currentAsset: asset });
       return projectId || null;
     } catch (error) {
+      const locale = getPreferredLocale();
       set({
         error:
-          error instanceof Error ? error.message : "Failed to resolve doc page",
+          error instanceof Error ? error.message : (locale === "zh-CN" ? "解析文档页面失败" : "Failed to resolve doc page"),
       });
       return null;
     } finally {
@@ -503,7 +505,8 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       );
       set({ tree: data.map(toTreeNode) });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "Failed to load knowledge tree" });
+      const locale = getPreferredLocale();
+      set({ error: error instanceof Error ? error.message : (locale === "zh-CN" ? "加载知识树失败" : "Failed to load knowledge tree") });
     } finally {
       set({ loading: false });
     }
@@ -525,7 +528,8 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       );
       set({ currentAsset: toKnowledgeAsset(data) });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "Failed to load asset" });
+      const locale = getPreferredLocale();
+      set({ error: error instanceof Error ? error.message : (locale === "zh-CN" ? "加载资产失败" : "Failed to load asset") });
     } finally {
       set({ loading: false });
     }
@@ -817,7 +821,8 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       );
       set({ ingestedFiles: data.map(toKnowledgeAsset) });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "Failed to load files" });
+      const locale = getPreferredLocale();
+      set({ error: error instanceof Error ? error.message : (locale === "zh-CN" ? "加载文件失败" : "Failed to load files") });
     } finally {
       set({ loading: false });
     }

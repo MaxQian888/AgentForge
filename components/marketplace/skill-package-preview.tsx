@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import YAML from "yaml";
+import { useTranslations } from "next-intl";
 import type { SkillPackagePreview } from "@/lib/stores/marketplace-store";
 
 interface Props {
@@ -24,6 +25,7 @@ function normalizeYaml(value: string) {
 }
 
 export function SkillPackagePreviewPane({ preview }: Props) {
+  const t = useTranslations("marketplace");
   const frontmatterYaml = useMemo(
     () => normalizeYaml(preview.frontmatterYaml),
     [preview.frontmatterYaml],
@@ -32,7 +34,7 @@ export function SkillPackagePreviewPane({ preview }: Props) {
   return (
     <div className="space-y-4 rounded-lg border border-border/60 p-3">
       <div className="space-y-1">
-        <p className="text-xs font-medium">Skill package</p>
+        <p className="text-xs font-medium">{t("preview.skillPackage")}</p>
         <p className="text-xs text-muted-foreground">
           {preview.canonicalPath}
         </p>
@@ -48,7 +50,7 @@ export function SkillPackagePreviewPane({ preview }: Props) {
 
       {frontmatterYaml ? (
         <div className="space-y-2">
-          <p className="text-xs font-medium">Frontmatter YAML</p>
+          <p className="text-xs font-medium">{t("preview.frontmatter")}</p>
           <pre className="overflow-x-auto rounded-md bg-muted/50 p-3 text-xs text-foreground">
             {frontmatterYaml}
           </pre>
@@ -57,7 +59,7 @@ export function SkillPackagePreviewPane({ preview }: Props) {
 
       {preview.agentConfigs.length > 0 ? (
         <div className="space-y-3">
-          <p className="text-xs font-medium">Agent YAML</p>
+          <p className="text-xs font-medium">{t("preview.agentYaml")}</p>
           {preview.agentConfigs.map((config) => (
             <div key={config.path} className="space-y-2 rounded-md border border-border/60 p-3">
               <div className="space-y-1">

@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -76,7 +77,8 @@ export const useWorkflowTriggerStore = create<WorkflowTriggerStoreState>()((set)
         triggersByWorkflow: { ...s.triggersByWorkflow, [workflowId]: data ?? [] },
       }));
     } catch (err) {
-      toast.error(`加载触发器失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `加载触发器失败: ${(err as Error).message}` : `Failed to load triggers: ${(err as Error).message}`);
     } finally {
       set((s) => ({ loading: { ...s.loading, [workflowId]: false } }));
     }
@@ -99,9 +101,11 @@ export const useWorkflowTriggerStore = create<WorkflowTriggerStoreState>()((set)
           ),
         },
       }));
-      toast.success(enabled ? "触发器已启用" : "触发器已停用");
+      const locale = getPreferredLocale();
+      toast.success(enabled ? (locale === "zh-CN" ? "触发器已启用" : "Trigger enabled") : (locale === "zh-CN" ? "触发器已停用" : "Trigger disabled"));
     } catch (err) {
-      toast.error(`切换失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `切换失败: ${(err as Error).message}` : `Failed to toggle trigger: ${(err as Error).message}`);
     }
   },
 }));

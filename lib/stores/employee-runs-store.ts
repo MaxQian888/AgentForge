@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 const DEFAULT_PAGE_SIZE = 20;
@@ -88,7 +89,8 @@ export const useEmployeeRunsStore = create<EmployeeRunsState>()((set, get) => ({
         },
       }));
     } catch (err) {
-      toast.error(`加载员工执行历史失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `加载员工执行历史失败: ${(err as Error).message}` : `Failed to load employee run history: ${(err as Error).message}`);
     } finally {
       set((s) => ({
         loadingByEmployee: { ...s.loadingByEmployee, [employeeId]: false },

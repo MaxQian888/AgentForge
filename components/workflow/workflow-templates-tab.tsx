@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
 import { LayoutTemplate, Search } from "lucide-react"
 import { toast } from "sonner"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,13 +18,6 @@ interface WorkflowTemplatesTabProps {
   projectId: string
   setActiveTab: (tab: string) => void
 }
-
-const SOURCE_FILTERS = [
-  { value: "all", label: "All" },
-  { value: "system", label: "System" },
-  { value: "user", label: "Custom" },
-  { value: "marketplace", label: "Marketplace" },
-] as const
 
 function categoryBadgeClass(category: string): string {
   switch (category) {
@@ -42,6 +36,7 @@ export function WorkflowTemplatesTab({
   projectId,
   setActiveTab,
 }: WorkflowTemplatesTabProps) {
+  const t = useTranslations("workflow")
   const {
     templates,
     templatesLoading,
@@ -53,7 +48,14 @@ export function WorkflowTemplatesTab({
     selectDefinition,
   } = useWorkflowStore()
 
-  const [sourceFilter, setSourceFilter] = useState<(typeof SOURCE_FILTERS)[number]["value"]>("all")
+  const sourceFilters = [
+    { value: "all", label: t("templates.source.all") },
+    { value: "system", label: t("templates.source.system") },
+    { value: "user", label: t("templates.source.user") },
+    { value: "marketplace", label: t("templates.source.marketplace") },
+  ] as const
+
+  const [sourceFilter, setSourceFilter] = useState<(typeof sourceFilters)[number]["value"]>("all")
   const [query, setQuery] = useState("")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogTemplate, setDialogTemplate] = useState<WorkflowDefinition | null>(null)
@@ -97,7 +99,7 @@ export function WorkflowTemplatesTab({
     const def = await cloneTemplate(dialogTemplate.id, projectId, overrides)
     setDialogLoading(false)
     if (def) {
-      toast.success("Template cloned")
+      toast.success(t("templates.toast.cloned"))
       setDialogOpen(false)
       selectDefinition(def)
       setActiveTab("workflows")
@@ -110,7 +112,7 @@ export function WorkflowTemplatesTab({
     const exec = await executeTemplate(dialogTemplate.id, projectId, taskId, overrides)
     setDialogLoading(false)
     if (exec) {
-      toast.success("Execution started")
+      toast.success(t("templates.toast.started"))
       setDialogOpen(false)
       setActiveTab("executions")
     }
@@ -132,11 +134,11 @@ export function WorkflowTemplatesTab({
             className="pl-9"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search workflow templates"
+            placeholder={t("templates.searchPlaceholder")}
           />
         </div>
         <div className="flex flex-wrap gap-2">
-          {SOURCE_FILTERS.map((filter) => (
+          {sourceFilters.map((filter) => (
             <Button
               key={filter.value}
               variant={sourceFilter === filter.value ? "default" : "outline"}
@@ -162,8 +164,8 @@ export function WorkflowTemplatesTab({
       {!templatesLoading && filteredTemplates.length === 0 && (
         <EmptyState
           icon={LayoutTemplate}
-          title="No templates found"
-          description="No workflow templates match the selected filters."
+          title={t("templates.noTemplates")}
+          description={t("templates.noTemplatesDesc")}
         />
       )}
 
@@ -202,11 +204,11 @@ export function WorkflowTemplatesTab({
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <div className="flex gap-3 text-xs text-muted-foreground">
-                        <span>{template.nodes.length} nodes</span>
-                        <span>{template.edges.length} edges</span>
+                        <span>{t("templates.nodes", { count: template.nodes.length })}</span>
+                        <span>{t("templates.edges", { count: template.edges.length })}</span>
                       </div>
                       <p className="truncate text-xs text-muted-foreground">
-                        {varKeys.length > 0 ? varKeys.join(", ") : "No variables"}
+                        {varKeys.length > 0 ? varKeys.join(", ") : t("templates.noVariables")}
                       </p>
                     </CardContent>
                   </Card>
@@ -219,7 +221,7 @@ export function WorkflowTemplatesTab({
             {selectedTemplate ? (
               <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-semibold">Preview</h3>
+                  <h3 className="text-sm font-semibold">{t("templates.preview")}</h3>
                   <div className="mt-2 font-medium">{selectedTemplate.name}</div>
                   <div className="text-xs text-muted-foreground">
                     {selectedTemplate.templateSource ?? selectedTemplate.category} · v{selectedTemplate.version}
@@ -229,15 +231,15 @@ export function WorkflowTemplatesTab({
 
                 <div className="grid gap-2 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Nodes</span>
+                    <span className="text-muted-foreground">{t("templates.nodes", { count: selectedTemplate.nodes.length })}</span>
                     <span>{selectedTemplate.nodes.length}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Edges</span>
+                    <span className="text-muted-foreground">{t("templates.edges", { count: selectedTemplate.edges.length })}</span>
                     <span>{selectedTemplate.edges.length}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Variables</span>
+                    <span className="text-muted-foreground">{t("templates.variables")}</span>
                     <span>{Object.keys(selectedTemplate.templateVars ?? {}).length}</span>
                   </div>
                 </div>
@@ -249,15 +251,15 @@ export function WorkflowTemplatesTab({
                       size="sm"
                       onClick={async () => {
                         const duplicated = await duplicateTemplate(selectedTemplate.id, projectId, {
-                          name: `${selectedTemplate.name} Copy`,
+                          name: `${selectedTemplate.name} ${t("templates.copySuffix")}`,
                           description: selectedTemplate.description,
                         })
                         if (duplicated) {
-                          toast.success("Template duplicated")
+                          toast.success(t("templates.toast.duplicated"))
                         }
                       }}
                     >
-                      Duplicate
+                      {t("templates.actions.duplicate")}
                     </Button>
                   )}
                   {(selectedTemplate.canEdit ?? false) && (
@@ -269,7 +271,7 @@ export function WorkflowTemplatesTab({
                         setActiveTab("workflows")
                       }}
                     >
-                      Edit
+                      {t("templates.actions.edit")}
                     </Button>
                   )}
                   {(selectedTemplate.canDelete ?? false) && (
@@ -279,11 +281,11 @@ export function WorkflowTemplatesTab({
                       onClick={async () => {
                         const ok = await deleteTemplate(selectedTemplate.id, projectId)
                         if (ok) {
-                          toast.success("Template deleted")
+                          toast.success(t("templates.toast.deleted"))
                         }
                       }}
                     >
-                      Delete
+                      {t("templates.actions.delete")}
                     </Button>
                   )}
                   {(selectedTemplate.canClone ?? true) && (
@@ -296,7 +298,7 @@ export function WorkflowTemplatesTab({
                         setDialogOpen(true)
                       }}
                     >
-                      Clone
+                      {t("templates.actions.clone")}
                     </Button>
                   )}
                   {(selectedTemplate.canExecute ?? true) && (
@@ -308,7 +310,7 @@ export function WorkflowTemplatesTab({
                         setDialogOpen(true)
                       }}
                     >
-                      Execute
+                      {t("templates.actions.execute")}
                     </Button>
                   )}
                 </div>
@@ -316,8 +318,8 @@ export function WorkflowTemplatesTab({
             ) : (
               <EmptyState
                 icon={LayoutTemplate}
-                title="Select a template"
-                description="Choose a template to inspect its source, variables, and available actions."
+                title={t("templates.selectTitle")}
+                description={t("templates.selectDesc")}
               />
             )}
           </div>

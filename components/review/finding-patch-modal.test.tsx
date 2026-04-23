@@ -1,3 +1,13 @@
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const messages: Record<string, string> = {
+      patchTitle: "Suggested Patch",
+      patchUnavailable: "No patch available.",
+    };
+    return messages[key] ?? key;
+  },
+}));
+
 jest.mock("react-diff-viewer-continued", () => {
   return {
     __esModule: true,

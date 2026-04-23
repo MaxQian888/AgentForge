@@ -35,7 +35,7 @@ export function VelocityChart({ data }: VelocityChartProps) {
             <div
               key={point.period}
               className="flex flex-1 flex-col items-center gap-1"
-              title={`${point.period}: ${point.tasksCompleted} tasks, $${point.costUsd.toFixed(2)}`}
+              title={`${point.period}: ${point.tasksCompleted} ${t("velocityTasksTooltip")}, $${point.costUsd.toFixed(2)}`}
             >
               <span className="text-xs text-muted-foreground">
                 {point.tasksCompleted}

@@ -42,6 +42,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useTranslations } from "next-intl";
 import {
   useEmployeeStore,
   type CreateEmployeeInput,
@@ -60,6 +61,7 @@ interface EmployeesSectionProps {
 }
 
 export function EmployeesSection({ projectId }: EmployeesSectionProps) {
+  const t = useTranslations("employees");
   const employeesByProject = useEmployeeStore((s) => s.employeesByProject);
   const loadingByProject = useEmployeeStore((s) => s.loadingByProject);
   const fetchEmployees = useEmployeeStore((s) => s.fetchEmployees);
@@ -79,10 +81,10 @@ export function EmployeesSection({ projectId }: EmployeesSectionProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>员工 (Employees)</CardTitle>
+          <CardTitle>{t("title")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">请选择项目以查看员工列表。</p>
+          <p className="text-sm text-muted-foreground">{t("selectProject")}</p>
         </CardContent>
       </Card>
     );
@@ -105,34 +107,34 @@ export function EmployeesSection({ projectId }: EmployeesSectionProps) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>员工 (Employees)</CardTitle>
+          <CardTitle>{t("title")}</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            员工是持久化的能力载体。每个员工绑定一个 role、可扩展技能、拥有独立记忆命名空间，在 workflow 的 llm_agent 节点中被复用。
+            {t("description")}
           </p>
         </div>
         <Button onClick={handleOpenCreate} size="sm">
           <Plus className="h-4 w-4 mr-1" />
-          新建员工
+          {t("create")}
         </Button>
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">加载中...</p>
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
         ) : employees.length === 0 ? (
           <div className="text-center py-8">
             <p className="text-sm text-muted-foreground">
-              当前项目还没有员工。点击&ldquo;新建员工&rdquo;创建第一个。
+              {t("empty")}
             </p>
           </div>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>名称</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>创建时间</TableHead>
-                <TableHead className="text-right">操作</TableHead>
+                <TableHead>{t("table.name")}</TableHead>
+                <TableHead>{t("table.role")}</TableHead>
+                <TableHead>{t("table.status")}</TableHead>
+                <TableHead>{t("table.createdAt")}</TableHead>
+                <TableHead className="text-right">{t("table.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -148,14 +150,14 @@ export function EmployeesSection({ projectId }: EmployeesSectionProps) {
                     </code>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={stateColor[emp.state]}>{emp.state}</Badge>
+                    <Badge variant={stateColor[emp.state]}>{t(`status.${emp.state}`)}</Badge>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {new Date(emp.createdAt).toLocaleString()}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button asChild variant="ghost" size="sm" className="mr-1">
-                      <Link href={`/employees/${emp.id}/runs`}>Runs</Link>
+                      <Link href={`/employees/${emp.id}/runs`}>{t("runsLink")}</Link>
                     </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -165,14 +167,14 @@ export function EmployeesSection({ projectId }: EmployeesSectionProps) {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => handleOpenEdit(emp)}>
-                          编辑
+                          {t("action.edit")}
                         </DropdownMenuItem>
                         {emp.state !== "active" && (
                           <DropdownMenuItem
                             onClick={() => setState(projectId, emp.id, "active")}
                           >
                             <Play className="h-3.5 w-3.5 mr-2" />
-                            启用
+                            {t("action.activate")}
                           </DropdownMenuItem>
                         )}
                         {emp.state === "active" && (
@@ -180,7 +182,7 @@ export function EmployeesSection({ projectId }: EmployeesSectionProps) {
                             onClick={() => setState(projectId, emp.id, "paused")}
                           >
                             <Pause className="h-3.5 w-3.5 mr-2" />
-                            暂停
+                            {t("action.pause")}
                           </DropdownMenuItem>
                         )}
                         {emp.state !== "archived" && (
@@ -188,7 +190,7 @@ export function EmployeesSection({ projectId }: EmployeesSectionProps) {
                             onClick={() => setState(projectId, emp.id, "archived")}
                           >
                             <Archive className="h-3.5 w-3.5 mr-2" />
-                            归档
+                            {t("action.archive")}
                           </DropdownMenuItem>
                         )}
                         <AlertDialog>
@@ -198,25 +200,24 @@ export function EmployeesSection({ projectId }: EmployeesSectionProps) {
                               className="text-destructive"
                             >
                               <Trash2 className="h-3.5 w-3.5 mr-2" />
-                              删除
+                              {t("action.delete")}
                             </DropdownMenuItem>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>
-                                确认删除员工 {emp.name}?
+                                {t("delete.confirmTitle", { name: emp.name })}
                               </AlertDialogTitle>
                               <AlertDialogDescription>
-                                此操作将永久删除该员工及其所有技能绑定、执行历史。
-                                记忆（agent_memory 表中 scope=employee 的行）会随之清除。
+                                {t("delete.confirmDescription")}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>取消</AlertDialogCancel>
+                              <AlertDialogCancel>{t("delete.cancel")}</AlertDialogCancel>
                               <AlertDialogAction
                                 onClick={() => deleteEmployee(projectId, emp.id)}
                               >
-                                确认删除
+                                {t("delete.confirm")}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
@@ -264,6 +265,7 @@ interface EmployeeDrawerProps {
 }
 
 function EmployeeDrawer({ open, onOpenChange, editing, onSave }: EmployeeDrawerProps) {
+  const t = useTranslations("employees");
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [roleId, setRoleId] = useState("code-reviewer");
@@ -306,13 +308,13 @@ function EmployeeDrawer({ open, onOpenChange, editing, onSave }: EmployeeDrawerP
     try {
       parsedPrefs = runtimePrefs.trim() ? JSON.parse(runtimePrefs) : {};
     } catch {
-      alert("Runtime prefs 必须是合法 JSON");
+      alert(t("error.invalidJson.runtimePrefs"));
       return;
     }
     try {
       parsedConfig = config.trim() ? JSON.parse(config) : {};
     } catch {
-      alert("Config 必须是合法 JSON");
+      alert(t("error.invalidJson.config"));
       return;
     }
 
@@ -336,48 +338,48 @@ function EmployeeDrawer({ open, onOpenChange, editing, onSave }: EmployeeDrawerP
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{editing ? `编辑员工: ${editing.name}` : "新建员工"}</SheetTitle>
+          <SheetTitle>
+            {editing ? t("drawer.editTitle", { name: editing.name }) : t("drawer.createTitle")}
+          </SheetTitle>
           <SheetDescription>
-            {editing
-              ? "修改员工配置。Name 一经创建不可更改。"
-              : "员工一经创建后，Name 字段不可再修改（用作唯一标识）。"}
+            {editing ? t("drawer.editDescription") : t("drawer.createDescription")}
           </SheetDescription>
         </SheetHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="emp-name">Name (唯一标识)</Label>
+            <Label htmlFor="emp-name">{t("form.name.label")}</Label>
             <Input
               id="emp-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={!!editing}
-              placeholder="如: product-selector"
+              placeholder={t("form.name.placeholder")}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="emp-display">Display Name (可选)</Label>
+            <Label htmlFor="emp-display">{t("form.displayName.label")}</Label>
             <Input
               id="emp-display"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="如: 选品员工"
+              placeholder={t("form.displayName.placeholder")}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="emp-role">Role ID</Label>
+            <Label htmlFor="emp-role">{t("form.roleId.label")}</Label>
             <Input
               id="emp-role"
               value={roleId}
               onChange={(e) => setRoleId(e.target.value)}
-              placeholder="如: code-reviewer, coder, planner"
+              placeholder={t("form.roleId.placeholder")}
             />
             <p className="text-xs text-muted-foreground">
-              必须对应 roles/&lt;id&gt;/role.yaml 中注册的 role。
+              {t("form.roleId.hint")}
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="emp-prefs">Runtime Prefs (JSON)</Label>
+            <Label htmlFor="emp-prefs">{t("form.runtimePrefs.label")}</Label>
             <Textarea
               id="emp-prefs"
               value={runtimePrefs}
@@ -386,11 +388,11 @@ function EmployeeDrawer({ open, onOpenChange, editing, onSave }: EmployeeDrawerP
               className="font-mono text-xs"
             />
             <p className="text-xs text-muted-foreground">
-              示例: {'{"runtime":"claude_code","provider":"anthropic","model":"claude-opus-4-7","budgetUsd":5}'}
+              {t("form.runtimePrefs.hint")}
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="emp-config">Config (JSON)</Label>
+            <Label htmlFor="emp-config">{t("form.config.label")}</Label>
             <Textarea
               id="emp-config"
               value={config}
@@ -399,30 +401,30 @@ function EmployeeDrawer({ open, onOpenChange, editing, onSave }: EmployeeDrawerP
               className="font-mono text-xs"
             />
             <p className="text-xs text-muted-foreground">
-              可用字段 system_prompt_override 覆盖 role 默认系统提示。
+              {t("form.config.hint")}
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="emp-skills">额外技能 (每行一个路径)</Label>
+            <Label htmlFor="emp-skills">{t("form.skills.label")}</Label>
             <Textarea
               id="emp-skills"
               value={skillsText}
               onChange={(e) => setSkillsText(e.target.value)}
               rows={3}
-              placeholder="skills/typescript&#10;skills/go"
+              placeholder={t("form.skills.placeholder")}
             />
             <p className="text-xs text-muted-foreground">
-              在 role 基础技能之外追加；路径格式与 role manifest 中 skills[].path 相同。
+              {t("form.skills.hint")}
             </p>
           </div>
         </div>
 
         <SheetFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            取消
+            {t("form.cancel")}
           </Button>
           <Button onClick={handleSave} disabled={!name.trim() || !roleId.trim()}>
-            {editing ? "保存修改" : "创建员工"}
+            {editing ? t("form.save") : t("form.create")}
           </Button>
         </SheetFooter>
       </SheetContent>

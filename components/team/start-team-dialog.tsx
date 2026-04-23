@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -50,6 +51,8 @@ export function StartTeamDialog({
   open,
   onOpenChange,
 }: StartTeamDialogProps) {
+  const t = useTranslations("teams");
+  const tc = useTranslations("common");
   const [budget, setBudget] = useState("10.00");
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
   const project = useProjectStore((s) => {
@@ -108,15 +111,15 @@ export function StartTeamDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Start Agent Team</DialogTitle>
+          <DialogTitle>{t("startDialog.title")}</DialogTitle>
           <DialogDescription>
-            Launch a Planner, Coder(s), Reviewer pipeline for: {taskTitle}
+            {t("startDialog.description", { taskTitle })}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="budget">Budget (USD)</Label>
+            <Label htmlFor="budget">{t("startDialog.budgetLabel")}</Label>
             <Input
               id="budget"
               type="number"
@@ -135,14 +138,14 @@ export function StartTeamDialog({
           />
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="strategy">Strategy</Label>
+            <Label htmlFor="strategy">{t("startDialog.strategyLabel")}</Label>
             <Select value={strategy} disabled>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={DEFAULT_TEAM_STRATEGY}>
-                  Planner &rarr; Coder &rarr; Reviewer
+                  {t("startDialog.strategyValue")}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -154,13 +157,13 @@ export function StartTeamDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {tc("action.cancel")}
             </Button>
             <Button
               type="submit"
               disabled={submitting || hasBlockingDiagnostics || !selectedRuntime?.available}
             >
-              {submitting ? "Starting..." : "Start Team"}
+              {submitting ? t("startDialog.starting") : t("startDialog.start")}
             </Button>
           </DialogFooter>
         </form>

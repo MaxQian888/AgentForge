@@ -2,13 +2,15 @@
 
 import { useEffect } from "react";
 import { SkillsWorkspace } from "@/components/skills/skills-workspace";
+import { useTranslations } from "next-intl";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 import { useSkillsStore } from "@/lib/stores/skills-store";
 
 export default function SkillsPage() {
+  const t = useTranslations();
   useBreadcrumbs([
-    { label: "Configuration", href: "/" },
-    { label: "Skills" },
+    { label: t("common.nav.group.configuration"), href: "/" },
+    { label: t("common.nav.skills") },
   ]);
 
   const {

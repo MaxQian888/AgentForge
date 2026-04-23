@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,8 @@ export function SaveViewDialog({
   projectId: string;
   config: unknown;
 }) {
+  const t = useTranslations("views");
+  const tCommon = useTranslations("common");
   const createView = useSavedViewStore((state) => state.createView);
   const [name, setName] = useState("");
   const [shared, setShared] = useState(false);
@@ -26,22 +29,22 @@ export function SaveViewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Save View</DialogTitle>
-          <DialogDescription>Persist the current workspace layout and filters.</DialogDescription>
+          <DialogTitle>{t("saveViewDialog.title")}</DialogTitle>
+          <DialogDescription>{t("saveViewDialog.description")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Name</Label>
-            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="My triage view" />
+            <Label>{t("saveViewDialog.nameLabel")}</Label>
+            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("saveViewDialog.namePlaceholder")} />
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} />
-            Shared with project members
+            {t("saveViewDialog.sharedLabel")}
           </label>
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tCommon("action.cancel")}
           </Button>
           <Button
             type="button"
@@ -58,7 +61,7 @@ export function SaveViewDialog({
               onOpenChange(false);
             }}
           >
-            Save
+            {tCommon("action.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

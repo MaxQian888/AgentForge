@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   usePluginStore,
@@ -44,16 +45,8 @@ function getSourceColor(source: string): string {
   return eventSourceColors[source] ?? "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400";
 }
 
-function formatTimestamp(ts?: string): string {
-  if (!ts) return "Unknown time";
-  try {
-    return new Date(ts).toLocaleString();
-  } catch {
-    return ts;
-  }
-}
-
 export function PluginEventTimeline({ pluginId }: PluginEventTimelineProps) {
+  const t = useTranslations("plugins");
   const events = usePluginStore((s) => s.events[pluginId]);
   const fetchEvents = usePluginStore((s) => s.fetchEvents);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -82,6 +75,15 @@ export function PluginEventTimeline({ pluginId }: PluginEventTimelineProps) {
     });
   };
 
+  const formatTimestamp = (ts?: string): string => {
+    if (!ts) return t("eventTimeline.unknownTime");
+    try {
+      return new Date(ts).toLocaleString();
+    } catch {
+      return ts;
+    }
+  };
+
   const sortedEvents: PluginEventRecord[] = events
     ? [...events].sort((a, b) => {
         const ta = a.created_at ?? "";
@@ -93,21 +95,21 @@ export function PluginEventTimeline({ pluginId }: PluginEventTimelineProps) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Event timeline</p>
+        <p className="text-sm font-medium">{t("eventTimeline.title")}</p>
         <select
           className="h-8 rounded-md border bg-background px-2 text-xs"
           value={limit}
           onChange={(e) => handleLimitChange(Number(e.target.value))}
         >
-          <option value={25}>25 events</option>
-          <option value={50}>50 events</option>
-          <option value={100}>100 events</option>
+          <option value={25}>{t("eventTimeline.events25")}</option>
+          <option value={50}>{t("eventTimeline.events50")}</option>
+          <option value={100}>{t("eventTimeline.events100")}</option>
         </select>
       </div>
 
       {sortedEvents.length === 0 ? (
         <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-          No events recorded for this plugin yet.
+          {t("eventTimeline.noEvents")}
         </div>
       ) : (
         <div className="flex flex-col gap-2">

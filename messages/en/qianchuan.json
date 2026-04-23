@@ -54,5 +54,33 @@
     "publishedSuccess": "Strategy published",
     "archivedSuccess": "Strategy archived",
     "deletedSuccess": "Strategy deleted"
+  },
+  "store": {
+    "bindings": {
+      "error": {
+        "load": "Failed to load Qianchuan bindings",
+        "create": "Failed to create binding",
+        "update": "Failed to update binding",
+        "delete": "Failed to delete binding",
+        "sync": "Sync failed"
+      },
+      "success": {
+        "create": "Binding created",
+        "delete": "Binding deleted",
+        "sync": "Sync triggered"
+      }
+    },
+    "strategies": {
+      "error": {
+        "create": "Failed to create strategy",
+        "update": "Failed to update strategy",
+        "publish": "Failed to publish strategy",
+        "archive": "Failed to archive strategy",
+        "delete": "Failed to delete strategy"
+      }
+    },
+    "error": {
+      "notLoggedIn": "Not logged in"
+    }
   }
 }

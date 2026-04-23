@@ -1,3 +1,20 @@
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
+    const map: Record<string, string> = {
+      "burndown.empty": "No burndown data available yet.",
+      "burndown.remaining": "Remaining: {remainingTasks}",
+      "burndown.completed": "Completed: {completedTasks}",
+    };
+    let result = map[key] ?? key;
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        result = result.replace(`{${k}}`, String(v));
+      });
+    }
+    return result;
+  },
+}));
+
 import { render, screen } from "@testing-library/react";
 import { BurndownChart } from "./burndown-chart";
 import type { SprintBurndownPoint } from "@/lib/stores/sprint-store";

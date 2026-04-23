@@ -1,6 +1,15 @@
 import { fireEvent, render, screen, act } from "@testing-library/react";
 import { MarketplaceSearchBar } from "./marketplace-search-bar";
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      "search.placeholder": "Search marketplace...",
+    };
+    return map[key] ?? key;
+  },
+}));
+
 describe("MarketplaceSearchBar", () => {
   beforeEach(() => {
     jest.useFakeTimers();

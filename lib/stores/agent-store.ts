@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { withDevtools } from "./_devtools";
+import { getPreferredLocale } from "./locale-store";
 import type {
   CodingAgentCatalog,
   CodingAgentInteractionCapabilities,
@@ -890,8 +891,9 @@ export const useAgentStore = create<AgentState>()(
         return { agents, pool: syncPoolWithAgents(state.pool, agents) };
       });
     } catch (error) {
-      toast.error("Failed to spawn agent", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "启动 Agent 失败" : "Failed to spawn agent", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
     }
   },
@@ -908,8 +910,9 @@ export const useAgentStore = create<AgentState>()(
         return { agents, pool: syncPoolWithAgents(state.pool, agents) };
       });
     } catch (error) {
-      toast.error("Failed to pause agent", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "暂停 Agent 失败" : "Failed to pause agent", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
     }
   },
@@ -926,8 +929,9 @@ export const useAgentStore = create<AgentState>()(
         return { agents, pool: syncPoolWithAgents(state.pool, agents) };
       });
     } catch (error) {
-      toast.error("Failed to resume agent", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "恢复 Agent 失败" : "Failed to resume agent", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
     }
   },
@@ -944,8 +948,9 @@ export const useAgentStore = create<AgentState>()(
         return { agents, pool: syncPoolWithAgents(state.pool, agents) };
       });
     } catch (error) {
-      toast.error("Failed to terminate agent", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "终止 Agent 失败" : "Failed to terminate agent", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
     }
   },

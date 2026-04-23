@@ -1,0 +1,24 @@
+{
+  "saveViewDialog": {
+    "title": "保存视图",
+    "description": "持久化当前工作区布局和筛选条件。",
+    "nameLabel": "名称",
+    "namePlaceholder": "我的分类视图",
+    "sharedLabel": "与项目成员共享"
+  },
+  "viewShareDialog": {
+    "title": "分享视图",
+    "description": "通过角色 ID 或成员 ID 分享此视图。",
+    "roleIdsLabel": "角色 ID",
+    "roleIdsPlaceholder": "reviewer, lead",
+    "memberIdsLabel": "成员 ID",
+    "memberIdsPlaceholder": "member-1, member-2",
+    "saveSharing": "保存分享设置"
+  },
+  "viewSwitcher": {
+    "unsavedView": "未保存视图",
+    "saveView": "保存视图",
+    "share": "分享",
+    "setDefault": "设为默认"
+  }
+}

@@ -204,7 +204,17 @@
     "delete": "删除",
     "filterAll": "全部",
     "filterPlaceholder": "筛选 {name}",
-    "unset": "未设置"
+    "unset": "未设置",
+    "types": {
+      "text": "文本",
+      "number": "数字",
+      "select": "单选",
+      "multi_select": "多选",
+      "date": "日期",
+      "user": "用户",
+      "url": "链接",
+      "checkbox": "复选框"
+    }
   },
   "automations": {
     "ruleName": "规则名称",
@@ -216,7 +226,38 @@
     "createRule": "创建规则",
     "disable": "禁用",
     "enable": "启用",
-    "delete": "删除"
+    "delete": "删除",
+    "workflowPluginId": "工作流插件 ID",
+    "workflowPluginHelp": "使用 start_workflow 进行标准工作流编排，invoke_plugin 仍用于通用插件操作。"
+  },
+  "store": {
+    "secrets": {
+      "error": {
+        "load": "加载密钥失败",
+        "create": "创建密钥失败",
+        "rotate": "轮换密钥失败",
+        "delete": "删除密钥失败"
+      },
+      "success": {
+        "create": "密钥 {name} 已创建",
+        "rotate": "密钥 {name} 已轮换",
+        "delete": "密钥已删除"
+      }
+    },
+    "vcs": {
+      "error": {
+        "load": "加载 VCS 集成失败",
+        "connect": "连接仓库失败",
+        "update": "更新集成失败",
+        "delete": "删除集成失败",
+        "sync": "触发同步失败"
+      },
+      "success": {
+        "connect": "已连接 {owner}/{repo}",
+        "delete": "集成已删除",
+        "syncQueued": "已排队后台同步"
+      }
+    }
   },
   "runtimeConfig": {
     "adapterFamily": "适配器类型",

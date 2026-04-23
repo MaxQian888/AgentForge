@@ -50,6 +50,398 @@
     "undo": "Undo",
     "redo": "Redo",
     "hidePalette": "Hide palette",
-    "showPalette": "Show palette"
+    "showPalette": "Show palette",
+    "workflowPluginId": "Workflow plugin ID",
+    "triggerProfile": "Trigger profile",
+    "exportFallbackName": "workflow"
+  },
+  "toolbar": {
+    "workflowNamePlaceholder": "Workflow name",
+    "descriptionPlaceholder": "Description",
+    "undoTooltip": "Undo (Ctrl+Z)",
+    "redoTooltip": "Redo (Ctrl+Shift+Z)",
+    "importAria": "Import workflow JSON",
+    "importWorkflowAria": "Import workflow",
+    "importTooltip": "Import JSON",
+    "exportAria": "Export workflow",
+    "exportTooltip": "Export JSON",
+    "saving": "Saving…"
+  },
+  "nodePalette": {
+    "searchPlaceholder": "Search nodes…",
+    "noNodes": "No nodes found.",
+    "categories": {
+      "entry": "Entry",
+      "logic": "Logic",
+      "agent": "Agent",
+      "flow": "Flow Control",
+      "human": "Human",
+      "action": "Action"
+    }
+  },
+  "nodeConfig": {
+    "nodeLabel": "Node label",
+    "configTitle": "{label} Config",
+    "dataFlowTitle": "Data Flow",
+    "advancedRawJson": "Advanced (Raw JSON)",
+    "deleteNode": "Delete Node",
+    "selectField": "Select {label}…",
+    "edge": {
+      "title": "Edge",
+      "displayLabel": "Display Label",
+      "displayLabelPlaceholder": "Optional label…",
+      "condition": "Condition",
+      "deleteEdge": "Delete Edge"
+    },
+    "conditionBuilder": {
+      "visual": "Visual",
+      "expression": "Expression",
+      "selectUpstreamNode": "Select upstream node…",
+      "fieldPlaceholder": "Field path (e.g. output.ok)",
+      "valuePlaceholder": "Value",
+      "expressionPlaceholder": "{{node.output.field}} == value",
+      "helperPrefix": "Use",
+      "helperSuffix": "to reference upstream data",
+      "tooComplex": "Expression too complex for visual mode"
+    },
+    "dataFlow": {
+      "noUpstream": "No upstream nodes connected.",
+      "directInputs": "Direct Inputs",
+      "indirect": "Indirect",
+      "hintPrefix": "Type",
+      "hintSuffix": "in any config to reference upstream data.",
+      "copyReference": "Copy reference"
+    },
+    "llmAgent": {
+      "runtime": "Runtime",
+      "runtimePlaceholder": "Select runtime…",
+      "provider": "Provider",
+      "providerPlaceholder": "Select provider…",
+      "model": "Model",
+      "modelPlaceholder": "Select model…",
+      "budgetUsd": "Budget (USD)",
+      "budgetPlaceholder": "e.g. 1.00",
+      "prompt": "Prompt",
+      "promptPlaceholder": "User prompt template…",
+      "systemPrompt": "System Prompt",
+      "systemPromptPlaceholder": "System prompt template…"
+    },
+    "httpCall": {
+      "secretsHelp": "Templating: {{secrets.NAME}} is allowed only in URL, headers, url_query, and body. Other fields reject it at save time.",
+      "method": "Method",
+      "url": "URL",
+      "urlPlaceholder": "https://api.example.com/v1/things",
+      "headers": "Headers",
+      "headerKeyPlaceholder": "Header name",
+      "headerValuePlaceholder": "Header value (e.g. Bearer {{secrets.X}})",
+      "urlQuery": "URL Query",
+      "queryKeyPlaceholder": "Query name",
+      "queryValuePlaceholder": "Value",
+      "body": "Body",
+      "bodyPlaceholder": "{\"hello\":\"world\"} -- supports {{secrets.X}} and {{$dataStore.X.Y}}",
+      "timeout": "Timeout (seconds, max 300)",
+      "treatAsSuccess": "Treat as success (comma-separated status codes)",
+      "treatAsSuccessPlaceholder": "e.g. 401,404",
+      "addRow": "Add {label}"
+    },
+    "imSend": {
+      "datastoreHelp": "Templating: {{$dataStore.<nodeId>.<field>}} resolves at execution time.",
+      "target": "Target",
+      "replyToTrigger": "Reply to triggering message",
+      "explicitChat": "Explicit chat / thread",
+      "provider": "Provider",
+      "providerPlaceholder": "feishu",
+      "chatId": "Chat ID",
+      "chatIdPlaceholder": "oc_xxx",
+      "threadId": "Thread ID (optional)",
+      "card": "Card",
+      "title": "Title",
+      "status": "Status",
+      "summary": "Summary",
+      "fields": "Fields",
+      "fieldLabelPlaceholder": "Label",
+      "fieldValuePlaceholder": "Value",
+      "addField": "Add field",
+      "actions": "Actions (buttons)",
+      "actionIdPlaceholder": "Action id (e.g. approve)",
+      "actionLabelPlaceholder": "Label",
+      "callback": "Callback",
+      "url": "URL",
+      "urlPlaceholder": "https://...",
+      "payloadPlaceholder": "Payload JSON: {\"k\":\"v\"}",
+      "addAction": "Add action",
+      "footer": "Footer (optional)"
+    },
+    "subWorkflow": {
+      "targetKind": "Target Kind",
+      "targetKindPlaceholder": "Select target kind",
+      "dagWorkflow": "DAG Workflow",
+      "workflowPlugin": "Workflow Plugin",
+      "targetWorkflow": "Target Workflow",
+      "targetPlugin": "Target Plugin",
+      "pickDagWorkflow": "Pick a DAG workflow",
+      "pickWorkflowPlugin": "Pick a workflow plugin",
+      "enterDagUuid": "Enter DAG workflow UUID",
+      "enterPluginId": "Enter plugin id",
+      "inputMapping": "Input Mapping (JSON)",
+      "inputMappingPlaceholder": "{\n  \"inputKey\": \"{{$parent.dataStore.previousNode.output.value}}\"\n}"
+    },
+    "groups": {
+      "Agent Config": "Agent Config",
+      "Condition": "Condition",
+      "Gate": "Gate",
+      "Function": "Function",
+      "Loop Config": "Loop Config",
+      "Sub-Workflow": "Sub-Workflow",
+      "Review": "Review",
+      "Event": "Event",
+      "Notification": "Notification",
+      "Status": "Status"
+    },
+    "fields": {
+      "expression": { "label": "Expression", "placeholder": "e.g. node.output.status === 'done'" },
+      "maxIterations": { "label": "Max Iterations", "placeholder": "10" },
+      "exitCondition": { "label": "Exit Condition", "placeholder": "e.g. node.output.done === true" },
+      "workflowId": { "label": "Workflow ID", "placeholder": "Workflow definition ID" },
+      "inputMapping": { "label": "Input Mapping", "placeholder": "{\"key\": \"{{node.output.value}}\"}" },
+      "prompt": { "label": "Review Prompt", "placeholder": "What should the reviewer check?" },
+      "reviewerHint": { "label": "Reviewer Hint", "placeholder": "Optional hint for the reviewer" },
+      "eventType": { "label": "Event Type", "placeholder": "e.g. webhook_received" },
+      "timeout": { "label": "Timeout (seconds)", "placeholder": "Timeout in seconds" },
+      "message": { "label": "Message", "placeholder": "Supports {{node.output.field}} variables" },
+      "channel": { "label": "Channel", "placeholder": "e.g. #general or email" },
+      "targetStatus": { "label": "Target Status" }
+    }
+  },
+  "execution": {
+    "title": "Execution",
+    "unableToLoad": "Unable to load execution",
+    "notFound": "Execution not found",
+    "started": "Started",
+    "pending": "pending",
+    "cancel": "Cancel",
+    "nodeExecution": "Node Execution",
+    "executionLog": "Execution Log",
+    "subWorkflow": {
+      "invokedByParent": "Invoked by parent",
+      "subInvocations": "Sub-invocations"
+    },
+    "deliveryFailed": {
+      "im": "Delivery failed",
+      "imTitle": "Backend failed to post result to IM thread after 3 retries",
+      "vcs": "PR comment failed",
+      "vcsTitle": "PR comment delivery failed after 3 retries"
+    }
+  },
+  "node": {
+    "status": {
+      "pending": "Pending",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "waiting": "Waiting"
+    },
+    "type": {
+      "trigger": "Trigger",
+      "condition": "Condition",
+      "agent_dispatch": "Agent dispatch",
+      "notification": "Notification",
+      "status_transition": "Status transition",
+      "gate": "Gate",
+      "parallel_split": "Parallel split",
+      "parallel_join": "Parallel join",
+      "human_review": "Human review",
+      "wait_event": "Wait event",
+      "llm_agent": "LLM agent",
+      "function": "Function",
+      "loop": "Loop",
+      "sub_workflow": "Sub-workflow",
+      "http_call": "HTTP Call",
+      "im_send": "IM Send"
+    },
+    "typeDescription": {
+      "trigger": "Starting point of the workflow",
+      "condition": "Branch based on a boolean expression",
+      "gate": "Block execution until a condition is met",
+      "function": "Execute a custom expression or script",
+      "agent_dispatch": "Dispatch a task to an AI agent",
+      "llm_agent": "Run an LLM prompt with configurable model and system prompt",
+      "parallel_split": "Fork execution into parallel branches",
+      "parallel_join": "Merge parallel branches back together",
+      "loop": "Repeat a set of nodes until a condition is satisfied",
+      "sub_workflow": "Embed and execute another workflow definition",
+      "human_review": "Pause for human approval or review",
+      "wait_event": "Pause until an external event is received",
+      "notification": "Send a notification message to a channel",
+      "status_transition": "Transition a work item to a new status",
+      "http_call": "Call an external HTTP API; supports {{secrets.X}} in url, headers, query, body",
+      "im_send": "Send a rich card with action buttons that can resume wait_event nodes"
+    },
+    "awaitingReview": "Awaiting Review",
+    "waitingForEvent": "Waiting for Event",
+    "reviewButton": "Review",
+    "sendEventButton": "Send Event",
+    "optionalComment": "Optional comment...",
+    "eventPayloadPlaceholder": "{\"event\": \"value\"}"
+  },
+  "review": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "approvedToast": "Review approved successfully",
+    "rejectedToast": "Review rejected successfully",
+    "failedToast": "Failed to submit review"
+  },
+  "event": {
+    "sendEvent": "Send Event",
+    "sentToast": "Event sent successfully",
+    "failedToast": "Failed to send event",
+    "invalidJson": "Invalid JSON"
+  },
+  "pluginRun": {
+    "unavailable": "Plugin run body unavailable",
+    "title": "Plugin Run",
+    "status": "Status",
+    "stepsTitle": "Steps",
+    "noSteps": "No steps recorded",
+    "role": "role",
+    "retries": "retries",
+    "attempts": "{count} attempts"
+  },
+  "reviewsTab": {
+    "noPending": "No pending reviews",
+    "allResolved": "All workflow reviews are resolved.",
+    "hideContext": "Hide context",
+    "showContext": "Show context",
+    "commentPlaceholder": "Optional comment...",
+    "approve": "Approve",
+    "reject": "Reject",
+    "toastApproved": "Review approved",
+    "toastRejected": "Review rejected"
+  },
+  "runs": {
+    "filter": {
+      "all": "All",
+      "dag": "DAG",
+      "plugin": "Plugin"
+    },
+    "summary": {
+      "running": "Running {count}",
+      "paused": "Paused {count}",
+      "failed": "Failed {count}"
+    },
+    "loading": "Loading runs...",
+    "noRuns": "No runs",
+    "noRunsDesc": "No workflow runs in this project yet.",
+    "triggeredBy": {
+      "trigger": "Triggered",
+      "manual": "Manual",
+      "sub_workflow": "Sub-workflow",
+      "task": "Task"
+    },
+    "employee": "Employee",
+    "time": {
+      "justNow": "just now",
+      "minutesAgo": "{count}m ago",
+      "hoursAgo": "{count}h ago",
+      "daysAgo": "{count}d ago"
+    },
+    "loadMore": "Load more",
+    "loadingMore": "Loading...",
+    "backToRuns": "Back to runs",
+    "detail": {
+      "loading": "Loading run detail...",
+      "started": "Started {time}",
+      "parent": "Parent {id}"
+    }
+  },
+  "templateDialog": {
+    "cloneTitle": "Create Workflow Copy: {name}",
+    "executeTitle": "Start Template Execution: {name}",
+    "cloneDesc": "This creates a project-owned workflow definition you can continue editing safely.",
+    "executeDesc": "This starts an execution by cloning the template into your project with the variables below.",
+    "taskIdLabel": "Task ID (optional)",
+    "taskIdPlaceholder": "Task ID (optional)",
+    "cancel": "Cancel",
+    "createCopy": "Create Workflow Copy",
+    "startExecution": "Start Execution"
+  },
+  "templates": {
+    "source": {
+      "all": "All",
+      "system": "System",
+      "user": "Custom",
+      "marketplace": "Marketplace"
+    },
+    "searchPlaceholder": "Search workflow templates",
+    "noTemplates": "No templates found",
+    "noTemplatesDesc": "No workflow templates match the selected filters.",
+    "nodes": "{count} nodes",
+    "edges": "{count} edges",
+    "noVariables": "No variables",
+    "preview": "Preview",
+    "variables": "Variables",
+    "actions": {
+      "duplicate": "Duplicate",
+      "edit": "Edit",
+      "delete": "Delete",
+      "clone": "Clone",
+      "execute": "Execute"
+    },
+    "toast": {
+      "cloned": "Template cloned",
+      "started": "Execution started",
+      "duplicated": "Template duplicated",
+      "deleted": "Template deleted"
+    },
+    "selectTitle": "Select a template",
+    "selectDesc": "Choose a template to inspect its source, variables, and available actions.",
+    "copySuffix": "Copy"
+  },
+  "store": {
+    "error": {
+      "createRule": "Failed to create automation rule",
+      "updateRule": "Failed to update automation rule",
+      "deleteRule": "Failed to delete automation rule",
+      "unknown": "Unknown error"
+    }
+  },
+  "triggers": {
+    "title": "Triggers",
+    "selectWorkflow": "Please select a workflow to view triggers.",
+    "description": "This shows the runtime status of trigger nodes defined in the workflow DAG. They are automatically synced when the workflow is saved. You can temporarily disable individual triggers without editing the DAG.",
+    "loading": "Loading...",
+    "noTriggers": "No triggers registered",
+    "noTriggersDesc": "This workflow has no registered triggers. Configure a trigger node in the DAG editor with source=im or schedule, then save.",
+    "table": {
+      "source": "Source",
+      "engine": "Engine",
+      "configSummary": "Config Summary",
+      "actingEmployee": "Acting Employee",
+      "dedupeWindow": "Dedupe Window",
+      "enabled": "Enabled",
+      "createdAt": "Created At"
+    },
+    "disabledReason": {
+      "dag_workflow_not_found": "DAG workflow not found",
+      "dag_workflow_inactive": "DAG workflow inactive",
+      "plugin_not_found": "Plugin not found",
+      "plugin_disabled": "Plugin disabled",
+      "plugin_not_workflow_kind": "Plugin is not workflow kind",
+      "plugin_process_not_executable": "Plugin process not executable",
+      "plugin_target_missing_plugin_id": "Plugin target missing plugin_id",
+      "acting_employee_not_found": "Acting employee not found",
+      "acting_employee_cross_project": "Acting employee cross-project reference",
+      "acting_employee_archived": "Acting employee archived"
+    },
+    "badge": {
+      "pluginTitle": "Fires a legacy workflow plugin run",
+      "dagTitle": "Fires a DAG workflow execution"
+    },
+    "disabledPrefix": "Disabled: ",
+    "config": {
+      "unknown": "?",
+      "utc": "UTC"
+    }
   }
 }

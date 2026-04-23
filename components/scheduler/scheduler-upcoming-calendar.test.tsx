@@ -6,6 +6,7 @@ jest.mock("next-intl", () => ({
       "calendar.nextMonth": "Next month",
       "calendar.today": "Today",
       "calendar.gridLabel": "Upcoming runs",
+      "calendar.jobsCount": "{count} jobs",
     };
     if (key === "calendar.moreItems") {
       return `+${values?.count ?? ""} more`;

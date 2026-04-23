@@ -1,0 +1,24 @@
+{
+  "saveViewDialog": {
+    "title": "Save View",
+    "description": "Persist the current workspace layout and filters.",
+    "nameLabel": "Name",
+    "namePlaceholder": "My triage view",
+    "sharedLabel": "Shared with project members"
+  },
+  "viewShareDialog": {
+    "title": "Share View",
+    "description": "Share this view with role IDs or member IDs.",
+    "roleIdsLabel": "Role IDs",
+    "roleIdsPlaceholder": "reviewer, lead",
+    "memberIdsLabel": "Member IDs",
+    "memberIdsPlaceholder": "member-1, member-2",
+    "saveSharing": "Save sharing"
+  },
+  "viewSwitcher": {
+    "unsavedView": "Unsaved view",
+    "saveView": "Save View",
+    "share": "Share",
+    "setDefault": "Set Default"
+  }
+}

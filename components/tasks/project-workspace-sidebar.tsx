@@ -227,7 +227,7 @@ export function ProjectWorkspaceSidebar({
                 onChange={(e) => setStatus(e.target.value as "all" | TaskStatus)}
               >
                 {statusOptions().map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={s}>{s === "all" ? t("filter.all") : t(`status.${s}`)}</option>
                 ))}
               </select>
             </label>
@@ -240,7 +240,7 @@ export function ProjectWorkspaceSidebar({
                 onChange={(e) => setPriority(e.target.value as "all" | TaskPriority)}
               >
                 {priorityOptions().map((p) => (
-                  <option key={p} value={p}>{p}</option>
+                  <option key={p} value={p}>{p === "all" ? t("filter.all") : t(`priority.${p}`)}</option>
                 ))}
               </select>
             </label>

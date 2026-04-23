@@ -25,6 +25,10 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}));
+
 const toastSuccessMock = jest.fn();
 const toastErrorMock = jest.fn();
 jest.mock("sonner", () => ({
@@ -362,5 +366,104 @@ describe("useLiveArtifactProjections", () => {
         payload: { asset_id: "asset-1", block_ids_affected: ["b1"] },
       }),
     ).not.toThrow();
+  });
+
+  it("shows a success toast when freeze succeeds", async () => {
+    installFetchMock((call) => {
+      if (call.url.includes("/freeze")) {
+        return jsonResponse({ id: "asset-1", frozen: true });
+      }
+      return jsonResponse({ results: {} });
+    });
+
+    const { result } = renderHook(() =>
+      useLiveArtifactProjections(baseOpts({ editorDocument: [liveBlock("b1")] })),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    result.current.actions.freeze({
+      id: "b1",
+      live_kind: "agent_run",
+      target_ref: { kind: "agent_run", id: "run-b1" },
+      view_opts: {},
+      last_rendered_at: "",
+    });
+
+    await waitFor(() =>
+      expect(toastSuccessMock).toHaveBeenCalledWith("liveArtifact.freezeSuccess"),
+    );
+  });
+
+  it("shows an error toast when freeze fails with a non-ok response", async () => {
+    installFetchMock((call) => {
+      if (call.url.includes("/freeze")) {
+        return {
+          ok: false,
+          status: 422,
+          json: async () => ({ error: "invalid state" }),
+          text: async () => "invalid state",
+        } as unknown as Response;
+      }
+      return jsonResponse({ results: {} });
+    });
+
+    const { result } = renderHook(() =>
+      useLiveArtifactProjections(baseOpts({ editorDocument: [liveBlock("b1")] })),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    result.current.actions.freeze({
+      id: "b1",
+      live_kind: "agent_run",
+      target_ref: { kind: "agent_run", id: "run-b1" },
+      view_opts: {},
+      last_rendered_at: "",
+    });
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith("liveArtifact.freezeError", {
+        description: "invalid state",
+      }),
+    );
+  });
+
+  it("shows an error toast when freeze throws a network error", async () => {
+    installFetchMock((call) => {
+      if (call.url.includes("/freeze")) {
+        return Promise.reject(new Error("network error"));
+      }
+      return jsonResponse({ results: {} });
+    });
+
+    const { result } = renderHook(() =>
+      useLiveArtifactProjections(baseOpts({ editorDocument: [liveBlock("b1")] })),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    result.current.actions.freeze({
+      id: "b1",
+      live_kind: "agent_run",
+      target_ref: { kind: "agent_run", id: "run-b1" },
+      view_opts: {},
+      last_rendered_at: "",
+    });
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith("liveArtifact.freezeError", {
+        description: "network error",
+      }),
+    );
   });
 });

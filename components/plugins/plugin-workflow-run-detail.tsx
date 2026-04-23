@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import type {
   WorkflowPluginRun,
   WorkflowStepRunStatus,
@@ -26,6 +27,7 @@ function formatDuration(start?: string, end?: string): string {
 }
 
 export function PluginWorkflowRunDetail({ run }: { run: WorkflowPluginRun }) {
+  const t = useTranslations("plugins");
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
 
   const toggleStep = (stepId: string) => {
@@ -42,12 +44,12 @@ export function PluginWorkflowRunDetail({ run }: { run: WorkflowPluginRun }) {
       {/* Run header */}
       <div className="grid gap-1 text-xs text-muted-foreground">
         <p>
-          Process: <span className="font-medium text-foreground">{run.process}</span>
+          {t("workflowRunDetail.process")}: <span className="font-medium text-foreground">{run.process}</span>
         </p>
-        <p>Started: {new Date(run.started_at).toLocaleString()}</p>
+        <p>{t("workflowRunDetail.started")}: {new Date(run.started_at).toLocaleString()}</p>
         {run.completed_at ? (
           <p>
-            Completed: {new Date(run.completed_at).toLocaleString()}
+            {t("workflowRunDetail.completed")}: {new Date(run.completed_at).toLocaleString()}
             <span className="ml-1">
               ({formatDuration(run.started_at, run.completed_at)})
             </span>
@@ -58,7 +60,7 @@ export function PluginWorkflowRunDetail({ run }: { run: WorkflowPluginRun }) {
       {/* Step progress */}
       {run.steps && run.steps.length > 0 ? (
         <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium">Steps</p>
+          <p className="text-xs font-medium">{t("workflowRunDetail.steps")}</p>
           {run.steps.map((step) => {
             const isCurrent = step.step_id === run.current_step_id;
             const isExpanded = expandedSteps.has(step.step_id);
@@ -99,13 +101,13 @@ export function PluginWorkflowRunDetail({ run }: { run: WorkflowPluginRun }) {
                   <div className="ml-5 border-l border-border/40 pl-3 py-1">
                     {step.error ? (
                       <p className="text-xs text-destructive mb-1">
-                        Error: {step.error}
+                        {t("workflowRunDetail.error")}: {step.error}
                       </p>
                     ) : null}
 
                     {step.retry_count > 0 ? (
                       <p className="text-xs text-muted-foreground mb-1">
-                        Retries: {step.retry_count}
+                        {t("workflowRunDetail.retries")}: {step.retry_count}
                       </p>
                     ) : null}
 
@@ -113,7 +115,7 @@ export function PluginWorkflowRunDetail({ run }: { run: WorkflowPluginRun }) {
                     {step.attempts && step.attempts.length > 0 ? (
                       <div className="flex flex-col gap-1">
                         <p className="text-[10px] font-medium text-muted-foreground">
-                          Attempts
+                          {t("workflowRunDetail.attempts")}
                         </p>
                         {step.attempts.map((attempt) => (
                           <div
@@ -121,7 +123,7 @@ export function PluginWorkflowRunDetail({ run }: { run: WorkflowPluginRun }) {
                             className="rounded border border-border/40 px-2 py-1 text-xs"
                           >
                             <div className="flex items-center gap-2">
-                              <span>#{attempt.attempt}</span>
+                              <span>{t("workflowRunDetail.attemptPrefix")}{attempt.attempt}</span>
                               <Badge
                                 variant="secondary"
                                 className={cn(

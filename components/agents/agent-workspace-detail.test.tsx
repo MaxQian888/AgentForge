@@ -19,6 +19,8 @@ jest.mock("next-intl", () => ({
       "workspace.permissionRequests.approve": "Approve",
       "workspace.permissionRequests.deny": "Deny",
       "workspace.logs": "Logs",
+      "detail.notFound": "Agent not found",
+      "card.budgetUsage": "Budget usage",
     };
     return map[key] ?? key;
   },

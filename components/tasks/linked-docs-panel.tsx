@@ -79,7 +79,7 @@ export function LinkedDocsPanel({
                       type="button"
                       size="sm"
                       variant="ghost"
-                      aria-label={`Remove ${doc.title}`}
+                      aria-label={t("detail.remove")}
                       onClick={() => onRemoveLink?.(doc.id)}
                     >
                       {t("detail.remove")}

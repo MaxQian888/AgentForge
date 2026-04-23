@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useRef } from "react";
+import React, { useRef, useMemo } from "react";
 import { X, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   Accordion,
   AccordionContent,
@@ -58,19 +59,30 @@ interface FieldRendererProps {
 }
 
 function FieldRenderer({ field, config, onChange }: FieldRendererProps) {
+  const t = useTranslations("workflow");
+  const tasksT = useTranslations("tasks");
   const rawValue = config[field.key];
 
   function update(value: unknown) {
     onChange({ ...config, [field.key]: value });
   }
 
+  const label = t(`nodeConfig.fields.${field.key}.label`, {
+    defaultValue: field.label,
+  });
+  const placeholder = field.placeholder
+    ? t(`nodeConfig.fields.${field.key}.placeholder`, {
+        defaultValue: field.placeholder,
+      })
+    : undefined;
+
   switch (field.type) {
     case "text":
       return (
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">{field.label}</Label>
+          <Label className="text-xs">{label}</Label>
           <Input
-            placeholder={field.placeholder}
+            placeholder={placeholder}
             value={(rawValue as string | undefined) ?? ""}
             onChange={(e) => update(e.target.value)}
           />
@@ -80,9 +92,9 @@ function FieldRenderer({ field, config, onChange }: FieldRendererProps) {
     case "textarea":
       return (
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">{field.label}</Label>
+          <Label className="text-xs">{label}</Label>
           <Textarea
-            placeholder={field.placeholder}
+            placeholder={placeholder}
             rows={3}
             value={(rawValue as string | undefined) ?? ""}
             onChange={(e) => update(e.target.value)}
@@ -93,9 +105,9 @@ function FieldRenderer({ field, config, onChange }: FieldRendererProps) {
     case "json":
       return (
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">{field.label}</Label>
+          <Label className="text-xs">{label}</Label>
           <Textarea
-            placeholder={field.placeholder}
+            placeholder={placeholder}
             rows={4}
             className="font-mono text-xs"
             value={(rawValue as string | undefined) ?? ""}
@@ -107,18 +119,20 @@ function FieldRenderer({ field, config, onChange }: FieldRendererProps) {
     case "select":
       return (
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">{field.label}</Label>
+          <Label className="text-xs">{label}</Label>
           <Select
             value={(rawValue as string | undefined) ?? ""}
             onValueChange={(v) => update(v)}
           >
             <SelectTrigger>
-              <SelectValue placeholder={`Select ${field.label}…`} />
+              <SelectValue placeholder={t("nodeConfig.selectField", { label })} />
             </SelectTrigger>
             <SelectContent>
               {(field.options ?? []).map((opt) => (
                 <SelectItem key={opt} value={opt}>
-                  {opt}
+                  {field.key === "targetStatus"
+                    ? tasksT(`status.${opt}`, { defaultValue: opt })
+                    : opt}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -129,10 +143,10 @@ function FieldRenderer({ field, config, onChange }: FieldRendererProps) {
     case "number":
       return (
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">{field.label}</Label>
+          <Label className="text-xs">{label}</Label>
           <Input
             type="number"
-            placeholder={field.placeholder}
+            placeholder={placeholder}
             value={(rawValue as string | number | undefined) ?? ""}
             onChange={(e) => update(e.target.value)}
           />
@@ -142,7 +156,7 @@ function FieldRenderer({ field, config, onChange }: FieldRendererProps) {
     case "boolean":
       return (
         <div className="flex items-center justify-between gap-2">
-          <Label className="text-xs">{field.label}</Label>
+          <Label className="text-xs">{label}</Label>
           <Switch
             checked={Boolean(rawValue)}
             onCheckedChange={(checked) => update(checked)}
@@ -151,12 +165,9 @@ function FieldRenderer({ field, config, onChange }: FieldRendererProps) {
       );
 
     case "expression": {
-      // ConditionBuilder needs upstream context — but in schema-driven mode
-      // we don't have it readily available. Render a simple textarea fallback
-      // (full ConditionBuilder is only used via the ConditionConfig override).
       return (
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">{field.label}</Label>
+          <Label className="text-xs">{label}</Label>
           <ConditionBuilder
             value={(rawValue as string | undefined) ?? ""}
             onChange={(expr) => update(expr)}
@@ -176,6 +187,7 @@ function FieldRenderer({ field, config, onChange }: FieldRendererProps) {
 export function NodeConfigPanel() {
   const { state, dispatch } = useEditor();
   const { selectedNodeId, nodes } = state;
+  const t = useTranslations("workflow");
 
   // useRef must be called unconditionally before any early return
   const advancedRef = useRef<HTMLTextAreaElement>(null);
@@ -249,6 +261,7 @@ export function NodeConfigPanel() {
   ];
 
   const NodeIcon = meta?.icon;
+  const metaLabel = t(`node.type.${node.type}`, { defaultValue: meta?.label ?? node.type ?? "" });
 
   return (
     <div className="flex h-full flex-col">
@@ -264,7 +277,7 @@ export function NodeConfigPanel() {
           className="h-7 flex-1 border-none bg-transparent p-0 text-sm font-medium shadow-none focus-visible:ring-0"
           value={label}
           onChange={(e) => handleLabelChange(e.target.value)}
-          aria-label="Node label"
+          aria-label={t("nodeConfig.nodeLabel")}
         />
         <Button
           variant="ghost"
@@ -287,7 +300,7 @@ export function NodeConfigPanel() {
           {hasCustomOverride ? (
             <AccordionItem value="type-config">
               <AccordionTrigger className="text-xs font-semibold uppercase tracking-wide">
-                {meta?.label ?? node.type} Config
+                {t("nodeConfig.configTitle", { label: metaLabel })}
               </AccordionTrigger>
               <AccordionContent>
                 <div className="pb-2 pt-1">
@@ -330,7 +343,7 @@ export function NodeConfigPanel() {
             groupNames.map((groupName) => (
               <AccordionItem key={groupName} value={`group-${groupName}`}>
                 <AccordionTrigger className="text-xs font-semibold uppercase tracking-wide">
-                  {groupName}
+                  {t(`nodeConfig.groups.${groupName}`, { defaultValue: groupName })}
                 </AccordionTrigger>
                 <AccordionContent>
                   <div className="flex flex-col gap-3 pb-2 pt-1">
@@ -351,7 +364,7 @@ export function NodeConfigPanel() {
           {/* ── Data Flow ────────────────────────────────────────────────────── */}
           <AccordionItem value="data-flow">
             <AccordionTrigger className="text-xs font-semibold uppercase tracking-wide">
-              Data Flow
+              {t("nodeConfig.dataFlowTitle")}
             </AccordionTrigger>
             <AccordionContent>
               <div className="pb-2 pt-1">
@@ -363,7 +376,7 @@ export function NodeConfigPanel() {
           {/* ── Advanced ─────────────────────────────────────────────────────── */}
           <AccordionItem value="advanced">
             <AccordionTrigger className="text-xs font-semibold uppercase tracking-wide">
-              Advanced (Raw JSON)
+              {t("nodeConfig.advancedRawJson")}
             </AccordionTrigger>
             <AccordionContent>
               <div className="pb-2 pt-1">
@@ -391,7 +404,7 @@ export function NodeConfigPanel() {
           onClick={handleDelete}
         >
           <Trash2 className="mr-2 h-4 w-4" />
-          Delete Node
+          {t("nodeConfig.deleteNode")}
         </Button>
       </div>
     </div>

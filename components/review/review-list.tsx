@@ -33,20 +33,20 @@ interface ReviewListProps {
   onToggleSelect?: (reviewId: string) => void;
 }
 
-function formatReviewAge(createdAt: string): string {
+function formatReviewAge(createdAt: string, t: ReturnType<typeof useTranslations>): string {
   const diffMs = Date.now() - new Date(createdAt).getTime();
   const diffMinutes = Math.max(0, Math.floor(diffMs / (60 * 1000)));
 
   if (diffMinutes < 60) {
-    return `${Math.max(1, diffMinutes)}m ago`;
+    return t("timeMinutesAgo", { count: Math.max(1, diffMinutes) });
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}h ago`;
+    return t("timeHoursAgo", { count: diffHours });
   }
 
-  return `${Math.floor(diffHours / 24)}d ago`;
+  return t("timeDaysAgo", { count: Math.floor(diffHours / 24) });
 }
 
 export function ReviewList({
@@ -181,7 +181,7 @@ export function ReviewList({
                             <span>{assigneeLabel}</span>
                           </span>
                           <span className="font-mono">{branchLabel}</span>
-                          <span>{formatReviewAge(review.createdAt)}</span>
+                          <span>{formatReviewAge(review.createdAt, t)}</span>
                         </div>
                       );
                     })()}

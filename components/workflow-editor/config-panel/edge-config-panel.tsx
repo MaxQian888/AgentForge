@@ -2,6 +2,7 @@
 
 import React from "react";
 import { X, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,7 @@ import { ConditionBuilder } from "./condition-builder";
 export function EdgeConfigPanel() {
   const { state, dispatch } = useEditor();
   const { selectedEdgeId, edges, nodes } = state;
+  const t = useTranslations("workflow");
 
   if (!selectedEdgeId) return null;
 
@@ -89,7 +91,7 @@ export function EdgeConfigPanel() {
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex flex-col gap-0.5 min-w-0">
-          <p className="text-xs text-muted-foreground">Edge</p>
+          <p className="text-xs text-muted-foreground">{t("nodeConfig.edge.title")}</p>
           <p className="text-sm font-medium truncate">
             {sourceLabel} → {targetLabel}
           </p>
@@ -109,9 +111,9 @@ export function EdgeConfigPanel() {
         <div className="flex flex-col gap-4 p-4">
           {/* Label */}
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Display Label</Label>
+            <Label className="text-xs">{t("nodeConfig.edge.displayLabel")}</Label>
             <Input
-              placeholder="Optional label…"
+              placeholder={t("nodeConfig.edge.displayLabelPlaceholder")}
               value={edgeLabel}
               onChange={(e) => handleLabelChange(e.target.value)}
             />
@@ -121,7 +123,7 @@ export function EdgeConfigPanel() {
 
           {/* Condition */}
           <div className="flex flex-col gap-2">
-            <Label className="text-xs">Condition</Label>
+            <Label className="text-xs">{t("nodeConfig.edge.condition")}</Label>
             <ConditionBuilder
               value={condition}
               onChange={handleConditionChange}
@@ -140,7 +142,7 @@ export function EdgeConfigPanel() {
           onClick={handleDelete}
         >
           <Trash2 className="mr-2 h-4 w-4" />
-          Delete Edge
+          {t("nodeConfig.edge.deleteEdge")}
         </Button>
       </div>
     </div>

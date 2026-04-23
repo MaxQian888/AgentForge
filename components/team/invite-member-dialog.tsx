@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -38,6 +39,8 @@ export function InviteMemberDialog({
   onOpenChange,
   onInvite,
 }: InviteMemberDialogProps) {
+  const t = useTranslations("invitations");
+  const tc = useTranslations("common");
   const [kind, setKind] = useState<InvitationIdentityKind>("email");
   const [email, setEmail] = useState("");
   const [imPlatform, setImPlatform] = useState("");
@@ -68,13 +71,13 @@ export function InviteMemberDialog({
     let identity: InvitationIdentity;
     if (kind === "email") {
       if (!email.trim()) {
-        setError("Email is required");
+        setError(t("dialog.errorEmailRequired"));
         return;
       }
       identity = { kind: "email", value: email.trim() };
     } else {
       if (!imPlatform.trim() || !imUserId.trim()) {
-        setError("IM platform and user ID are required");
+        setError(t("dialog.errorIMRequired"));
         return;
       }
       identity = {
@@ -94,7 +97,7 @@ export function InviteMemberDialog({
       setLastCreated(result);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to send invitation",
+        err instanceof Error ? err.message : t("dialog.errorSendFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -116,28 +119,22 @@ export function InviteMemberDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Invite Team Member</DialogTitle>
-          <DialogDescription>
-            Send an invitation by email or IM identity. The invitee joins once
-            they accept.
-          </DialogDescription>
+          <DialogTitle>{t("dialog.title")}</DialogTitle>
+          <DialogDescription>{t("dialog.description")}</DialogDescription>
         </DialogHeader>
 
         {lastCreated ? (
           <div className="flex flex-col gap-3">
-            <p className="text-sm">
-              Invitation created. Share this link with the invitee if automatic
-              delivery doesn&apos;t reach them:
-            </p>
+            <p className="text-sm">{t("dialog.createdHeading")}</p>
             <Input
               readOnly
               value={lastCreated.acceptUrl}
               onFocus={(e) => e.currentTarget.select()}
-              aria-label="Accept invitation URL"
+              aria-label={t("dialog.acceptUrlAriaLabel")}
             />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={handleClose}>
-                Close
+                {t("dialog.close")}
               </Button>
               <Button
                 type="button"
@@ -146,37 +143,37 @@ export function InviteMemberDialog({
                   reset();
                 }}
               >
-                Send another
+                {t("dialog.sendAnother")}
               </Button>
             </DialogFooter>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label>Identity Type</Label>
+              <Label>{t("dialog.identityType")}</Label>
               <Select
                 value={kind}
                 onValueChange={(next) =>
                   setKind(next as InvitationIdentityKind)
                 }
               >
-                <SelectTrigger aria-label="Identity type">
+                <SelectTrigger aria-label={t("dialog.identityType")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="email">Email</SelectItem>
-                  <SelectItem value="im">IM (platform + user ID)</SelectItem>
+                  <SelectItem value="email">{t("dialog.identityEmail")}</SelectItem>
+                  <SelectItem value="im">{t("dialog.identityIM")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             {kind === "email" ? (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="invite-email">Email</Label>
+                <Label htmlFor="invite-email">{t("dialog.emailLabel")}</Label>
                 <Input
                   id="invite-email"
                   type="email"
-                  placeholder="member@example.com"
+                  placeholder={t("dialog.emailPlaceholder")}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
@@ -184,16 +181,16 @@ export function InviteMemberDialog({
             ) : (
               <>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="invite-im-platform">IM Platform</Label>
+                  <Label htmlFor="invite-im-platform">{t("dialog.imPlatformLabel")}</Label>
                   <Input
                     id="invite-im-platform"
-                    placeholder="feishu / lark / dingtalk"
+                    placeholder={t("dialog.imPlatformPlaceholder")}
                     value={imPlatform}
                     onChange={(e) => setImPlatform(e.target.value)}
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="invite-im-user-id">IM User ID</Label>
+                  <Label htmlFor="invite-im-user-id">{t("dialog.imUserIdLabel")}</Label>
                   <Input
                     id="invite-im-user-id"
                     value={imUserId}
@@ -201,7 +198,7 @@ export function InviteMemberDialog({
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="invite-im-display-name">Display Name</Label>
+                  <Label htmlFor="invite-im-display-name">{t("dialog.imDisplayNameLabel")}</Label>
                   <Input
                     id="invite-im-display-name"
                     value={imDisplayName}
@@ -212,7 +209,7 @@ export function InviteMemberDialog({
             )}
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="invite-role">Project Role</Label>
+              <Label htmlFor="invite-role">{t("dialog.roleLabel")}</Label>
               <Select value={projectRole} onValueChange={setProjectRole}>
                 <SelectTrigger id="invite-role">
                   <SelectValue />
@@ -227,7 +224,7 @@ export function InviteMemberDialog({
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="invite-message">Message (optional)</Label>
+              <Label htmlFor="invite-message">{t("dialog.messageLabel")}</Label>
               <Textarea
                 id="invite-message"
                 value={message}
@@ -247,14 +244,14 @@ export function InviteMemberDialog({
                 onClick={handleClose}
                 disabled={submitting}
               >
-                Cancel
+                {tc("action.cancel")}
               </Button>
               <Button
                 type="button"
                 disabled={submitting}
                 onClick={() => void handleSubmit()}
               >
-                {submitting ? "Sending..." : "Send Invitation"}
+                {submitting ? t("dialog.sending") : t("dialog.send")}
               </Button>
             </DialogFooter>
           </div>

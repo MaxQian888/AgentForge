@@ -24,6 +24,7 @@ function workloadColor(percent: number): string {
 
 export function TeamHealthWidget({ members }: TeamHealthWidgetProps) {
   const t = useTranslations("dashboard");
+  const commonT = useTranslations("common");
 
   return (
     <Card>
@@ -49,7 +50,7 @@ export function TeamHealthWidget({ members }: TeamHealthWidgetProps) {
                     </span>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {member.status}
+                    {commonT(`status.${member.status}`)}
                   </span>
                 </div>
                 <div className="h-1.5 w-full rounded-full bg-muted">

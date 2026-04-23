@@ -1,6 +1,7 @@
 "use client";
 
 import { lazy, Suspense } from "react";
+import { useTranslations } from "next-intl";
 import { defaultProps } from "@blocknote/core";
 import { BlockContentWrapper, createReactBlockSpec } from "@blocknote/react";
 import { useLiveArtifactContext } from "./live-artifact-context";
@@ -86,6 +87,7 @@ function KindRenderer({
   targetRef: TargetRef | null;
   viewOpts: ViewOpts;
 }) {
+  const t = useTranslations("docs");
   const context = useLiveArtifactContext();
   const projection = context.projections[blockId];
 
@@ -95,7 +97,7 @@ function KindRenderer({
         className="rounded-md border border-amber-400/40 bg-amber-400/10 p-3 text-xs text-amber-800 dark:text-amber-200"
         role="status"
       >
-        Unknown live artifact kind: {kind || "(empty)"}
+        {t("liveArtifact.unknownKind", { kind: kind || t("liveArtifact.unknownKindEmpty") })}
       </div>
     );
   }

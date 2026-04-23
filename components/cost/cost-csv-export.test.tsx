@@ -27,6 +27,25 @@ describe("buildCostCsv", () => {
       '2026-04-11,"compute, storage","agent ""primary""",4.50',
     );
   });
+
+  it("accepts a translated header row", () => {
+    const csv = buildCostCsv(
+      [
+        {
+          id: "r1",
+          date: "2026-04-10",
+          category: "runtime",
+          agent: "planner",
+          amountUsd: 1.25,
+        },
+      ],
+      ["日期", "类别", "Agent", "金额 (USD)"],
+    );
+
+    const lines = csv.split("\n");
+    expect(lines[0]).toBe("日期,类别,Agent,金额 (USD)");
+    expect(lines[1]).toBe("2026-04-10,runtime,planner,1.25");
+  });
 });
 
 describe("CostCsvExport", () => {

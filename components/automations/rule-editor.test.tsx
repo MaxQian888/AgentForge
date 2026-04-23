@@ -49,6 +49,8 @@ jest.mock("next-intl", () => ({
       "automations.conditionValue": "Condition Value",
       "automations.action": "Action",
       "automations.createRule": "Create Rule",
+      "automations.workflowPluginId": "Workflow Plugin ID",
+      "automations.workflowPluginHelp": "Use start_workflow for canonical workflow orchestration. invoke_plugin remains for generic plugin operations.",
     };
     return map[key] ?? key;
   },

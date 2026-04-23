@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,8 @@ export function MilestoneEditor({
   onOpenChange: (open: boolean) => void;
   projectId: string;
 }) {
+  const t = useTranslations("milestones");
+  const tc = useTranslations("common");
   const createMilestone = useMilestoneStore((state) => state.createMilestone);
   const [name, setName] = useState("");
   const [targetDate, setTargetDate] = useState("");
@@ -25,24 +28,24 @@ export function MilestoneEditor({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create Milestone</DialogTitle>
-          <DialogDescription>Define a roadmap milestone and target date.</DialogDescription>
+          <DialogTitle>{t("editor.title")}</DialogTitle>
+          <DialogDescription>{t("editor.description")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Name</Label>
-            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="v2.0 Release" />
+            <Label>{t("editor.name")}</Label>
+            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("editor.namePlaceholder")} />
           </div>
           <div className="space-y-2">
-            <Label>Target Date</Label>
+            <Label>{t("editor.targetDate")}</Label>
             <Input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label>Status</Label>
+            <Label>{t("editor.status")}</Label>
             <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}>
               {["planned", "in_progress", "completed", "missed"].map((item) => (
                 <option key={item} value={item}>
-                  {item}
+                  {t(`status.${item}`)}
                 </option>
               ))}
             </select>
@@ -50,7 +53,7 @@ export function MilestoneEditor({
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tc("action.cancel")}
           </Button>
           <Button
             type="button"
@@ -60,7 +63,7 @@ export function MilestoneEditor({
               onOpenChange(false);
             }}
           >
-            Save
+            {tc("action.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

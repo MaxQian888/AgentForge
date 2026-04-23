@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 export type IMPlatform =
   | "feishu"
@@ -458,7 +459,8 @@ export const useIMStore = create<IMState>()((set, get) => ({
       });
       set({ channels: data ?? [], error: null });
     } catch {
-      set({ channels: [], error: "Unable to load IM channels" });
+      const locale = getPreferredLocale();
+      set({ channels: [], error: locale === "zh-CN" ? "无法加载 IM 频道" : "Unable to load IM channels" });
     } finally {
       set({ loading: false });
     }
@@ -501,7 +503,8 @@ export const useIMStore = create<IMState>()((set, get) => ({
         error: null,
       });
     } catch {
-      set({ deliveries: [], error: "Unable to load delivery history" });
+      const locale = getPreferredLocale();
+      set({ deliveries: [], error: locale === "zh-CN" ? "无法加载投递历史" : "Unable to load delivery history" });
     } finally {
       set({ loading: false });
     }
@@ -518,7 +521,8 @@ export const useIMStore = create<IMState>()((set, get) => ({
       });
       set({ eventTypes: data ?? [], error: null });
     } catch {
-      set({ eventTypes: [], error: "Unable to load IM event types" });
+      const locale = getPreferredLocale();
+      set({ eventTypes: [], error: locale === "zh-CN" ? "无法加载 IM 事件类型" : "Unable to load IM event types" });
     }
   },
 
@@ -536,8 +540,9 @@ export const useIMStore = create<IMState>()((set, get) => ({
       }
       await get().fetchChannels();
     } catch {
-      toast.error("Failed to save channel");
-      set({ error: "Failed to save channel" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "保存频道失败" : "Failed to save channel");
+      set({ error: locale === "zh-CN" ? "保存频道失败" : "Failed to save channel" });
     } finally {
       set({ loading: false });
     }
@@ -553,8 +558,9 @@ export const useIMStore = create<IMState>()((set, get) => ({
       await api.delete(`/api/v1/im/channels/${id}`, { token });
       await get().fetchChannels();
     } catch {
-      toast.error("Failed to delete channel");
-      set({ error: "Failed to delete channel" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "删除频道失败" : "Failed to delete channel");
+      set({ error: locale === "zh-CN" ? "删除频道失败" : "Failed to delete channel" });
     } finally {
       set({ loading: false });
     }
@@ -570,8 +576,9 @@ export const useIMStore = create<IMState>()((set, get) => ({
       await api.post(`/api/v1/im/deliveries/${id}/retry`, {}, { token });
       await get().fetchDeliveryHistory(get().historyFilters);
     } catch {
-      toast.error("Failed to retry delivery");
-      set({ error: "Failed to retry delivery" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "重试投递失败" : "Failed to retry delivery");
+      set({ error: locale === "zh-CN" ? "重试投递失败" : "Failed to retry delivery" });
     } finally {
       set({ loading: false });
     }
@@ -594,8 +601,9 @@ export const useIMStore = create<IMState>()((set, get) => ({
       set({ lastBatchRetryResults: results, error: null });
       return results;
     } catch {
-      toast.error("Failed to retry deliveries");
-      set({ error: "Failed to retry deliveries" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "批量重试投递失败" : "Failed to retry deliveries");
+      set({ error: locale === "zh-CN" ? "批量重试投递失败" : "Failed to retry deliveries" });
       return [];
     } finally {
       set({ loading: false });
@@ -620,8 +628,9 @@ export const useIMStore = create<IMState>()((set, get) => ({
       set({ error: null });
       return cleared;
     } catch {
-      toast.error("Failed to clear retry queue");
-      set({ error: "Failed to clear retry queue" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "清空重试队列失败" : "Failed to clear retry queue");
+      set({ error: locale === "zh-CN" ? "清空重试队列失败" : "Failed to clear retry queue" });
       return 0;
     } finally {
       set({ loading: false });
@@ -644,7 +653,8 @@ export const useIMStore = create<IMState>()((set, get) => ({
       set({ lastTestSendResult: result, error: null });
       return result;
     } catch {
-      set({ error: "Failed to send IM test message" });
+      const locale = getPreferredLocale();
+      set({ error: locale === "zh-CN" ? "发送 IM 测试消息失败" : "Failed to send IM test message" });
       return null;
     } finally {
       set({ loading: false });

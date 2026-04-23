@@ -24,7 +24,22 @@
     "pathPolicy": "Path policy: {allow} allow / {deny} deny",
     "extends": "Extends {name}",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "unresolvedCount": "{count} unresolved",
+    "blockingCount": "{count} blocking",
+    "warningCount": "{count} warning",
+    "pluginConsumerCount": "{count} plugin consumer"
+  },
+  "provenance": {
+    "inherited": "Inherited",
+    "template": "Template",
+    "explicit": "Explicit"
+  },
+  "skillCompatibility": {
+    "blocking": "Blocking compatibility issue",
+    "warning": "Warning-only compatibility issue",
+    "compatible": "Compatibility OK",
+    "unknown": "Compatibility unknown"
   },
   "formDialog": {
     "createTitle": "Create Role",
@@ -168,8 +183,70 @@
     "resCostPerTask": "Cost / Task",
     "resCostPerDay": "Cost / Day",
     "resCostAlertThreshold": "Cost Alert Threshold",
-    "provenanceSummary": "Provenance: {inherited} inherited, {template} template, {explicit} explicit"
+    "provenanceSummary": "Provenance: {inherited} inherited, {template} template, {explicit} explicit",
+    "loading": "Loading...",
+    "dependencies": "Dependencies: {deps}",
+    "declaredTools": "Declared tools: {tools}",
+    "missingTools": "Missing: {tools}"
   },
+  "sections": {
+    "setup": { "label": "Setup", "description": "Choose how this role starts, then confirm its reusable identity." },
+    "identity": { "label": "Identity", "description": "Define the role job, persona, language, and response style." },
+    "capabilities": { "label": "Capabilities", "description": "Describe packages, tools, skills, and execution limits." },
+    "knowledge": { "label": "Knowledge", "description": "Bind repos, docs, patterns, and shared knowledge sources." },
+    "governance": { "label": "Governance", "description": "Set security, collaboration, and trigger expectations." },
+    "review": { "label": "Review", "description": "Inspect YAML, summary, preview, and sandbox before saving." }
+  },
+  "guidance": {
+    "setup": {
+      "title": "Start From The Right Base",
+      "summary": "Start from a template when most values should carry over. Use inheritance only when the new role is truly a child role.",
+      "bullet0": "Reuse a template to copy the current draft shape into a new role.",
+      "bullet1": "Set extends when the role should keep a parent relationship instead of forking the config.",
+      "bullet2": "Confirm metadata first so later preview and sandbox results are easy to interpret."
+    },
+    "identity": {
+      "title": "Align Role, Goal, And Prompt",
+      "summary": "Identity fields should agree on what the role does, how it behaves, and how it should answer.",
+      "bullet0": "Fill role title, goal, and system prompt before tuning persona details.",
+      "bullet1": "Use advanced identity for language, tone, and response style rather than burying those rules in the prompt.",
+      "bullet2": "If role and prompt disagree, sandbox output becomes harder to trust."
+    },
+    "capabilities": {
+      "title": "Model Tools And Skills Explicitly",
+      "summary": "Use packages for reusable capability bundles and skills for explicit knowledge references this role can load.",
+      "bullet0": "Keep allowed tools and external tools readable enough to review before save.",
+      "bullet1": "Use skills to declare opt-in knowledge or workflows that belong to this role.",
+      "bullet2": "Execution limits such as turns or budget should describe guardrails, not hidden surprises."
+    },
+    "knowledge": {
+      "title": "Bind The Right Context",
+      "summary": "Knowledge fields should make the role's trusted sources obvious to operators and reviewers.",
+      "bullet0": "List repositories, documents, and patterns that matter to this role.",
+      "bullet1": "Use shared knowledge rows for sources that the role can cite or reuse across runs.",
+      "bullet2": "Prefer concise references over long prompt prose when the knowledge source already exists."
+    },
+    "governance": {
+      "title": "Keep Governance Visible",
+      "summary": "Permission mode, path rules, review requirements, delegation, and triggers should be explicit and reviewable.",
+      "bullet0": "Use permission and path constraints instead of long negative instructions in the prompt.",
+      "bullet1": "Add collaboration settings that other operators can explain and maintain.",
+      "bullet2": "Only add triggers whose activation rule is clear enough to review later."
+    },
+    "review": {
+      "title": "Preview Before You Save",
+      "summary": "Inspect the execution summary, YAML, and authoritative preview or sandbox results before persisting the draft.",
+      "bullet0": "Preview resolves the effective manifest and execution profile without calling a model.",
+      "bullet1": "Sandbox reuses the same draft but adds readiness checks and one bounded prompt probe.",
+      "bullet2": "Review the YAML mapping so the structured inputs match the canonical role asset you expect."
+    }
+  },
+  "error.load": "Failed to load roles",
+  "error.loadSkills": "Failed to load role skill catalog",
+  "error.create": "Failed to create role",
+  "error.update": "Failed to update role",
+  "error.delete": "Failed to delete role",
+  "error.unknown": "Unknown error",
   "deleteDialog": {
     "title": "Delete Role",
     "loading": "Loading role references...",
@@ -221,6 +298,13 @@
     "previewDraft": "Preview Role Draft",
     "running": "Running...",
     "runSandbox": "Run Sandbox Probe",
-    "sandboxInput": "Sandbox Input"
+    "sandboxInput": "Sandbox Input",
+    "pluginDependencies": "Plugin dependencies",
+    "downstreamPluginConsumers": "Downstream plugin consumers",
+    "fieldProvenance": "Field provenance",
+    "loadedSkills": "Loaded skills",
+    "onDemandSkills": "On-demand skills",
+    "skillDiagnostics": "Skill diagnostics",
+    "effectiveRole": "Effective role: {name} ({id})"
   }
 }

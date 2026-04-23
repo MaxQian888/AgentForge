@@ -23,6 +23,12 @@ import audit from "./audit.json";
 import projectTemplates from "./project-templates.json";
 import invitations from "./invitations.json";
 import qianchuan from "./qianchuan.json";
+import employees from "./employees.json";
+import knowledge from "./knowledge.json";
+import milestones from "./milestones.json";
+import skills from "./skills.json";
+import triggers from "./triggers.json";
+import views from "./views.json";
 import { normalizeMessageBundle } from "../normalize";
 
 export default normalizeMessageBundle({
@@ -51,4 +57,10 @@ export default normalizeMessageBundle({
   projectTemplates,
   invitations,
   qianchuan,
+  employees,
+  knowledge,
+  milestones,
+  skills,
+  triggers,
+  views,
 });

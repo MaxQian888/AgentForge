@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -26,18 +27,19 @@ export interface NodePaletteProps {
 
 // ── Category config ───────────────────────────────────────────────────────────
 
-const CATEGORIES: { id: NodeCategory; label: string }[] = [
-  { id: "entry", label: "Entry" },
-  { id: "logic", label: "Logic" },
-  { id: "agent", label: "Agent" },
-  { id: "flow", label: "Flow Control" },
-  { id: "human", label: "Human" },
-  { id: "action", label: "Action" },
+const CATEGORY_IDS: NodeCategory[] = [
+  "entry",
+  "logic",
+  "agent",
+  "flow",
+  "human",
+  "action",
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function NodePalette({ onAddNode }: NodePaletteProps) {
+  const t = useTranslations("workflow");
   const [query, setQuery] = useState("");
   const [openCategories, setOpenCategories] = useState<
     Record<NodeCategory, boolean>
@@ -56,7 +58,9 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
   const isSearching = lowerQuery.length > 0;
   const filteredAll = isSearching
     ? NODE_REGISTRY.filter((n) =>
-        n.label.toLowerCase().includes(lowerQuery)
+        t(`node.type.${n.type}`, { defaultValue: n.label })
+          .toLowerCase()
+          .includes(lowerQuery)
       )
     : null;
 
@@ -80,7 +84,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search nodes…"
+          placeholder={t("nodePalette.searchPlaceholder")}
           className="pl-7 h-7 text-xs"
         />
       </div>
@@ -90,11 +94,14 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         <div className="flex flex-col gap-0.5 mt-1">
           {filteredAll.length === 0 ? (
             <p className="text-xs text-muted-foreground px-1 py-2">
-              No nodes found.
+              {t("nodePalette.noNodes")}
             </p>
           ) : (
             filteredAll.map((node) => {
               const Icon = node.icon;
+              const label = t(`node.type.${node.type}`, {
+                defaultValue: node.label,
+              });
               return (
                 <Tooltip key={node.type}>
                   <TooltipTrigger asChild>
@@ -110,11 +117,13 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                         className="h-3.5 w-3.5 shrink-0"
                         style={{ color: node.color }}
                       />
-                      {node.label}
+                      {label}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="right">
-                    {node.description}
+                    {t(`node.typeDescription.${node.type}`, {
+                      defaultValue: node.description,
+                    })}
                   </TooltipContent>
                 </Tooltip>
               );
@@ -125,10 +134,11 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
 
       {/* Categorized list */}
       {!isSearching &&
-        CATEGORIES.map(({ id, label }) => {
+        CATEGORY_IDS.map((id) => {
           const nodes = getNodesByCategory(id);
           if (nodes.length === 0) return null;
           const isOpen = openCategories[id];
+          const label = t(`nodePalette.categories.${id}`);
 
           return (
             <Collapsible
@@ -150,6 +160,9 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                 <div className="flex flex-col gap-0.5 pb-1">
                   {nodes.map((node) => {
                     const Icon = node.icon;
+                    const nodeLabel = t(`node.type.${node.type}`, {
+                      defaultValue: node.label,
+                    });
                     return (
                       <Tooltip key={node.type}>
                         <TooltipTrigger asChild>
@@ -167,11 +180,13 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                               className="h-3.5 w-3.5 shrink-0"
                               style={{ color: node.color }}
                             />
-                            {node.label}
+                            {nodeLabel}
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent side="right">
-                          {node.description}
+                          {t(`node.typeDescription.${node.type}`, {
+                            defaultValue: node.description,
+                          })}
                         </TooltipContent>
                       </Tooltip>
                     );

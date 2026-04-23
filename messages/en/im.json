@@ -65,7 +65,9 @@
     "edit": "Edit",
     "delete": "Delete",
     "loadingChannels": "Loading channels...",
-    "noChannels": "No IM channels configured. Click New Channel to get started."
+    "noChannels": "No IM channels configured. Click New Channel to get started.",
+    "statusActive": "Active",
+    "statusInactive": "Inactive"
   },
   "health": {
     "title": "Bridge Health",
@@ -89,6 +91,7 @@
     "providerFailures": "Failures",
     "providerDowngrades": "Downgrades",
     "providerLastDelivery": "Last delivery",
+    "tenantMounts": "Tenant mounts",
     "diagnosticsTitle": "Diagnostics",
     "diagnosticsUnavailable": "Diagnostics unavailable",
     "configure": "Configure"
@@ -122,6 +125,38 @@
     "structured_reply_unavailable": "Structured reply unavailable",
     "structured_delivery_unavailable": "Structured delivery unavailable",
     "thread_reply_unavailable": "Thread reply unavailable"
+  },
+  "inventory": {
+    "empty": "No IM bridges online. Start src-im-bridge to populate this panel.",
+    "providers": "Providers",
+    "capabilityMatrix": "Capability matrix",
+    "commandPlugins": "Command Plugins",
+    "noneLoaded": "None loaded."
+  },
+  "healthStatusLabels": {
+    "healthy": "Healthy",
+    "degraded": "Degraded",
+    "disconnected": "Disconnected"
+  },
+  "statusLabels": {
+    "pending": "Pending",
+    "delivered": "Delivered",
+    "suppressed": "Suppressed",
+    "failed": "Failed",
+    "timeout": "Timeout"
+  },
+  "store": {
+    "error": {
+      "loadChannels": "Unable to load IM channels",
+      "loadDeliveries": "Unable to load delivery history",
+      "loadEventTypes": "Unable to load IM event types",
+      "saveChannel": "Failed to save channel",
+      "deleteChannel": "Failed to delete channel",
+      "retryDelivery": "Failed to retry delivery",
+      "retryDeliveries": "Failed to retry deliveries",
+      "clearRetryQueue": "Failed to clear retry queue",
+      "sendTest": "Failed to send IM test message"
+    }
   },
   "history": {
     "title": "Message History",

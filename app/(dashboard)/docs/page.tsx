@@ -22,7 +22,8 @@ import { DocsPageDetailClient } from "./[pageId]/page-client";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function DocsLandingPage() {
-  useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Docs" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.configuration"), href: "/" }, { label: tc("nav.docs") }]);
   const t = useTranslations("docs");
   const router = useRouter();
   const searchParams = useSearchParams();

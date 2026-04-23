@@ -22,8 +22,10 @@
     "close": "Close",
     "sendAnother": "Send another",
     "createdHeading": "Invitation created. Share this link with the invitee if automatic delivery doesn't reach them:",
+    "acceptUrlAriaLabel": "Accept invitation URL",
     "errorEmailRequired": "Email is required",
-    "errorIMRequired": "IM platform and user ID are required"
+    "errorIMRequired": "IM platform and user ID are required",
+    "errorSendFailed": "Failed to send invitation"
   },
   "roster": {
     "invitedIdentity": "Invited Identity",

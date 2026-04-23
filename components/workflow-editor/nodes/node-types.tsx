@@ -295,22 +295,3 @@ export const workflowNodeTypes = {
   http_call: HTTPCallNode,
   im_send: IMSendNode,
 };
-
-export const NODE_TYPE_LABELS: Record<string, string> = {
-  trigger: "Trigger",
-  condition: "Condition",
-  agent_dispatch: "Agent Dispatch",
-  notification: "Notification",
-  status_transition: "Status Transition",
-  gate: "Gate",
-  parallel_split: "Parallel Split",
-  parallel_join: "Parallel Join",
-  llm_agent: "LLM Agent",
-  function: "Function",
-  loop: "Loop",
-  human_review: "Human Review",
-  wait_event: "Wait Event",
-  sub_workflow: "Sub-Workflow",
-  http_call: "HTTP Call",
-  im_send: "IM Send",
-};

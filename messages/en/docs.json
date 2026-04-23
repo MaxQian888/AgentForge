@@ -147,5 +147,129 @@
     "createRootTasks": "Create root backlog tasks",
     "cancel": "Cancel",
     "createTasks": "Create Tasks"
+  },
+  "blockEditor": {
+    "selectedBlocks": "Selected blocks",
+    "createTasks": "Create Tasks",
+    "taskCount": "{count} tasks",
+    "inlineCommentAnchors": "Inline comment anchors:"
+  },
+  "liveArtifact": {
+    "chrome": {
+      "actionsLabel": "Live artifact actions",
+      "openSource": "Open source",
+      "freeze": "Freeze",
+      "remove": "Remove"
+    },
+    "status": {
+      "notFound": "This live artifact is no longer available.",
+      "forbidden": "You do not have access to this live artifact.",
+      "degradedTitle": "Live update temporarily unavailable"
+    },
+    "sharedBody": {
+      "lastKnownUnavailable": "Showing last-known data is unavailable.",
+      "removeBlock": "Remove block",
+      "loadingLabel": "Loading live artifact"
+    },
+    "unknownKind": "Unknown live artifact kind: {kind}",
+    "unknownKindEmpty": "(empty)",
+    "slashMenu": {
+      "group": "Live artifacts",
+      "agentRun": {
+        "title": "Live agent run",
+        "subtext": "Embed a live-updating agent run (status, steps, cost)."
+      },
+      "costSummary": {
+        "title": "Live cost summary",
+        "subtext": "Aggregate spend across runtime, provider, or member."
+      },
+      "review": {
+        "title": "Live review",
+        "subtext": "Embed a review with live status and findings preview."
+      },
+      "taskGroup": {
+        "title": "Live task group",
+        "subtext": "Embed a filtered or saved-view-backed task list."
+      }
+    },
+    "dialogs": {
+      "agentRun": {
+        "title": "Embed live agent run",
+        "desc": "Pick a recent agent run. The block will stay in sync with its status, steps, and cost.",
+        "searchAriaLabel": "Search agent runs",
+        "searchPlaceholder": "Filter by id, task, status, runtime",
+        "listAriaLabel": "Agent runs",
+        "empty": "No agent runs match this search.",
+        "started": "started",
+        "cost": "${amount}"
+      },
+      "costSummary": {
+        "title": "Embed live cost summary",
+        "desc": "Aggregate spend for a date range. Filters and group-by are stored in the block and re-projected on every render.",
+        "startDate": "Start date",
+        "endDate": "End date",
+        "runtime": "Runtime",
+        "anyRuntime": "Any runtime",
+        "provider": "Provider",
+        "anyProvider": "Any provider",
+        "member": "Member",
+        "anyMember": "Any member",
+        "groupBy": "Group by",
+        "noGrouping": "No grouping",
+        "topN": "Top N rows"
+      },
+      "review": {
+        "title": "Embed live review",
+        "desc": "Link a review. Status, risk level, and finding counts stay in sync.",
+        "searchAriaLabel": "Search reviews",
+        "searchPlaceholder": "Filter by id, task, status, risk",
+        "listAriaLabel": "Reviews",
+        "empty": "No reviews match this search.",
+        "risk": "risk: {level}",
+        "unknown": "unknown"
+      },
+      "taskGroup": {
+        "title": "Embed live task group",
+        "desc": "Pick a saved view or define an inline filter. Rows update as tasks change.",
+        "filterModeAriaLabel": "Filter mode",
+        "savedViewTab": "Saved view",
+        "inlineFilterTab": "Inline filter",
+        "savedViewLabel": "Saved view",
+        "selectSavedView": "Select a saved view",
+        "noSavedViews": "No saved views exist for this project yet.",
+        "status": "Status",
+        "statusPlaceholder": "e.g. in_progress",
+        "assignee": "Assignee",
+        "assigneePlaceholder": "member id",
+        "tag": "Tag",
+        "sprint": "Sprint",
+        "milestone": "Milestone",
+        "rowsPerPage": "Rows per page"
+      },
+      "cancel": "Cancel",
+      "insert": "Insert"
+    },
+    "blocks": {
+      "agentRun": {
+        "title": "Agent run",
+        "notFound": "This live artifact is no longer available. The referenced agent run may have been deleted.",
+        "forbidden": "The details of this agent run are hidden from your current role."
+      },
+      "costSummary": {
+        "title": "Cost summary",
+        "notFound": "This live artifact is no longer available. The referenced cost window produced no data.",
+        "forbidden": "You do not have access to cost data for this window."
+      },
+      "review": {
+        "title": "Review",
+        "notFound": "This live artifact is no longer available. The referenced review may have been deleted.",
+        "forbidden": "The details of this review are hidden from your current role."
+      },
+      "taskGroup": {
+        "title": "Task group",
+        "notFound": "This live artifact is no longer available. The referenced saved view or filter may have been removed.",
+        "forbidden": "You do not have access to the tasks matched by this filter."
+      }
+    }
   }
 }

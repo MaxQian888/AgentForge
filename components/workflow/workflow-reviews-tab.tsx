@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { ClipboardCheck, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkflowStore, type WorkflowPendingReview } from "@/lib/stores/workflow-store";
@@ -51,6 +52,7 @@ function ReviewCard({
   submitting,
   onResolve,
 }: ReviewCardProps) {
+  const t = useTranslations("workflow");
   const [contextOpen, setContextOpen] = useState(false);
 
   return (
@@ -109,7 +111,7 @@ function ReviewCard({
               <Collapsible open={contextOpen} onOpenChange={setContextOpen}>
                 <CollapsibleTrigger asChild>
                   <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
-                    {contextOpen ? "Hide context" : "Show context"}
+                    {contextOpen ? t("reviewsTab.hideContext") : t("reviewsTab.showContext")}
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
@@ -121,7 +123,7 @@ function ReviewCard({
             )}
 
             <Textarea
-              placeholder="Optional comment..."
+              placeholder={t("reviewsTab.commentPlaceholder")}
               value={comment}
               onChange={(e) => onCommentChange(e.target.value)}
               className="mt-3"
@@ -134,7 +136,7 @@ function ReviewCard({
                 disabled={submitting}
                 onClick={() => onResolve("approved")}
               >
-                Approve
+                {t("reviewsTab.approve")}
               </Button>
               <Button
                 variant="destructive"
@@ -142,7 +144,7 @@ function ReviewCard({
                 disabled={submitting}
                 onClick={() => onResolve("rejected")}
               >
-                Reject
+                {t("reviewsTab.reject")}
               </Button>
             </div>
           </div>
@@ -153,6 +155,7 @@ function ReviewCard({
 }
 
 export function WorkflowReviewsTab({ projectId }: WorkflowReviewsTabProps) {
+  const t = useTranslations("workflow");
   const pendingReviews = useWorkflowStore((s) => s.pendingReviews);
   const pendingReviewsLoading = useWorkflowStore((s) => s.pendingReviewsLoading);
   const fetchPendingReviews = useWorkflowStore((s) => s.fetchPendingReviews);
@@ -182,7 +185,7 @@ export function WorkflowReviewsTab({ projectId }: WorkflowReviewsTabProps) {
     const ok = await resolveReview(review.executionId, review.nodeId, decision, comment);
     setSubmitting(false);
     if (ok) {
-      toast.success("Review " + decision);
+      toast.success(decision === "approved" ? t("reviewsTab.toastApproved") : t("reviewsTab.toastRejected"));
       setComment("");
       setExpandedId(null);
       fetchPendingReviews(projectId);
@@ -203,8 +206,8 @@ export function WorkflowReviewsTab({ projectId }: WorkflowReviewsTabProps) {
     return (
       <EmptyState
         icon={ClipboardCheck}
-        title="No pending reviews"
-        description="All workflow reviews are resolved."
+        title={t("reviewsTab.noPending")}
+        description={t("reviewsTab.allResolved")}
       />
     );
   }

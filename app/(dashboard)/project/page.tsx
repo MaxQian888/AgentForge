@@ -235,7 +235,8 @@ function CreateTaskDialog({
 }
 
 function ProjectView() {
-  useBreadcrumbs([{ label: "Projects", href: "/projects" }, { label: "Tasks" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.projects"), href: "/projects" }, { label: tc("nav.team") }]);
   const t = useTranslations("projects");
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -432,7 +433,7 @@ function ProjectView() {
                     message:
                       error instanceof Error
                         ? error.message
-                        : "Failed to change task status.",
+                        : t("error.changeStatus"),
                   };
                 }
               })
@@ -454,7 +455,7 @@ function ProjectView() {
                     message:
                       error instanceof Error
                         ? error.message
-                        : "Failed to assign task.",
+                        : t("error.assignTask"),
                   };
                 }
               })
@@ -476,7 +477,7 @@ function ProjectView() {
                     message:
                       error instanceof Error
                         ? error.message
-                        : "Failed to delete task.",
+                        : t("error.deleteTask"),
                   };
                 }
               })

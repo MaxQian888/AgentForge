@@ -1,0 +1,16 @@
+{
+  "editor.title": "创建里程碑",
+  "editor.description": "定义路线图里程碑和目标日期。",
+  "editor.name": "名称",
+  "editor.namePlaceholder": "v2.0 发布",
+  "editor.targetDate": "目标日期",
+  "editor.status": "状态",
+  "status.planned": "计划中",
+  "status.in_progress": "进行中",
+  "status.completed": "已完成",
+  "status.missed": "已错过",
+  "roadmap.noTargetDate": "无目标日期",
+  "roadmap.complete": "{rate}% 完成",
+  "roadmap.sprints": "迭代",
+  "roadmap.tasks": "任务"
+}

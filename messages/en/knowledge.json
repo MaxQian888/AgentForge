@@ -1,0 +1,42 @@
+{
+  "ingestedFiles": {
+    "title": "Uploads",
+    "uploadFile": "Upload file",
+    "noFiles": "No uploaded files yet.",
+    "reuploadTitle": "Re-upload file",
+    "openAsWiki": "Open as wiki page"
+  },
+  "ingestStatus": {
+    "pending": "Pending",
+    "processing": "Processing",
+    "ready": "Ready",
+    "failed": "Failed"
+  },
+  "search": {
+    "placeholder": "Search wiki pages, files, templates…",
+    "searching": "Searching…",
+    "noResults": "No results found."
+  },
+  "kind": {
+    "wiki_page": "Wiki",
+    "ingested_file": "File",
+    "template": "Template"
+  },
+  "materializedFrom": "Imported from file",
+  "sourceUpdatedBanner": {
+    "text": "The source file has been updated. This page may be out of date.",
+    "dismiss": "Dismiss"
+  },
+  "liveArtifact": {
+    "freezeSuccess": "Block frozen",
+    "freezeError": "Freeze failed"
+  },
+  "store": {
+    "error": {
+      "resolveDoc": "Failed to resolve doc page",
+      "loadTree": "Failed to load knowledge tree",
+      "loadAsset": "Failed to load asset",
+      "loadFiles": "Failed to load files"
+    }
+  }
+}

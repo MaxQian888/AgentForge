@@ -99,7 +99,49 @@
     "today": "今天",
     "gridLabel": "即将运行的任务日历",
     "moreItems": "另 {count} 个",
-    "dayDetail": "{date} 的运行"
+    "dayDetail": "{date} 的运行",
+    "jobsCount": "{count} 个任务"
+  },
+  "statusLabels": {
+    "succeeded": "成功",
+    "failed": "失败",
+    "running": "运行中",
+    "cancel_requested": "已请求取消",
+    "cancelled": "已取消",
+    "pending": "待处理",
+    "skipped": "已跳过",
+    "paused": "已暂停",
+    "disabled": "已禁用",
+    "never-run": "从未运行"
+  },
+  "controlStateLabels": {
+    "active": "活跃",
+    "paused": "已暂停"
+  },
+  "triggerSourceLabels": {
+    "manual": "手动",
+    "cron": "定时",
+    "system": "系统",
+    "startup": "启动",
+    "reconcile": "对账"
+  },
+  "overlapPolicyLabels": {
+    "skip": "跳过",
+    "allow": "允许"
+  },
+  "executionModeLabels": {
+    "in_process": "进程内",
+    "os_registered": "系统注册"
+  },
+  "scopeLabels": {
+    "system": "系统",
+    "project": "项目"
+  },
+  "runStatusOptions": {
+    "failed": "失败",
+    "running": "运行中",
+    "cancel_requested": "已请求取消",
+    "cancelled": "已取消"
   },
   "createDialog": {
     "title": "新建调度任务",

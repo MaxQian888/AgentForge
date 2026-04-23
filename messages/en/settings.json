@@ -204,7 +204,17 @@
     "delete": "Delete",
     "filterAll": "All",
     "filterPlaceholder": "Filter {name}",
-    "unset": "Unset"
+    "unset": "Unset",
+    "types": {
+      "text": "Text",
+      "number": "Number",
+      "select": "Select",
+      "multi_select": "Multi Select",
+      "date": "Date",
+      "user": "User",
+      "url": "URL",
+      "checkbox": "Checkbox"
+    }
   },
   "automations": {
     "ruleName": "Rule name",
@@ -216,7 +226,38 @@
     "createRule": "Create rule",
     "disable": "Disable",
     "enable": "Enable",
-    "delete": "Delete"
+    "delete": "Delete",
+    "workflowPluginId": "Workflow Plugin ID",
+    "workflowPluginHelp": "Use start_workflow for canonical workflow orchestration. invoke_plugin remains for generic plugin operations."
+  },
+  "store": {
+    "secrets": {
+      "error": {
+        "load": "Failed to load secrets",
+        "create": "Failed to create secret",
+        "rotate": "Failed to rotate secret",
+        "delete": "Failed to delete secret"
+      },
+      "success": {
+        "create": "Secret {name} created",
+        "rotate": "Secret {name} rotated",
+        "delete": "Secret deleted"
+      }
+    },
+    "vcs": {
+      "error": {
+        "load": "Failed to load VCS integrations",
+        "connect": "Failed to connect repository",
+        "update": "Failed to update integration",
+        "delete": "Failed to delete integration",
+        "sync": "Failed to trigger sync"
+      },
+      "success": {
+        "connect": "Connected {owner}/{repo}",
+        "delete": "Integration deleted",
+        "syncQueued": "Queued background sync"
+      }
+    }
   },
   "runtimeConfig": {
     "adapterFamily": "Adapter",

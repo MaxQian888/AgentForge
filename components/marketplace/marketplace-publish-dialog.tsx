@@ -23,6 +23,7 @@ import {
   type CreateItemRequest,
 } from "@/lib/stores/marketplace-store";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 interface Props {
   open: boolean;
@@ -38,6 +39,7 @@ function slugify(name: string): string {
 }
 
 export function MarketplacePublishDialog({ open, onClose }: Props) {
+  const t = useTranslations("marketplace");
   const { publishItem } = useMarketplaceStore();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<CreateItemRequest>({
@@ -59,10 +61,10 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
     setLoading(true);
     try {
       await publishItem(form);
-      toast.success("Item published successfully");
+      toast.success(t("publish.success"));
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to publish");
+      toast.error(err instanceof Error ? err.message : t("publish.failed"));
     } finally {
       setLoading(false);
     }
@@ -72,12 +74,12 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Publish Item</DialogTitle>
+          <DialogTitle>{t("publish.title")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="pub-type">Type</Label>
+              <Label htmlFor="pub-type">{t("publish.typeLabel")}</Label>
               <Select
                 value={form.type}
                 onValueChange={(v) =>
@@ -91,15 +93,15 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="plugin">Plugin</SelectItem>
-                  <SelectItem value="skill">Skill</SelectItem>
-                  <SelectItem value="role">Role</SelectItem>
-                  <SelectItem value="workflow_template">Workflow Template</SelectItem>
+                  <SelectItem value="plugin">{t("publish.typePlugin")}</SelectItem>
+                  <SelectItem value="skill">{t("publish.typeSkill")}</SelectItem>
+                  <SelectItem value="role">{t("publish.typeRole")}</SelectItem>
+                  <SelectItem value="workflow_template">{t("publish.typeWorkflow")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label htmlFor="pub-license">License</Label>
+              <Label htmlFor="pub-license">{t("publish.licenseLabel")}</Label>
               <Select
                 value={form.license}
                 onValueChange={(v) => setForm((f) => ({ ...f, license: v }))}
@@ -108,16 +110,16 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="MIT">MIT</SelectItem>
-                  <SelectItem value="Apache-2.0">Apache 2.0</SelectItem>
-                  <SelectItem value="GPL-3.0">GPL 3.0</SelectItem>
-                  <SelectItem value="Proprietary">Proprietary</SelectItem>
+                  <SelectItem value="MIT">{t("publish.licenseMIT")}</SelectItem>
+                  <SelectItem value="Apache-2.0">{t("publish.licenseApache")}</SelectItem>
+                  <SelectItem value="GPL-3.0">{t("publish.licenseGPL")}</SelectItem>
+                  <SelectItem value="Proprietary">{t("publish.licenseProprietary")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div>
-            <Label htmlFor="pub-name">Name</Label>
+            <Label htmlFor="pub-name">{t("publish.nameLabel")}</Label>
             <Input
               id="pub-name"
               value={form.name}
@@ -126,7 +128,7 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
             />
           </div>
           <div>
-            <Label htmlFor="pub-slug">Slug</Label>
+            <Label htmlFor="pub-slug">{t("publish.slugLabel")}</Label>
             <Input
               id="pub-slug"
               value={form.slug}
@@ -135,7 +137,7 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
             />
           </div>
           <div>
-            <Label htmlFor="pub-desc">Description</Label>
+            <Label htmlFor="pub-desc">{t("publish.descriptionLabel")}</Label>
             <Textarea
               id="pub-desc"
               value={form.description}
@@ -147,7 +149,7 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="pub-cat">Category</Label>
+              <Label htmlFor="pub-cat">{t("publish.categoryLabel")}</Label>
               <Input
                 id="pub-cat"
                 value={form.category}
@@ -157,7 +159,7 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
               />
             </div>
             <div>
-              <Label htmlFor="pub-repo">Repository URL</Label>
+              <Label htmlFor="pub-repo">{t("publish.repoLabel")}</Label>
               <Input
                 id="pub-repo"
                 value={form.repository_url ?? ""}
@@ -171,10 +173,10 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
             </div>
           </div>
           <div>
-            <Label htmlFor="pub-tags">Tags (comma-separated)</Label>
+            <Label htmlFor="pub-tags">{t("publish.tagsLabel")}</Label>
             <Input
               id="pub-tags"
-              placeholder="e.g. testing, automation, ci"
+              placeholder={t("publish.tagsPlaceholder")}
               value={form.tags.join(", ")}
               onChange={(e) =>
                 setForm((f) => ({
@@ -189,10 +191,10 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
+              {t("publish.cancel")}
             </Button>
             <Button type="submit" disabled={loading}>
-              {loading ? "Publishing..." : "Publish"}
+              {loading ? t("publish.publishing") : t("publish.submitLabel")}
             </Button>
           </div>
         </form>

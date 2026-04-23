@@ -23,19 +23,22 @@ import type {
   TaskStatus,
 } from "@/lib/stores/task-store";
 
-function formatRelativeTime(isoDate: string): string {
+function formatRelativeTime(
+  isoDate: string,
+  t: (key: string, values?: Record<string, number>) => string
+): string {
   const now = Date.now();
   const then = new Date(isoDate).getTime();
   const diffMs = now - then;
-  if (diffMs < 0) return "just now";
+  if (diffMs < 0) return t("relativeTime.justNow");
 
   const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return t("relativeTime.justNow");
+  if (minutes < 60) return t("relativeTime.minutesAgo", { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("relativeTime.hoursAgo", { count: hours });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return t("relativeTime.daysAgo", { count: days });
 }
 
 export interface TaskContextRailProps {
@@ -133,7 +136,7 @@ export function TaskContextRail({
                 </div>
                 {st.progress?.lastActivityAt ? (
                   <div className="text-xs text-muted-foreground">
-                    {t("attention.lastActivity", { time: formatRelativeTime(st.progress.lastActivityAt) })}
+                    {t("attention.lastActivity", { time: formatRelativeTime(st.progress.lastActivityAt, t) })}
                   </div>
                 ) : null}
                 <div className="flex flex-wrap gap-1.5">

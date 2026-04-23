@@ -218,11 +218,11 @@ describe("Board", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Configure Columns" }));
-    await user.click(screen.getByRole("button", { name: "Hide blocked" }));
+    await user.click(screen.getByRole("button", { name: "Hide Blocked" }));
 
     expect(screen.queryByTestId("column-blocked")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Move done left" }));
+    await user.click(screen.getByRole("button", { name: "Move Done left" }));
 
     const columnIds = screen
       .getAllByTestId(/column-/)

@@ -456,7 +456,7 @@ export function TaskListView({
     (taskId: string, fieldId: string): string => {
       const value = valuesByTask[taskId]?.find((item) => item.fieldDefId === fieldId)?.value;
       if (value == null || value === "") {
-        return "Unset";
+        return t("common.unset");
       }
       return String(value);
     },
@@ -637,7 +637,7 @@ export function TaskListView({
       setRowErrors((current) => ({
         ...current,
         [task.id]:
-          error instanceof Error ? error.message : "Failed to update task status.",
+          error instanceof Error ? error.message : t("error.updateStatusFailed"),
       }));
     }
   };
@@ -668,7 +668,7 @@ export function TaskListView({
       setRowErrors((current) => ({
         ...current,
         [task.id]:
-          error instanceof Error ? error.message : "Failed to update task priority.",
+          error instanceof Error ? error.message : t("error.updatePriorityFailed"),
       }));
     }
   };
@@ -959,7 +959,7 @@ export function TaskListView({
                   <SelectContent>
                     {inlineStatusOptions.map((status) => (
                       <SelectItem key={status} value={status}>
-                        {status}
+                        {t(`status.${status}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -997,7 +997,7 @@ export function TaskListView({
                   <SelectContent>
                     {inlinePriorityOptions.map((priority) => (
                       <SelectItem key={priority} value={priority}>
-                        {priority}
+                        {t(`priority.${priority}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1206,11 +1206,12 @@ function timelineSlotKeys(
 
 function formatTimelineSlotLabel(
   slotKey: string,
-  granularity: TimelineGranularity
+  granularity: TimelineGranularity,
+  t: (key: string, values?: Record<string, string | number>) => string
 ): string {
   switch (granularity) {
     case "week":
-      return `Week of ${slotKey}`;
+      return t("timeline.weekOf", { date: slotKey });
     case "month":
       return slotKey.slice(0, 7);
     case "day":
@@ -1689,7 +1690,7 @@ export function TaskTimelineView(props: {
         columnCount={slotKeys.length}
         droppablePrefix="timeline"
         slotLabelFormatter={(slotKey) =>
-          formatTimelineSlotLabel(slotKey, granularity)
+          formatTimelineSlotLabel(slotKey, granularity, t)
         }
         resolveSlotKey={(task) => timelineSlotKey(task, granularity)}
         getTaskSpan={(task) => timelineSpan(task, granularity)}
@@ -1835,7 +1836,7 @@ function TaskQuickFilterBar({ tasks }: { tasks: Task[] }) {
             <SelectItem value="all">{t("filter.all")}</SelectItem>
             {(["urgent", "high", "medium", "low"] as const).map((priority) => (
               <SelectItem key={priority} value={priority}>
-                {priority}
+                {t(`priority.${priority}`)}
               </SelectItem>
             ))}
           </SelectContent>

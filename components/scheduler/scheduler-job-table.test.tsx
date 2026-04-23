@@ -10,6 +10,16 @@ jest.mock("next-intl", () => ({
       "jobTable.paused": "Paused",
       "jobTable.na": "N/A",
       "jobTable.notScheduled": "Not scheduled",
+      "statusLabels.succeeded": "Succeeded",
+      "statusLabels.failed": "Failed",
+      "statusLabels.running": "Running",
+      "statusLabels.cancel_requested": "Cancel Requested",
+      "statusLabels.cancelled": "Cancelled",
+      "statusLabels.pending": "Pending",
+      "statusLabels.skipped": "Skipped",
+      "statusLabels.paused": "Paused",
+      "statusLabels.disabled": "Disabled",
+      "statusLabels.never-run": "Never Run",
     };
     return map[key] ?? key;
   },
@@ -118,8 +128,8 @@ describe("SchedulerJobTable", () => {
 
     expect(screen.getByText("Cleanup")).toBeInTheDocument();
     expect(screen.getByText("scheduler.cleanup")).toBeInTheDocument();
-    expect(screen.getByText("Paused")).toBeInTheDocument();
-    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.getAllByText("Paused")).toHaveLength(2);
+    expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.getByText("N/A")).toBeInTheDocument();
     expect(container.querySelector('tr[data-state="selected"]')).toBeInTheDocument();
 

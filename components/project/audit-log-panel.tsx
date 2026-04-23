@@ -141,7 +141,7 @@ export function AuditLogPanel({ projectId }: AuditLogPanelProps) {
               <SelectItem value="">{t("filters.anyResource")}</SelectItem>
               {RESOURCE_TYPES.map((rt) => (
                 <SelectItem key={rt} value={rt}>
-                  {rt}
+                  {t(`resourceTypes.${rt}` as Parameters<typeof t>[0])}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -225,7 +225,9 @@ export function AuditLogPanel({ projectId }: AuditLogPanelProps) {
                   )}
                 </TableCell>
                 <TableCell className="text-xs font-mono">{event.actionId}</TableCell>
-                <TableCell className="text-xs">{event.resourceType}</TableCell>
+                <TableCell className="text-xs">
+                  {t(`resourceTypes.${event.resourceType}` as Parameters<typeof t>[0])}
+                </TableCell>
                 <TableCell className="text-xs">{event.resourceId ?? "—"}</TableCell>
                 <TableCell>
                   <Badge
@@ -331,7 +333,7 @@ export function AuditLogPanel({ projectId }: AuditLogPanelProps) {
               </dd>
             </dl>
           ) : (
-            <p className="mt-6 text-sm text-muted-foreground">…</p>
+            <p className="mt-6 text-sm text-muted-foreground">{t("detail.loading")}</p>
           )}
         </SheetContent>
       </Sheet>

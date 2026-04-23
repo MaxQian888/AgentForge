@@ -8,6 +8,11 @@ jest.mock("next-intl", () => ({
       "runHistory.colSummary": "Summary",
       "runHistory.colMetrics": "Metrics",
       "runHistory.noRuns": "No runs yet.",
+      "triggerSourceLabels.manual": "Manual",
+      "triggerSourceLabels.cron": "Cron",
+      "triggerSourceLabels.system": "System",
+      "triggerSourceLabels.startup": "Startup",
+      "triggerSourceLabels.reconcile": "Reconcile",
     };
     return map[key] ?? key;
   },
@@ -67,8 +72,8 @@ describe("SchedulerRunHistory", () => {
       />,
     );
 
-    expect(screen.getByText("manual")).toBeInTheDocument();
-    expect(screen.getByText("system")).toBeInTheDocument();
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    expect(screen.getByText("System")).toBeInTheDocument();
     expect(screen.getByText("1m 1s")).toBeInTheDocument();
     expect(screen.getByText("500ms")).toBeInTheDocument();
     expect(screen.getByText("Bridge unavailable")).toBeInTheDocument();

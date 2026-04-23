@@ -46,7 +46,20 @@
     "ip": "IP address",
     "userAgent": "User agent",
     "payload": "Payload snapshot",
+    "loading": "Loading…",
     "close": "Close"
+  },
+  "resourceTypes": {
+    "project": "Project",
+    "member": "Member",
+    "task": "Task",
+    "team_run": "Team Run",
+    "workflow": "Workflow",
+    "wiki": "Wiki",
+    "settings": "Settings",
+    "automation": "Automation",
+    "dashboard": "Dashboard",
+    "auth": "Auth"
   },
   "errors": {
     "loadFailed": "Failed to load audit events",

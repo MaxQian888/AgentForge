@@ -60,6 +60,7 @@
   "widget.filter.timeRange.7d": "Last 7 Days",
   "widget.filter.timeRange.30d": "Last 30 Days",
   "widget.filter.timeRange.current_sprint": "Current Sprint",
+  "widget.filter.timeRange.14d": "Last 14 Days",
   "widget.filter.category.all": "All Categories",
   "widget.filter.category.tasks": "Tasks",
   "widget.filter.category.reviews": "Reviews",
@@ -81,6 +82,8 @@
   "widget.config.chartType": "Chart Type",
   "widget.config.chartType.bar": "Bar",
   "widget.config.chartType.line": "Line",
+  "widget.config.groupBy.day": "Day",
+  "widget.config.groupBy.week": "Week",
   "widget.config.invalid": "Widget configuration is invalid.",
   "widget.alert.budget.title": "Budget threshold exceeded",
   "widget.alert.budget.message": "Budget usage is above 90%.",
@@ -145,6 +148,10 @@
   "activityFeed.timeRange.all": "All Time",
   "activityFeed.timeRange.last24h": "Last 24 Hours",
   "activityFeed.timeRange.last7d": "Last 7 Days",
+  "activityFeed.timeAgo.seconds": "{seconds}s ago",
+  "activityFeed.timeAgo.minutes": "{minutes}m ago",
+  "activityFeed.timeAgo.hours": "{hours}h ago",
+  "activityFeed.timeAgo.days": "{days}d ago",
   "agentFleet.title": "Agent Fleet",
   "agentFleet.empty": "No active agents.",
   "agentFleet.name": "Name",
@@ -163,5 +170,9 @@
   "budget.utilization": "Utilization",
   "actions.newSprint": "New Sprint",
   "actions.createTeam": "Create Team",
-  "projectDashboard.title": "Project Dashboard"
+  "projectDashboard.title": "Project Dashboard",
+  "bootstrap.title": "Project Bootstrap",
+  "bootstrap.state.ready": "Ready",
+  "bootstrap.state.attention": "Attention",
+  "bootstrap.state.blocked": "Blocked"
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 import {
   Select,
   SelectContent,
@@ -41,6 +42,7 @@ interface LlmAgentConfigProps {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function LlmAgentConfig({ config, onChange }: LlmAgentConfigProps) {
+  const t = useTranslations("workflow");
   const runtime = (config.runtime as string | undefined) ?? "";
   const provider = (config.provider as string | undefined) ?? "";
   const model = (config.model as string | undefined) ?? "";
@@ -63,10 +65,10 @@ export function LlmAgentConfig({ config, onChange }: LlmAgentConfigProps) {
     <div className="flex flex-col gap-4">
       {/* Runtime */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Runtime</Label>
+        <Label className="text-xs">{t("nodeConfig.llmAgent.runtime")}</Label>
         <Select value={runtime} onValueChange={(v) => update({ runtime: v })}>
           <SelectTrigger>
-            <SelectValue placeholder="Select runtime…" />
+            <SelectValue placeholder={t("nodeConfig.llmAgent.runtimePlaceholder")} />
           </SelectTrigger>
           <SelectContent>
             {RUNTIMES.map((r) => (
@@ -80,10 +82,10 @@ export function LlmAgentConfig({ config, onChange }: LlmAgentConfigProps) {
 
       {/* Provider */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Provider</Label>
+        <Label className="text-xs">{t("nodeConfig.llmAgent.provider")}</Label>
         <Select value={provider} onValueChange={handleProviderChange}>
           <SelectTrigger>
-            <SelectValue placeholder="Select provider…" />
+            <SelectValue placeholder={t("nodeConfig.llmAgent.providerPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
             {PROVIDERS.map((p) => (
@@ -97,14 +99,14 @@ export function LlmAgentConfig({ config, onChange }: LlmAgentConfigProps) {
 
       {/* Model */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Model</Label>
+        <Label className="text-xs">{t("nodeConfig.llmAgent.model")}</Label>
         <Select
           value={model}
           onValueChange={(v) => update({ model: v })}
           disabled={availableModels.length === 0}
         >
           <SelectTrigger>
-            <SelectValue placeholder="Select model…" />
+            <SelectValue placeholder={t("nodeConfig.llmAgent.modelPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
             {availableModels.map((m) => (
@@ -118,12 +120,12 @@ export function LlmAgentConfig({ config, onChange }: LlmAgentConfigProps) {
 
       {/* Budget USD */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Budget (USD)</Label>
+        <Label className="text-xs">{t("nodeConfig.llmAgent.budgetUsd")}</Label>
         <Input
           type="number"
           min={0}
           step={0.01}
-          placeholder="e.g. 1.00"
+          placeholder={t("nodeConfig.llmAgent.budgetPlaceholder")}
           value={String(budgetUsd)}
           onChange={(e) => update({ budgetUsd: e.target.value })}
         />
@@ -131,10 +133,10 @@ export function LlmAgentConfig({ config, onChange }: LlmAgentConfigProps) {
 
       {/* Prompt */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Prompt</Label>
+        <Label className="text-xs">{t("nodeConfig.llmAgent.prompt")}</Label>
         <Textarea
           rows={4}
-          placeholder="User prompt template…"
+          placeholder={t("nodeConfig.llmAgent.promptPlaceholder")}
           value={prompt}
           onChange={(e) => update({ prompt: e.target.value })}
         />
@@ -142,10 +144,10 @@ export function LlmAgentConfig({ config, onChange }: LlmAgentConfigProps) {
 
       {/* System Prompt */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">System Prompt</Label>
+        <Label className="text-xs">{t("nodeConfig.llmAgent.systemPrompt")}</Label>
         <Textarea
           rows={4}
-          placeholder="System prompt template…"
+          placeholder={t("nodeConfig.llmAgent.systemPromptPlaceholder")}
           value={systemPrompt}
           onChange={(e) => update({ systemPrompt: e.target.value })}
         />

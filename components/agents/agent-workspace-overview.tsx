@@ -262,18 +262,18 @@ export function AgentWorkspaceOverview({
               }
             >
               <ActivityIcon />
-              <AlertTitle>Bridge Health</AlertTitle>
+              <AlertTitle>{t("overview.bridgeHealth")}</AlertTitle>
               <AlertDescription>
                 <p>
-                  Status: {bridgeHealth.status}
+                  {t("overview.bridgeStatus", { status: bridgeHealth.status })}
                   {bridgeHealth.lastCheck
                     ? `, last check ${new Date(bridgeHealth.lastCheck).toLocaleString()}`
                     : ""}
                 </p>
                 <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>Active {bridgeHealth.pool.active}</span>
-                  <span>Available {bridgeHealth.pool.available}</span>
-                  <span>Warm {bridgeHealth.pool.warm}</span>
+                  <span>{t("overview.bridgeActive", { count: bridgeHealth.pool.active })}</span>
+                  <span>{t("overview.bridgeAvailable", { count: bridgeHealth.pool.available })}</span>
+                  <span>{t("overview.bridgeWarm", { count: bridgeHealth.pool.warm })}</span>
                 </div>
               </AlertDescription>
             </Alert>
@@ -357,11 +357,11 @@ export function AgentWorkspaceOverview({
                       }
                     >
                       {runtime.available && !bridgeDegraded
-                        ? "Available"
-                        : "Unavailable"}
+                        ? t("runtime.available")
+                        : t("runtime.unavailable")}
                     </Badge>
                     <div className="text-muted-foreground">
-                      Providers: {runtime.compatibleProviders.join(", ") || "-"}
+                      {t("runtime.providers", { providers: runtime.compatibleProviders.join(", ") || "-" })}
                     </div>
                     {runtime.diagnostics.length > 0 && (
                       <div className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
@@ -397,18 +397,18 @@ export function AgentWorkspaceOverview({
           {bridgeDegraded && bridgeHealth && (
             <Alert className="border-amber-500/40 bg-amber-500/5">
               <ActivityIcon />
-              <AlertTitle>Bridge Health</AlertTitle>
+              <AlertTitle>{t("overview.bridgeHealth")}</AlertTitle>
               <AlertDescription>
                 <p>
-                  Status: {bridgeHealth.status}
+                  {t("overview.bridgeStatus", { status: bridgeHealth.status })}
                   {bridgeHealth.lastCheck
                     ? `, last check ${new Date(bridgeHealth.lastCheck).toLocaleString()}`
                     : ""}
                 </p>
                 <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>Active {bridgeHealth.pool.active}</span>
-                  <span>Available {bridgeHealth.pool.available}</span>
-                  <span>Warm {bridgeHealth.pool.warm}</span>
+                  <span>{t("overview.bridgeActive", { count: bridgeHealth.pool.active })}</span>
+                  <span>{t("overview.bridgeAvailable", { count: bridgeHealth.pool.available })}</span>
+                  <span>{t("overview.bridgeWarm", { count: bridgeHealth.pool.warm })}</span>
                 </div>
               </AlertDescription>
             </Alert>

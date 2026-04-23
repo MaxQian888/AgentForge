@@ -4,6 +4,19 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DesktopWindowFrame } from "./desktop-window-frame";
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      "desktop.workspace": "Desktop Workspace",
+      "desktop.minimizeWindow": "Minimize window",
+      "desktop.maximizeWindow": "Maximize window",
+      "desktop.restoreWindow": "Restore window",
+      "desktop.closeWindow": "Close window",
+    };
+    return map[key] ?? key;
+  },
+}));
+
 const closeMainWindowMock = jest.fn();
 const getWindowChromeStateMock = jest.fn();
 const minimizeMainWindowMock = jest.fn();

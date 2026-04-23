@@ -13,6 +13,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 import type { WorkflowTrigger, TriggerSource } from "./workflow-trigger-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -75,23 +76,24 @@ const getToken = () => {
 // string from the server, so we look at the underlying response payload
 // when available.
 function toastTriggerError(err: unknown, fallback: string) {
+  const locale = getPreferredLocale();
   const e = err as { code?: string; message?: string };
   const code = e?.code;
   switch (code) {
     case "trigger:workflow_not_found":
-      toast.error("目标工作流不存在");
+      toast.error(locale === "zh-CN" ? "目标工作流不存在" : "Target workflow does not exist");
       return;
     case "trigger:acting_employee_archived":
-      toast.error("员工已归档或不属于该项目");
+      toast.error(locale === "zh-CN" ? "员工已归档或不属于该项目" : "Employee is archived or does not belong to this project");
       return;
     case "trigger:cannot_delete_dag_managed":
-      toast.error("此触发器由 DAG 节点维护，请到工作流编辑器中删除");
+      toast.error(locale === "zh-CN" ? "此触发器由 DAG 节点维护，请到工作流编辑器中删除" : "This trigger is maintained by a DAG node. Please delete it in the workflow editor.");
       return;
     case "trigger:immutable_field":
-      toast.error("workflowId / source / createdVia 不可修改");
+      toast.error(locale === "zh-CN" ? "workflowId / source / createdVia 不可修改" : "workflowId / source / createdVia cannot be modified");
       return;
   }
-  toast.error(`${fallback}: ${e?.message ?? "unknown error"}`);
+  toast.error(`${fallback}: ${e?.message ?? (locale === "zh-CN" ? "未知错误" : "unknown error")}`);
 }
 
 export const useEmployeeTriggerStore = create<State>()((set) => ({
@@ -114,7 +116,8 @@ export const useEmployeeTriggerStore = create<State>()((set) => ({
         },
       }));
     } catch (err) {
-      toastTriggerError(err, "加载触发器失败");
+      const locale = getPreferredLocale();
+      toastTriggerError(err, locale === "zh-CN" ? "加载触发器失败" : "Failed to load triggers");
     } finally {
       set((s) => ({ loading: { ...s.loading, [employeeId]: false } }));
     }
@@ -138,10 +141,12 @@ export const useEmployeeTriggerStore = create<State>()((set) => ({
           },
         }));
       }
-      toast.success("触发器已创建");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "触发器已创建" : "Trigger created");
       return data;
     } catch (err) {
-      toastTriggerError(err, "创建触发器失败");
+      const locale = getPreferredLocale();
+      toastTriggerError(err, locale === "zh-CN" ? "创建触发器失败" : "Failed to create trigger");
       return null;
     }
   },
@@ -168,7 +173,8 @@ export const useEmployeeTriggerStore = create<State>()((set) => ({
       });
       return data;
     } catch (err) {
-      toastTriggerError(err, "更新触发器失败");
+      const locale = getPreferredLocale();
+      toastTriggerError(err, locale === "zh-CN" ? "更新触发器失败" : "Failed to update trigger");
       return null;
     }
   },
@@ -186,9 +192,11 @@ export const useEmployeeTriggerStore = create<State>()((set) => ({
           ),
         },
       }));
-      toast.success("触发器已删除");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "触发器已删除" : "Trigger deleted");
     } catch (err) {
-      toastTriggerError(err, "删除触发器失败");
+      const locale = getPreferredLocale();
+      toastTriggerError(err, locale === "zh-CN" ? "删除触发器失败" : "Failed to delete trigger");
     }
   },
 
@@ -203,7 +211,8 @@ export const useEmployeeTriggerStore = create<State>()((set) => ({
       );
       return data;
     } catch (err) {
-      toastTriggerError(err, "试运行失败");
+      const locale = getPreferredLocale();
+      toastTriggerError(err, locale === "zh-CN" ? "试运行失败" : "Dry run failed");
       return null;
     }
   },

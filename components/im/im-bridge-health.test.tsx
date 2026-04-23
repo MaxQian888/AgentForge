@@ -113,7 +113,7 @@ describe("IMBridgeHealth", () => {
 
     expect(screen.getByText("Bridge Health")).toBeInTheDocument();
     expect(screen.getByText("Connected")).toBeInTheDocument();
-    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Healthy").length).toBeGreaterThan(0);
     expect(screen.getByText(new Date(heartbeat).toLocaleString())).toBeInTheDocument();
     expect(screen.getByText("Pending Deliveries")).toBeInTheDocument();
     expect(screen.getAllByText("2").length).toBeGreaterThan(0);
@@ -125,14 +125,13 @@ describe("IMBridgeHealth", () => {
     expect(screen.getAllByText("webhook")).toHaveLength(2);
     expect(screen.getByText("session_webhook")).toBeInTheDocument();
     expect(screen.getByText("webhook_status")).toBeInTheDocument();
-    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Healthy").length).toBeGreaterThan(0);
   });
 
   it("shows disconnected fallbacks when no heartbeat or providers exist", () => {
     render(<IMBridgeHealth />);
 
-    expect(screen.getByText("Disconnected")).toBeInTheDocument();
-    expect(screen.getByText("disconnected")).toBeInTheDocument();
+    expect(screen.getAllByText("Disconnected").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("No heartbeat")).toBeInTheDocument();
     expect(
       screen.getByText(

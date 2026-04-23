@@ -34,7 +34,8 @@ function matchesAge(createdAt: string, bucket: AgeBucket): boolean {
 }
 
 export default function ReviewsPage({ searchParams }: ReviewsPageProps) {
-  useBreadcrumbs([{ label: "Project", href: "/" }, { label: "Reviews" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.project"), href: "/" }, { label: tc("nav.reviews") }]);
   const t = useTranslations("reviews");
   const {
     allReviews,

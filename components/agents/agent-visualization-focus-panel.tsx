@@ -104,11 +104,11 @@ export function AgentVisualizationFocusPanel({
             <Badge
               className={statusColors[focus.status as AgentStatus] ?? ""}
             >
-              {focus.status}
+              {t(`status.${focus.status}`)}
             </Badge>
             <Badge variant="outline">{focus.taskId}</Badge>
           </div>
-          <FocusSection title={t("visualization.focus.section.cost") ?? "Cost / Budget"}>
+          <FocusSection title={t("visualization.focus.section.cost")}>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-sm text-muted-foreground">
                 <span>${focus.costUsd.toFixed(4)} / ${focus.budgetUsd.toFixed(2)}</span>
@@ -117,7 +117,7 @@ export function AgentVisualizationFocusPanel({
               <Progress value={focus.budgetPct} className="h-1.5" />
             </div>
           </FocusSection>
-          <FocusSection title={t("visualization.focus.section.runtime") ?? "Runtime"}>
+          <FocusSection title={t("visualization.focus.section.runtime")}>
             <div className="flex flex-wrap gap-2">
               <Badge variant="outline">{focus.runtime || "—"}</Badge>
               <Badge variant="outline">{focus.provider || "—"}</Badge>
@@ -125,13 +125,13 @@ export function AgentVisualizationFocusPanel({
             </div>
           </FocusSection>
           <div className="space-y-1 text-sm text-muted-foreground">
-            <p>Turns: {focus.turnCount}</p>
-            <p>Task: {focus.taskTitle}</p>
-            {focus.worktreePath ? <p>Worktree: {focus.worktreePath}</p> : null}
-            {focus.branchName ? <p>Branch: {focus.branchName}</p> : null}
+            <p>{t("visualization.focus.agent.turnsLabel", { turnCount: focus.turnCount })}</p>
+            <p>{t("visualization.focus.agent.taskLabel", { taskTitle: focus.taskTitle })}</p>
+            {focus.worktreePath ? <p>{t("visualization.focus.agent.worktreeLabel", { worktreePath: focus.worktreePath })}</p> : null}
+            {focus.branchName ? <p>{t("visualization.focus.agent.branchLabel", { branchName: focus.branchName })}</p> : null}
             {focus.canResume ? (
               <Badge variant="secondary" className="mt-1">
-                Resumable
+                {t("visualization.focus.agent.resumable")}
               </Badge>
             ) : null}
           </div>

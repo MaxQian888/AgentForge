@@ -8,6 +8,7 @@
  * only user decision; everything else is a straight-line form.
  */
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,6 +83,7 @@ const defaultForm: FormState = {
 };
 
 export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props) {
+  const t = useTranslations("triggers.editDrawer");
   const createTrigger = useEmployeeTriggerStore((s) => s.createTrigger);
   const patchTrigger = useEmployeeTriggerStore((s) => s.patchTrigger);
   const fetchByEmployee = useEmployeeTriggerStore((s) => s.fetchByEmployee);
@@ -130,7 +132,7 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
     try {
       mapping = JSON.parse(form.inputMappingJSON || "{}");
     } catch (err) {
-      setJsonErr(`input_mapping JSON 不合法: ${(err as Error).message}`);
+      setJsonErr(t("jsonError", { message: (err as Error).message }));
       return;
     }
     setJsonErr(null);
@@ -171,37 +173,35 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="sm:max-w-lg overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{isEdit ? "编辑触发器" : "新建触发器"}</SheetTitle>
-          <SheetDescription>
-            派发运行的数字员工被默认绑定为当前员工 (`acting_employee_id`)。
-          </SheetDescription>
+          <SheetTitle>{isEdit ? t("titleEdit") : t("titleCreate")}</SheetTitle>
+          <SheetDescription>{t("description")}</SheetDescription>
         </SheetHeader>
 
         <form onSubmit={onSubmit} className="space-y-4 py-4 px-4">
           {!isEdit ? (
             <div className="space-y-2">
-              <Label htmlFor="trigger-wf">目标工作流 ID</Label>
+              <Label htmlFor="trigger-wf">{t("workflowId")}</Label>
               <Input
                 id="trigger-wf"
                 value={form.workflowId}
                 onChange={(e) => update("workflowId", e.target.value)}
-                placeholder="UUID"
+                placeholder={t("workflowIdPlaceholder")}
                 required
               />
             </div>
           ) : null}
 
           <div className="space-y-2">
-            <Label htmlFor="trigger-name">显示名称</Label>
+            <Label htmlFor="trigger-name">{t("displayName")}</Label>
             <Input
               id="trigger-name"
               value={form.displayName}
               onChange={(e) => update("displayName", e.target.value)}
-              placeholder="例如：PR review 命令"
+              placeholder={t("displayNamePlaceholder")}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="trigger-desc">描述 (可选)</Label>
+            <Label htmlFor="trigger-desc">{t("descriptionLabel")}</Label>
             <Input
               id="trigger-desc"
               value={form.description}
@@ -211,7 +211,7 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
 
           {!isEdit ? (
             <div className="space-y-2">
-              <Label>来源</Label>
+              <Label>{t("source")}</Label>
               <div className="flex gap-3 text-sm">
                 <label className="flex items-center gap-1">
                   <input
@@ -221,7 +221,7 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
                     checked={form.source === "im"}
                     onChange={() => update("source", "im")}
                   />
-                  IM 命令
+                  {t("sourceIm")}
                 </label>
                 <label className="flex items-center gap-1">
                   <input
@@ -231,7 +231,7 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
                     checked={form.source === "schedule"}
                     onChange={() => update("source", "schedule")}
                   />
-                  定时
+                  {t("sourceSchedule")}
                 </label>
               </div>
             </div>
@@ -240,7 +240,7 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
           {form.source === "im" ? (
             <div className="space-y-3">
               <div className="space-y-2">
-                <Label>平台</Label>
+                <Label>{t("platform")}</Label>
                 <Select
                   value={form.imPlatform}
                   onValueChange={(v) => update("imPlatform", v)}
@@ -256,23 +256,23 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>命令</Label>
+                <Label>{t("command")}</Label>
                 <Input
                   value={form.imCommand}
                   onChange={(e) => update("imCommand", e.target.value)}
-                  placeholder="/review"
+                  placeholder={t("commandPlaceholder")}
                 />
               </div>
               <div className="space-y-2">
-                <Label>match_regex (可选)</Label>
+                <Label>{t("matchRegex")}</Label>
                 <Input
                   value={form.imMatchRegex}
                   onChange={(e) => update("imMatchRegex", e.target.value)}
-                  placeholder="^/review\\s+https?://.+"
+                  placeholder={t("matchRegexPlaceholder")}
                 />
               </div>
               <div className="space-y-2">
-                <Label>chat_allowlist (每行一个 chat id)</Label>
+                <Label>{t("chatAllowlist")}</Label>
                 <Textarea
                   value={form.imChatAllowlist}
                   onChange={(e) => update("imChatAllowlist", e.target.value)}
@@ -283,23 +283,23 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
           ) : (
             <div className="space-y-3">
               <div className="space-y-2">
-                <Label>cron 表达式</Label>
+                <Label>{t("cron")}</Label>
                 <Input
                   value={form.cron}
                   onChange={(e) => update("cron", e.target.value)}
-                  placeholder="0 9 * * 1-5"
+                  placeholder={t("cronPlaceholder")}
                 />
               </div>
               <div className="space-y-2">
-                <Label>时区</Label>
+                <Label>{t("timezone")}</Label>
                 <Input
                   value={form.timezone}
                   onChange={(e) => update("timezone", e.target.value)}
-                  placeholder="UTC"
+                  placeholder={t("timezonePlaceholder")}
                 />
               </div>
               <div className="space-y-2">
-                <Label>重叠策略</Label>
+                <Label>{t("overlapPolicy")}</Label>
                 <Select
                   value={form.overlapPolicy}
                   onValueChange={(v) => update("overlapPolicy", v)}
@@ -308,8 +308,8 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="skip_if_running">skip_if_running</SelectItem>
-                    <SelectItem value="allow_parallel">allow_parallel</SelectItem>
+                    <SelectItem value="skip_if_running">{t("overlapSkip")}</SelectItem>
+                    <SelectItem value="allow_parallel">{t("overlapAllow")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -317,7 +317,7 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
           )}
 
           <div className="space-y-2">
-            <Label>input_mapping (JSON)</Label>
+            <Label>{t("inputMapping")}</Label>
             <Textarea
               value={form.inputMappingJSON}
               onChange={(e) => update("inputMappingJSON", e.target.value)}
@@ -335,16 +335,16 @@ export function TriggerEditDrawer({ open, employeeId, trigger, onClose }: Props)
                 checked={form.enabled}
                 onChange={(e) => update("enabled", e.target.checked)}
               />
-              <Label htmlFor="trigger-enabled">启用</Label>
+              <Label htmlFor="trigger-enabled">{t("enabled")}</Label>
             </div>
           ) : null}
 
           <SheetFooter className="flex flex-row justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>
-              取消
+              {t("cancel")}
             </Button>
             <Button type="submit" disabled={saving}>
-              {saving ? "保存中…" : isEdit ? "保存" : "创建"}
+              {saving ? t("saving") : isEdit ? t("save") : t("create")}
             </Button>
           </SheetFooter>
         </form>

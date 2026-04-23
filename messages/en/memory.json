@@ -112,5 +112,6 @@
   "tag.addLabel": "Add tag",
   "tag.addPlaceholder": "New tag...",
   "tag.add": "Add",
-  "tag.remove": "Remove tag {tag}"
+  "tag.remove": "Remove tag {tag}",
+  "featureDisabled": "This feature is currently disabled for this deployment."
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Clock, Loader2, Layers, Package2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,12 +23,6 @@ import { WorkflowPluginRunBody } from "./workflow-plugin-run-body";
 
 type EngineFilter = "all" | UnifiedRunEngine;
 
-const ENGINE_FILTERS: { value: EngineFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "dag", label: "DAG" },
-  { value: "plugin", label: "Plugin" },
-];
-
 const statusBadgeClass: Record<UnifiedRunStatus, string> = {
   pending: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-400",
   running: "bg-blue-500/15 text-blue-700 dark:text-blue-400 animate-pulse",
@@ -38,7 +33,10 @@ const statusBadgeClass: Record<UnifiedRunStatus, string> = {
   unknown: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
 };
 
-function formatRelativeTime(iso?: string): string {
+function formatRelativeTime(
+  iso: string | undefined,
+  t: ReturnType<typeof useTranslations>
+): string {
   if (!iso) return "—";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "—";
@@ -47,28 +45,29 @@ function formatRelativeTime(iso?: string): string {
   const minute = 60 * 1000;
   const hour = 60 * minute;
   const day = 24 * hour;
-  if (abs < minute) return "just now";
-  if (abs < hour) return `${Math.floor(abs / minute)}m ago`;
-  if (abs < day) return `${Math.floor(abs / hour)}h ago`;
-  return `${Math.floor(abs / day)}d ago`;
+  if (abs < minute) return t("runs.time.justNow");
+  if (abs < hour) return t("runs.time.minutesAgo", { count: Math.floor(abs / minute) });
+  if (abs < day) return t("runs.time.hoursAgo", { count: Math.floor(abs / hour) });
+  return t("runs.time.daysAgo", { count: Math.floor(abs / day) });
 }
 
-function triggerLabel(row: UnifiedRunRow): string {
+function triggerLabel(row: UnifiedRunRow, t: ReturnType<typeof useTranslations>): string {
   switch (row.triggeredBy.kind) {
     case "trigger":
-      return "Triggered";
+      return t("runs.triggeredBy.trigger");
     case "manual":
-      return "Manual";
+      return t("runs.triggeredBy.manual");
     case "sub_workflow":
-      return "Sub-workflow";
+      return t("runs.triggeredBy.sub_workflow");
     case "task":
-      return "Task";
+      return t("runs.triggeredBy.task");
     default:
       return row.triggeredBy.kind;
   }
 }
 
 export function WorkflowRunsTab({ projectId }: { projectId: string }) {
+  const t = useTranslations("workflow");
   const {
     rows,
     summary,
@@ -142,11 +141,17 @@ export function WorkflowRunsTab({ projectId }: { projectId: string }) {
 
   const activeEngine: EngineFilter = (filter.engine as EngineFilter) ?? "all";
 
+  const engineFilters: { value: EngineFilter; label: string }[] = [
+    { value: "all", label: t("runs.filter.all") },
+    { value: "dag", label: t("runs.filter.dag") },
+    { value: "plugin", label: t("runs.filter.plugin") },
+  ];
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          {ENGINE_FILTERS.map((f) => (
+          {engineFilters.map((f) => (
             <Button
               key={f.value}
               variant={activeEngine === f.value ? "default" : "outline"}
@@ -160,13 +165,13 @@ export function WorkflowRunsTab({ projectId }: { projectId: string }) {
         </div>
         <div className="flex items-center gap-2 text-xs">
           <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-400">
-            Running {summary.running}
+            {t("runs.summary.running", { count: summary.running })}
           </Badge>
           <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400">
-            Paused {summary.paused}
+            {t("runs.summary.paused", { count: summary.paused })}
           </Badge>
           <Badge className="bg-red-500/15 text-red-700 dark:text-red-400">
-            Failed {summary.failed}
+            {t("runs.summary.failed", { count: summary.failed })}
           </Badge>
         </div>
       </div>
@@ -174,15 +179,15 @@ export function WorkflowRunsTab({ projectId }: { projectId: string }) {
       {loading && rows.length === 0 && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading runs...
+          {t("runs.loading")}
         </div>
       )}
 
       {!loading && rows.length === 0 && (
         <EmptyState
           icon={Clock}
-          title="No runs"
-          description="No workflow runs in this project yet."
+          title={t("runs.noRuns")}
+          description={t("runs.noRunsDesc")}
         />
       )}
 
@@ -214,7 +219,7 @@ export function WorkflowRunsTab({ projectId }: { projectId: string }) {
                       ) : (
                         <>
                           <Package2 className="inline h-3 w-3 mr-1" />
-                          Plugin
+                          {t("runs.filter.plugin")}
                         </>
                       )}
                     </Badge>
@@ -231,13 +236,13 @@ export function WorkflowRunsTab({ projectId }: { projectId: string }) {
                     </Badge>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{triggerLabel(row)}</span>
+                    <span>{triggerLabel(row, t)}</span>
                     {row.actingEmployeeId && (
                       <Badge variant="outline" className="text-[10px]">
-                        Employee
+                        {t("runs.employee")}
                       </Badge>
                     )}
-                    <span>{formatRelativeTime(row.startedAt)}</span>
+                    <span>{formatRelativeTime(row.startedAt, t)}</span>
                   </div>
                 </div>
               </CardContent>
@@ -251,7 +256,7 @@ export function WorkflowRunsTab({ projectId }: { projectId: string }) {
                 onClick={handleLoadMore}
                 disabled={loading}
               >
-                {loading ? "Loading..." : "Load more"}
+                {loading ? t("runs.loadingMore") : t("runs.loadMore")}
               </Button>
             </div>
           )}
@@ -276,6 +281,7 @@ function UnifiedRunDetailView({
   detail,
   onBack,
 }: UnifiedRunDetailViewProps) {
+  const t = useTranslations("workflow");
   // For DAG runs we need the workflow definition (nodes) so the engine-native
   // body component can render its node flow. Pull from the existing workflow
   // store — by the time a caller reaches a DAG detail, the workflow
@@ -290,7 +296,7 @@ function UnifiedRunDetailView({
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onBack}>
-          Back to runs
+          {t("runs.backToRuns")}
         </Button>
         <span className="text-sm text-muted-foreground">
           / {engine} / {runId.slice(0, 8)}
@@ -299,7 +305,7 @@ function UnifiedRunDetailView({
       {loading && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading run detail...
+          {t("runs.detail.loading")}
         </div>
       )}
       {detail && (
@@ -328,6 +334,7 @@ function SharedRunHeader({
     ReturnType<typeof useWorkflowRunStore.getState>["selectedDetail"]
   >;
 }) {
+  const t = useTranslations("workflow");
   const row = detail.row;
   return (
     <Card>
@@ -351,20 +358,20 @@ function SharedRunHeader({
             {row.status}
           </Badge>
           <span className="text-xs text-muted-foreground">
-            Started {formatRelativeTime(row.startedAt)}
+            {t("runs.detail.started", { time: formatRelativeTime(row.startedAt, t) })}
           </span>
           {row.actingEmployeeId && (
             <Badge variant="outline" className="text-[10px]">
-              Employee {row.actingEmployeeId.slice(0, 8)}
+              {t("runs.employee")} {row.actingEmployeeId.slice(0, 8)}
             </Badge>
           )}
           <span className="text-xs text-muted-foreground">
-            {triggerLabel(row)}
+            {triggerLabel(row, t)}
             {row.triggeredBy.ref ? ` · ${row.triggeredBy.ref.slice(0, 8)}` : ""}
           </span>
           {row.parentLink && (
             <Badge variant="outline" className="text-[10px]">
-              Parent {row.parentLink.parentExecutionId.slice(0, 8)}
+              {t("runs.detail.parent", { id: row.parentLink.parentExecutionId.slice(0, 8) })}
             </Badge>
           )}
         </div>

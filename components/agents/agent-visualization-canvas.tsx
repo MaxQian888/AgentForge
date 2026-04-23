@@ -58,7 +58,12 @@ interface VisualizationErrorBoundaryState {
 }
 
 class VisualizationErrorBoundary extends Component<
-  { children: ReactNode },
+  {
+    children: ReactNode;
+    errorTitle: string;
+    errorDescription: string;
+    retryLabel: string;
+  },
   VisualizationErrorBoundaryState
 > {
   state: VisualizationErrorBoundaryState = { hasError: false };
@@ -77,15 +82,15 @@ class VisualizationErrorBoundary extends Component<
         <div className="flex items-center justify-center h-full p-8">
           <Alert variant="destructive" className="max-w-md">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Visualization Error</AlertTitle>
+            <AlertTitle>{this.props.errorTitle}</AlertTitle>
             <AlertDescription className="mt-2">
-              <p className="mb-3">The flow graph encountered an error.</p>
+              <p className="mb-3">{this.props.errorDescription}</p>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => this.setState({ hasError: false })}
               >
-                Retry
+                {this.props.retryLabel}
               </Button>
             </AlertDescription>
           </Alert>
@@ -125,6 +130,7 @@ function VisualizationNode({
   data,
   selected,
 }: NodeProps<VisualizationNode>) {
+  const t = useTranslations("agents");
   const content = (
     <div
       className={cn(
@@ -175,7 +181,7 @@ function VisualizationNode({
         {typeof data.budgetPct === "number" ? (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-              <span>Budget</span>
+              <span>{t("visualization.legend.budget")}</span>
               <span>{Math.round(data.budgetPct)}%</span>
             </div>
             <Progress
@@ -314,7 +320,11 @@ export function AgentVisualizationCanvas({
       ) : null}
 
       <div className="h-[min(68vh,720px)] overflow-hidden rounded-xl border bg-background">
-        <VisualizationErrorBoundary>
+        <VisualizationErrorBoundary
+          errorTitle={t("visualization.errorTitle")}
+          errorDescription={t("visualization.errorDescription")}
+          retryLabel={t("common.retry")}
+        >
         <ReactFlow
           nodes={nodes}
           edges={model.edges}

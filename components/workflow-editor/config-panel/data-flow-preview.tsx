@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Copy, ChevronRight } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +33,7 @@ interface DataFlowPreviewProps {
 export function DataFlowPreview({ nodeId }: DataFlowPreviewProps) {
   const { state } = useEditor();
   const { nodes, edges } = state;
+  const t = useTranslations("workflow");
 
   // All predecessors ordered by BFS distance (direct first)
   const predecessors = findPredecessors(nodeId, nodes, edges);
@@ -49,7 +51,7 @@ export function DataFlowPreview({ nodeId }: DataFlowPreviewProps) {
   if (predecessors.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        No upstream nodes connected.
+        {t("nodeConfig.dataFlow.noUpstream")}
       </p>
     );
   }
@@ -61,7 +63,7 @@ export function DataFlowPreview({ nodeId }: DataFlowPreviewProps) {
         {directPredecessors.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-medium text-foreground">
-              Direct Inputs
+              {t("nodeConfig.dataFlow.directInputs")}
             </p>
             {directPredecessors.map((n) => (
               <PredecessorBlock key={n.id} node={n} />
@@ -77,7 +79,7 @@ export function DataFlowPreview({ nodeId }: DataFlowPreviewProps) {
                 <ChevronRight
                   className={`h-3 w-3 transition-transform ${indirectOpen ? "rotate-90" : ""}`}
                 />
-                Indirect ({indirectPredecessors.length})
+                {t("nodeConfig.dataFlow.indirect")} ({indirectPredecessors.length})
               </button>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -92,11 +94,11 @@ export function DataFlowPreview({ nodeId }: DataFlowPreviewProps) {
 
         {/* Hint */}
         <p className="text-xs text-muted-foreground border-t pt-2">
-          Type{" "}
+          {t("nodeConfig.dataFlow.hintPrefix")}{" "}
           <code className="rounded bg-muted px-1 font-mono">
             {"{{node.output.field}}"}
           </code>{" "}
-          in any config to reference upstream data.
+          {t("nodeConfig.dataFlow.hintSuffix")}
         </p>
       </div>
     </TooltipProvider>
@@ -112,6 +114,7 @@ interface NodeLike {
 }
 
 function PredecessorBlock({ node }: { node: NodeLike }) {
+  const t = useTranslations("workflow");
   const nodeType = node.type ?? "unknown";
   const label = (node.data.label as string | undefined) ?? node.id;
   const fields = getUpstreamOutputFields(node.id, nodeType);
@@ -146,7 +149,7 @@ function PredecessorBlock({ node }: { node: NodeLike }) {
               </Button>
             </TooltipTrigger>
             <TooltipContent side="left">
-              <p>Copy reference</p>
+              <p>{t("nodeConfig.dataFlow.copyReference")}</p>
             </TooltipContent>
           </Tooltip>
         </div>

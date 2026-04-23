@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FileSymlink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useTranslations } from "next-intl";
 
 /**
  * Shows a pill on a wiki page that was materialized from an ingested file.
@@ -10,11 +11,13 @@ import { Badge } from "@/components/ui/badge";
  */
 export function MaterializedFromPill({
   sourceAssetId,
-  label = "Imported from file",
+  label,
 }: {
   sourceAssetId: string;
   label?: string;
 }) {
+  const t = useTranslations("knowledge");
+  const resolvedLabel = label ?? t("materializedFrom");
   return (
     <Badge
       variant="secondary"
@@ -23,7 +26,7 @@ export function MaterializedFromPill({
     >
       <Link href={`/docs?assetId=${sourceAssetId}`}>
         <FileSymlink className="size-3.5 shrink-0" />
-        {label}
+        {resolvedLabel}
       </Link>
     </Badge>
   );

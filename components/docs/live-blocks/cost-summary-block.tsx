@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { LiveArtifactChrome } from "./live-artifact-chrome";
 import { SharedBody } from "./shared-body";
 import { useLiveArtifactActions } from "./use-live-artifact-actions";
@@ -26,6 +27,7 @@ export function CostSummaryBlock({
   projection,
   cachedOk,
 }: CostSummaryBlockProps) {
+  const t = useTranslations("docs");
   const router = useRouter();
   const actions = useLiveArtifactActions();
 
@@ -62,7 +64,7 @@ export function CostSummaryBlock({
   return (
     <LiveArtifactChrome
       kind="cost_summary"
-      title="Cost summary"
+      title={t("liveArtifact.blocks.costSummary.title")}
       status={projection?.status}
       diagnostics={projection?.diagnostics}
       onOpenSource={handleOpenSource}
@@ -73,8 +75,8 @@ export function CostSummaryBlock({
         projection={projection}
         cachedOk={cachedOk}
         onRemove={handleRemove}
-        notFoundMessage="This live artifact is no longer available. The referenced cost window produced no data."
-        forbiddenMessage="You do not have access to cost data for this window."
+        notFoundMessage={t("liveArtifact.blocks.costSummary.notFound")}
+        forbiddenMessage={t("liveArtifact.blocks.costSummary.forbidden")}
       />
     </LiveArtifactChrome>
   );

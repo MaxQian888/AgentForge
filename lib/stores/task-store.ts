@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 export type TaskStatus =
   | "inbox"
@@ -276,8 +277,9 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
         tasks: upsertNormalizedTask(state.tasks, normalizeTask(task)),
       }));
     } catch (error) {
-      toast.error("Failed to create task", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "创建任务失败" : "Failed to create task", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }
@@ -312,8 +314,9 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
           ),
         }));
       }
-      toast.error("Failed to update task", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "更新任务失败" : "Failed to update task", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }
@@ -333,8 +336,9 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
       await api.delete(`/api/v1/tasks/${id}`, { token });
     } catch (error) {
       set({ tasks: previousTasks });
-      toast.error("Failed to delete task", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "删除任务失败" : "Failed to delete task", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }

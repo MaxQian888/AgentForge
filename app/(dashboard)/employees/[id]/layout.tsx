@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { use } from "react";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,13 +14,13 @@ import { cn } from "@/lib/utils";
  */
 interface NavTab {
   slug: string;
-  label: string;
+  labelKey: string;
 }
 
 const TABS: NavTab[] = [
-  { slug: "runs", label: "Runs" },
-  { slug: "triggers", label: "Triggers" },
-  // 1D will append: { slug: "secrets",  label: "Secrets"  }
+  { slug: "runs", labelKey: "runs" },
+  { slug: "triggers", labelKey: "triggers" },
+  // 1D will append: { slug: "secrets",  labelKey: "secrets"  }
 ];
 
 export default function EmployeeDetailLayout({
@@ -31,10 +32,11 @@ export default function EmployeeDetailLayout({
 }) {
   const { id } = use(params);
   const pathname = usePathname();
+  const t = useTranslations("employees");
   return (
     <div className="space-y-4">
       <div className="border-b">
-        <nav className="flex gap-1 px-1" aria-label="Employee sections">
+        <nav className="flex gap-1 px-1" aria-label={t("title")}>
           {TABS.map((tab) => {
             const href = `/employees/${id}/${tab.slug}`;
             const active = pathname?.startsWith(href);
@@ -49,7 +51,7 @@ export default function EmployeeDetailLayout({
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
-                {tab.label}
+                {t(tab.labelKey)}
               </Link>
             );
           })}

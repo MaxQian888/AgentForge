@@ -105,7 +105,7 @@ export function AgentWorkspaceDetail({
   if (!agent) {
     return (
       <div className="flex items-center justify-center py-20">
-        <p className="text-muted-foreground">Agent not found</p>
+        <p className="text-muted-foreground">{t("detail.notFound")}</p>
       </div>
     );
   }
@@ -223,7 +223,7 @@ export function AgentWorkspaceDetail({
             </span>
             <Progress
               value={costPct}
-              aria-label="Budget usage"
+              aria-label={t("card.budgetUsage")}
               className="mt-2"
               indicatorClassName={costPct > 80 ? "bg-destructive" : undefined}
             />
@@ -247,7 +247,7 @@ export function AgentWorkspaceDetail({
                 className="flex items-center justify-between rounded-md border p-3 text-sm"
               >
                 <div className="min-w-0">
-                  <p className="font-medium">{req.toolName ?? "Unknown tool"}</p>
+                  <p className="font-medium">{req.toolName ?? t("detail.unknownTool")}</p>
                   {req.mcpServerId && (
                     <p className="text-xs text-muted-foreground">
                       MCP: {req.mcpServerId}
@@ -318,24 +318,24 @@ export function AgentWorkspaceDetail({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Pool Snapshot
+              {t("detail.poolSnapshot")}
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 text-sm sm:grid-cols-4">
             <div>
-              <p className="text-muted-foreground">Active</p>
+              <p className="text-muted-foreground">{t("detail.poolActive")}</p>
               <p className="text-xl font-semibold">{pool.active}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Available</p>
+              <p className="text-muted-foreground">{t("detail.poolAvailable")}</p>
               <p className="text-xl font-semibold">{pool.available}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Queued</p>
+              <p className="text-muted-foreground">{t("detail.poolQueued")}</p>
               <p className="text-xl font-semibold">{pool.queued ?? 0}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Warm</p>
+              <p className="text-muted-foreground">{t("detail.poolWarm")}</p>
               <p className="text-xl font-semibold">{pool.warm ?? 0}</p>
             </div>
           </CardContent>
@@ -375,7 +375,7 @@ export function AgentWorkspaceDetail({
                               : "bg-green-500/10 text-green-600",
                           )}
                         >
-                          {result.isError ? "error" : "ok"}
+                          {result.isError ? t("detail.toolResultError") : t("detail.toolResultOk")}
                         </Badge>
                       )}
                     </div>
@@ -466,7 +466,7 @@ export function AgentWorkspaceDetail({
           {agent.dispatchStatus ? (
             <>
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Outcome:</span>
+                <span className="text-muted-foreground">{t("detail.outcome")}</span>
                 <Badge variant="secondary">{agent.dispatchStatus}</Badge>
                 {agent.guardrailType && (
                   <Badge variant="outline">{agent.guardrailType}</Badge>
@@ -474,13 +474,13 @@ export function AgentWorkspaceDetail({
               </div>
               {agent.budget > 0 && (
                 <div className="text-muted-foreground">
-                  Budget: ${agent.budget.toFixed(2)}
+                  {t("detail.budgetLabel", { budget: agent.budget.toFixed(2) })}
                 </div>
               )}
             </>
           ) : (
             <div className="text-muted-foreground">
-              Manual spawn
+              {t("detail.manualSpawn")}
               {agent.lastActivity && (
                 <span>
                   {" "}
@@ -494,10 +494,10 @@ export function AgentWorkspaceDetail({
           )}
           <div className="flex flex-wrap gap-2 pt-2">
             <Button asChild type="button" size="sm" variant="outline">
-              <Link href={`/project?taskId=${agent.taskId}`}>Current Task</Link>
+              <Link href={`/project?taskId=${agent.taskId}`}>{t("detail.currentTask")}</Link>
             </Button>
             <Button asChild type="button" size="sm" variant="outline">
-              <Link href={`/reviews?taskId=${agent.taskId}`}>Review History</Link>
+              <Link href={`/reviews?taskId=${agent.taskId}`}>{t("detail.reviewHistory")}</Link>
             </Button>
           </div>
         </CardContent>
@@ -507,7 +507,7 @@ export function AgentWorkspaceDetail({
 
       {/* Output stream */}
       <div>
-        <h2 className="mb-3 text-lg font-semibold">Output Stream</h2>
+        <h2 className="mb-3 text-lg font-semibold">{t("detail.outputStream")}</h2>
         <OutputStream lines={outputs} />
       </div>
 

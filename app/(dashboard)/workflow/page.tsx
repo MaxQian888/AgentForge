@@ -620,7 +620,8 @@ function TriggersTab({ projectId }: { projectId: string }) {
 }
 
 function WorkflowPageContent() {
-  useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Workflow" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.operations"), href: "/" }, { label: tc("nav.workflow") }]);
   const t = useTranslations("workflow");
   const searchParams = useSearchParams();
   const requestedProjectId = searchParams.get("project");

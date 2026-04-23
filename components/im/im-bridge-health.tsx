@@ -106,7 +106,7 @@ export function IMBridgeHealth({
                 variant="secondary"
                 className={cn("text-sm capitalize", healthColors[bridgeStatus.health])}
               >
-                {bridgeStatus.health}
+                {t(`healthStatusLabels.${bridgeStatus.health}`, { defaultValue: bridgeStatus.health })}
               </Badge>
             </div>
           </CardContent>

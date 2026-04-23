@@ -24,7 +24,8 @@ import { ErrorBanner } from "@/components/shared/error-banner";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function SchedulerPage() {
-  useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Scheduler" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.operations"), href: "/" }, { label: tc("nav.scheduler") }]);
   const t = useTranslations("scheduler");
   const jobs = useSchedulerStore((s) => s.jobs);
   const runsByJobKey = useSchedulerStore((s) => s.runsByJobKey);

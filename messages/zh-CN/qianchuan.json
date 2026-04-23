@@ -54,5 +54,33 @@
     "publishedSuccess": "策略已发布",
     "archivedSuccess": "策略已归档",
     "deletedSuccess": "策略已删除"
+  },
+  "store": {
+    "bindings": {
+      "error": {
+        "load": "加载千川绑定失败",
+        "create": "创建失败",
+        "update": "更新失败",
+        "delete": "删除失败",
+        "sync": "同步失败"
+      },
+      "success": {
+        "create": "绑定已创建",
+        "delete": "绑定已删除",
+        "sync": "已触发同步"
+      }
+    },
+    "strategies": {
+      "error": {
+        "create": "创建策略失败",
+        "update": "更新策略失败",
+        "publish": "发布策略失败",
+        "archive": "归档策略失败",
+        "delete": "删除策略失败"
+      }
+    },
+    "error": {
+      "notLoggedIn": "未登录"
+    }
   }
 }

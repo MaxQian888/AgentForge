@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -18,8 +19,6 @@ interface Props {
   onChange: (c: Record<string, unknown>) => void;
 }
 
-const SECRETS_HELP = "Templating: {{secrets.NAME}} is allowed only in URL, headers, url_query, and body. Other fields reject it at save time.";
-
 function fromObject(o: unknown): KV[] {
   if (!o || typeof o !== "object") return [];
   return Object.entries(o as Record<string, string>).map(([k, v]) => ({ k, v }));
@@ -31,6 +30,7 @@ function toObject(rows: KV[]): Record<string, string> {
 }
 
 export function HTTPCallConfig({ config, onChange }: Props) {
+  const t = useTranslations("workflow");
   const method = (config.method as Method | undefined) ?? "GET";
   const url = (config.url as string | undefined) ?? "";
   const body = (config.body as string | undefined) ?? "";
@@ -56,7 +56,7 @@ export function HTTPCallConfig({ config, onChange }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Method</Label>
+        <Label className="text-xs">{t("nodeConfig.httpCall.method")}</Label>
         <Select value={method} onValueChange={(v) => update({ method: v })}>
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -68,40 +68,40 @@ export function HTTPCallConfig({ config, onChange }: Props) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">URL</Label>
+        <Label className="text-xs">{t("nodeConfig.httpCall.url")}</Label>
         <Input value={url} onChange={(e) => update({ url: e.target.value })}
-          placeholder="https://api.example.com/v1/things" />
-        <p className="text-[11px] text-muted-foreground">{SECRETS_HELP}</p>
+          placeholder={t("nodeConfig.httpCall.urlPlaceholder")} />
+        <p className="text-[11px] text-muted-foreground">{t("nodeConfig.httpCall.secretsHelp")}</p>
       </div>
 
-      <KVEditor label="Headers" rows={headers} onChange={updateHeaders}
-        keyPlaceholder="Header name" valuePlaceholder="Header value (e.g. Bearer {{secrets.X}})" />
+      <KVEditor label={t("nodeConfig.httpCall.headers")} rows={headers} onChange={updateHeaders}
+        keyPlaceholder={t("nodeConfig.httpCall.headerKeyPlaceholder")} valuePlaceholder={t("nodeConfig.httpCall.headerValuePlaceholder")} />
 
-      <KVEditor label="URL Query" rows={query} onChange={updateQuery}
-        keyPlaceholder="Query name" valuePlaceholder="Value" />
+      <KVEditor label={t("nodeConfig.httpCall.urlQuery")} rows={query} onChange={updateQuery}
+        keyPlaceholder={t("nodeConfig.httpCall.queryKeyPlaceholder")} valuePlaceholder={t("nodeConfig.httpCall.queryValuePlaceholder")} />
 
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Body</Label>
+        <Label className="text-xs">{t("nodeConfig.httpCall.body")}</Label>
         <Textarea rows={5} value={body}
           onChange={(e) => update({ body: e.target.value })}
-          placeholder='{"hello":"world"} -- supports {{secrets.X}} and {{$dataStore.X.Y}}'
+          placeholder={t("nodeConfig.httpCall.bodyPlaceholder")}
           className="font-mono text-xs" />
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Timeout (seconds, max 300)</Label>
+        <Label className="text-xs">{t("nodeConfig.httpCall.timeout")}</Label>
         <Input type="number" value={timeout}
           onChange={(e) => update({ timeout_seconds: Number(e.target.value) })} />
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Treat as success (comma-separated status codes)</Label>
+        <Label className="text-xs">{t("nodeConfig.httpCall.treatAsSuccess")}</Label>
         <Input value={treatAsSuccess}
           onChange={(e) => {
             const arr = e.target.value.split(",").map((s) => Number(s.trim())).filter((n) => !Number.isNaN(n));
             update({ treat_as_success: arr });
           }}
-          placeholder="e.g. 401,404" />
+          placeholder={t("nodeConfig.httpCall.treatAsSuccessPlaceholder")} />
       </div>
     </div>
   );
@@ -113,6 +113,7 @@ function KVEditor({
   label: string; rows: KV[]; onChange: (rows: KV[]) => void;
   keyPlaceholder: string; valuePlaceholder: string;
 }) {
+  const t = useTranslations("workflow");
   return (
     <div className="flex flex-col gap-1.5">
       <Label className="text-xs">{label}</Label>
@@ -138,7 +139,7 @@ function KVEditor({
         ))}
         <Button variant="ghost" size="sm" className="self-start"
           onClick={() => onChange([...rows, { k: "", v: "" }])}>
-          <Plus className="mr-1 h-3.5 w-3.5" /> Add {label.toLowerCase().replace(/s$/, "")}
+          <Plus className="mr-1 h-3.5 w-3.5" /> {t("nodeConfig.httpCall.addRow", { label: label.toLowerCase().replace(/s$/, "") })}
         </Button>
       </div>
     </div>

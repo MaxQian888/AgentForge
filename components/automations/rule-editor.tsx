@@ -89,14 +89,14 @@ export function RuleEditor({ projectId }: { projectId: string }) {
       </div>
       {actionType === "start_workflow" ? (
         <div className="space-y-2">
-          <Label>Workflow Plugin ID</Label>
+          <Label>{t("automations.workflowPluginId")}</Label>
           <Input
             value={workflowPluginId}
             onChange={(event) => setWorkflowPluginId(event.target.value)}
             placeholder="task-delivery-flow"
           />
           <p className="text-xs text-muted-foreground">
-            Use <code>start_workflow</code> for canonical workflow orchestration. <code>invoke_plugin</code> remains for generic plugin operations.
+            {t("automations.workflowPluginHelp")}
           </p>
         </div>
       ) : null}

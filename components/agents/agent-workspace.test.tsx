@@ -9,6 +9,7 @@ jest.mock("next-intl", () => ({
       "workspace.toggleSidebar": "Toggle Sidebar",
       "monitor.teamsLink": "Teams",
       "monitor.loading": "Loading agents...",
+      "workspace.spawnAgent": "Spawn Agent",
     };
     return map[key] ?? key;
   },

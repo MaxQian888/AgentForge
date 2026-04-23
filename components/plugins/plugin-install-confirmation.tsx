@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import { Globe, FolderOpen, AlertTriangle } from "lucide-react";
 import type { PluginSourceType, PluginPermissions } from "@/lib/stores/plugin-store";
 
@@ -23,6 +24,7 @@ export function PluginInstallConfirmation({
   onConfirm,
   onBack,
 }: PluginInstallConfirmationProps) {
+  const t = useTranslations("plugins");
   const hasNetwork =
     permissions?.network?.required && permissions.network.domains?.length;
   const hasFilesystem =
@@ -42,12 +44,12 @@ export function PluginInstallConfirmation({
       {/* Permissions */}
       {(hasNetwork || hasFilesystem) && (
         <div className="grid gap-2">
-          <p className="text-sm font-medium">Requested Permissions</p>
+          <p className="text-sm font-medium">{t("installConfirmation.requestedPermissions")}</p>
           {hasNetwork && (
             <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
               <Globe className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <div className="grid gap-1">
-                <span className="font-medium">Network access</span>
+                <span className="font-medium">{t("installConfirmation.networkAccess")}</span>
                 <ul className="list-disc pl-4 text-xs text-muted-foreground">
                   {permissions!.network!.domains!.map((d) => (
                     <li key={d}>{d}</li>
@@ -60,7 +62,7 @@ export function PluginInstallConfirmation({
             <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
               <FolderOpen className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <div className="grid gap-1">
-                <span className="font-medium">Filesystem access</span>
+                <span className="font-medium">{t("installConfirmation.filesystemAccess")}</span>
                 <ul className="list-disc pl-4 text-xs text-muted-foreground">
                   {permissions!.filesystem!.allowed_paths!.map((p) => (
                     <li key={p}>{p}</li>
@@ -81,20 +83,17 @@ export function PluginInstallConfirmation({
           )}
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <p className="text-sm">
-            This plugin has no cryptographic signature. Install only if you trust
-            the source.
-          </p>
+          <p className="text-sm">{t("installConfirmation.unsignedWarning")}</p>
         </div>
       )}
 
       {/* Actions */}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onBack}>
-          Back
+          {t("installConfirmation.back")}
         </Button>
         <Button type="button" onClick={onConfirm}>
-          {unsigned ? "Install Anyway" : "Confirm Install"}
+          {unsigned ? t("installConfirmation.installAnyway") : t("installConfirmation.confirmInstall")}
         </Button>
       </div>
     </div>

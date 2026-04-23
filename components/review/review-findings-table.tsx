@@ -35,6 +35,14 @@ const decisionColors: Record<string, string> = {
   needs_manual_fix: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
 };
 
+const decisionLabelKeys: Record<string, string> = {
+  pending: "decisionPending",
+  approved: "decisionApproved",
+  dismissed: "decisionDismissed",
+  deferred: "decisionDeferred",
+  needs_manual_fix: "decisionNeedsManualFix",
+};
+
 interface ReviewFindingsTableProps {
   findings: ReviewFinding[];
 }
@@ -66,8 +74,8 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
             <TableHead>{t("findingFileLine")}</TableHead>
             <TableHead>{t("findingMessage")}</TableHead>
             <TableHead>{t("findingSuggestion")}</TableHead>
-            <TableHead>Decision</TableHead>
-            <TableHead>Actions</TableHead>
+            <TableHead>{t("findingDecision")}</TableHead>
+            <TableHead>{t("findingActions")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -104,7 +112,7 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
                   variant="secondary"
                   className={cn("text-xs", decisionColors[finding.decision ?? "pending"] ?? "")}
                 >
-                  {finding.decision ?? "pending"}
+                  {t(decisionLabelKeys[finding.decision ?? "pending"] ?? "decisionPending")}
                 </Badge>
               </TableCell>
               <TableCell>
@@ -113,7 +121,7 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
-                    title="Approve"
+                    title={t("actionApprove")}
                     data-testid={`approve-${finding.id ?? index}`}
                     onClick={() => finding.id && decideFinding(finding.id, "approve")}
                   >
@@ -123,7 +131,7 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
-                    title="Dismiss"
+                    title={t("actionDismiss")}
                     data-testid={`dismiss-${finding.id ?? index}`}
                     onClick={() => finding.id && decideFinding(finding.id, "dismiss")}
                   >
@@ -133,7 +141,7 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
-                    title="Defer"
+                    title={t("actionDefer")}
                     data-testid={`defer-${finding.id ?? index}`}
                     onClick={() => finding.id && decideFinding(finding.id, "defer")}
                   >
@@ -144,7 +152,7 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"
-                      title="Show patch"
+                      title={t("actionShowPatch")}
                       data-testid={`show-patch-${finding.id ?? index}`}
                       onClick={() =>
                         setPatchModal({ open: true, patch: finding.suggestedPatch ?? null })

@@ -3,6 +3,7 @@ jest.mock("next-intl", () => ({
     const map: Record<string, string> = {
       "teamHealth.title": "Team Health",
       "teamHealth.empty": "No team members yet.",
+      "status.overloaded": "overloaded",
     };
     return map[key] ?? key;
   },

@@ -94,10 +94,18 @@
     "reset": "Reset",
     "allItems": "All"
   },
+  "desktop": {
+    "workspace": "Desktop Workspace",
+    "minimizeWindow": "Minimize window",
+    "maximizeWindow": "Maximize window",
+    "restoreWindow": "Restore window",
+    "closeWindow": "Close window"
+  },
   "quickSearch": "Quick Search",
   "status": {
     "active": "Active",
     "inactive": "Inactive",
+    "suspended": "Suspended",
     "enabled": "Enabled",
     "disabled": "Disabled",
     "pending": "Pending",
@@ -107,5 +115,8 @@
     "error": "Error",
     "success": "Success",
     "warning": "Warning"
+  },
+  "error": {
+    "unknown": "Unknown error"
   }
 }

@@ -190,7 +190,7 @@ export function SchedulerJobDetail({
             </div>
             <div>
               <span className="text-muted-foreground">{t("jobDetail.controlState")}</span>
-              <p className="font-medium capitalize">{job.controlState ?? "active"}</p>
+              <p className="font-medium capitalize">{t(`controlStateLabels.${job.controlState ?? "active"}`)}</p>
             </div>
             <div>
               <span className="text-muted-foreground">{t("jobDetail.nextRun")}</span>
@@ -202,15 +202,15 @@ export function SchedulerJobDetail({
             </div>
             <div>
               <span className="text-muted-foreground">{t("jobDetail.scope")}</span>
-              <p className="font-medium capitalize">{job.scope}</p>
+              <p className="font-medium capitalize">{job.scope ? t(`scopeLabels.${job.scope}`) : "-"}</p>
             </div>
             <div>
               <span className="text-muted-foreground">{t("jobDetail.overlapPolicy")}</span>
-              <p className="font-medium capitalize">{job.overlapPolicy}</p>
+              <p className="font-medium capitalize">{job.overlapPolicy ? t(`overlapPolicyLabels.${job.overlapPolicy}`) : "-"}</p>
             </div>
             <div>
               <span className="text-muted-foreground">{t("jobDetail.executionMode")}</span>
-              <p className="font-medium capitalize">{job.executionMode}</p>
+              <p className="font-medium capitalize">{job.executionMode ? t(`executionModeLabels.${job.executionMode}`) : "-"}</p>
             </div>
           </div>
 
@@ -291,10 +291,10 @@ export function SchedulerJobDetail({
               onChange={(event) => setStatusFilter(event.target.value)}
             >
               <option value="">{t("runHistory.filterAll")}</option>
-              <option value="failed">failed</option>
-              <option value="running">running</option>
-              <option value="cancel_requested">cancel_requested</option>
-              <option value="cancelled">cancelled</option>
+              <option value="failed">{t("runStatusOptions.failed")}</option>
+              <option value="running">{t("runStatusOptions.running")}</option>
+              <option value="cancel_requested">{t("runStatusOptions.cancel_requested")}</option>
+              <option value="cancelled">{t("runStatusOptions.cancelled")}</option>
             </select>
             <label className="text-xs text-muted-foreground">{t("runHistory.filterTrigger")}</label>
             <select
@@ -304,8 +304,8 @@ export function SchedulerJobDetail({
               onChange={(event) => setTriggerFilter(event.target.value)}
             >
               <option value="">{t("runHistory.filterAll")}</option>
-              <option value="manual">manual</option>
-              <option value="cron">cron</option>
+              <option value="manual">{t("triggerSourceLabels.manual")}</option>
+              <option value="cron">{t("triggerSourceLabels.cron")}</option>
             </select>
             <Button
               variant="outline"

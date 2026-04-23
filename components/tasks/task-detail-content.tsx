@@ -568,7 +568,7 @@ export function TaskDetailContent({
             <SelectContent>
               {statuses.map((status) => (
                 <SelectItem key={status} value={status}>
-                  {status.replace("_", " ")}
+                  {t(`status.${status}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -587,7 +587,7 @@ export function TaskDetailContent({
             <SelectContent>
               {priorities.map((item) => (
                 <SelectItem key={item} value={item}>
-                  {item}
+                  {t(`priority.${item}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -716,7 +716,7 @@ export function TaskDetailContent({
                     <span className="truncate">{candidate.title}</span>
                   </div>
                   <Badge variant={candidate.status === "done" ? "secondary" : "outline"}>
-                    {candidate.status === "done" ? t("detail.done") : candidate.status}
+                    {candidate.status === "done" ? t("detail.done") : t(`status.${candidate.status}`)}
                   </Badge>
                 </label>
               );
@@ -914,7 +914,7 @@ export function TaskDetailContent({
                 >
                   <span>{blocker.title}</span>
                   <Badge variant={blocker.isComplete ? "secondary" : "outline"}>
-                    {blocker.isComplete ? t("detail.done") : blocker.status}
+                    {blocker.isComplete ? t("detail.done") : t(`status.${blocker.status}`)}
                   </Badge>
                 </div>
               ))}
@@ -933,7 +933,7 @@ export function TaskDetailContent({
                   className="flex flex-wrap items-center gap-2 text-muted-foreground"
                 >
                   <span>{blockedTask.title}</span>
-                  <Badge variant="outline">{blockedTask.status}</Badge>
+                  <Badge variant="outline">{t(`status.${blockedTask.status}`)}</Badge>
                 </div>
               ))}
             </div>
@@ -1045,7 +1045,7 @@ export function TaskDetailContent({
                       {t(formatExecutionModeKey(childTask.executionMode)!)}
                     </Badge>
                   ) : null}
-                  <Badge variant="outline">{childTask.status}</Badge>
+                  <Badge variant="outline">{t(`status.${childTask.status}`)}</Badge>
                 </div>
               </div>
             ))}
@@ -1096,7 +1096,7 @@ export function TaskDetailContent({
             variant="outline"
             disabled={!onSpawnAgent || !canSpawn}
             onClick={() => setSpawnDialogOpen(true)}
-            title={!canSpawn ? "Requires editor or higher" : undefined}
+            title={!canSpawn ? t("permission.requiresEditor") : undefined}
           >
             <Bot className="mr-2 size-4" />
             {t("detail.startAgent")}
@@ -1106,7 +1106,7 @@ export function TaskDetailContent({
             variant="outline"
             disabled={!canStartTeam}
             onClick={() => setTeamDialogOpen(true)}
-            title={!canStartTeam ? "Requires editor or higher" : undefined}
+            title={!canStartTeam ? t("permission.requiresEditor") : undefined}
           >
             <Network className="mr-2 size-4" />
             {t("detail.startTeam")}
@@ -1137,7 +1137,7 @@ export function TaskDetailContent({
           disabled={!onTaskSave || !canEditTask}
           onClick={() => void handleSave()}
           className="flex-1"
-          title={!canEditTask ? "Requires editor or higher" : undefined}
+          title={!canEditTask ? t("permission.requiresEditor") : undefined}
         >
           {t("detail.saveChanges")}
         </Button>

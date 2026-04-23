@@ -8,6 +8,8 @@ jest.mock("next-intl", () => ({
       "jobFilters.statusSucceeded": "Succeeded",
       "jobFilters.statusFailed": "Failed",
       "jobFilters.statusPaused": "Paused",
+      "scopeLabels.system": "System",
+      "scopeLabels.project": "Project",
     };
     return map[key] ?? key;
   },

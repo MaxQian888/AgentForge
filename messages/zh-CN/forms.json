@@ -15,5 +15,13 @@
   "taskTitle": "任务标题",
   "taskDescription": "任务描述",
   "taskPriority": "任务优先级",
-  "customField": "自定义字段：{name}"
+  "customField": "自定义字段：{name}",
+  "loadingForm": "加载表单",
+  "checkingForm": "正在检查请求的表单链接...",
+  "formNotFound": "未找到表单",
+  "formNotFoundDesc": "请在查询字符串中提供表单 slug 以加载公开表单。",
+  "checkingAccess": "正在检查权限并加载表单详情...",
+  "noFormMatched": "没有与 slug \"{slug}\" 匹配的表单。",
+  "formUnavailable": "表单不可用",
+  "submitDescription": "提交此表单以在项目中创建任务。"
 }

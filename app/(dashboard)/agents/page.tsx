@@ -10,9 +10,11 @@ import { useTaskStore } from "@/lib/stores/task-store";
 import { AgentWorkspace } from "@/components/agents/agent-workspace";
 import { EmployeesSection } from "@/components/employees/employees-section";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
+import { useTranslations } from "next-intl";
 
 function AgentsPageInner() {
-  useBreadcrumbs([{ label: "Project", href: "/" }, { label: "Agents" }]);
+  const t = useTranslations();
+  useBreadcrumbs([{ label: t("common.nav.group.project"), href: "/" }, { label: t("common.nav.agents") }]);
   const searchParams = useSearchParams();
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
   const tasks = useTaskStore((state) => state.tasks);

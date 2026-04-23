@@ -1,0 +1,52 @@
+{
+  "title": "Skills",
+  "description": "Inspect governed skills, verify health, sync workflow mirrors, and hand off into the right downstream workspace.",
+  "actions": {
+    "verifyInternal": "Verify Internal Skills",
+    "verifyBuiltIns": "Verify Built-in Skills",
+    "syncMirrors": "Sync Mirrors"
+  },
+  "searchPlaceholder": "Search skills...",
+  "filters": {
+    "family": {
+      "all": "All Families",
+      "builtInRuntime": "Built-in Runtime",
+      "repoAssistant": "Repo Assistant",
+      "workflowMirror": "Workflow Mirror"
+    },
+    "status": {
+      "all": "All Statuses",
+      "healthy": "Healthy",
+      "warning": "Warning",
+      "drifted": "Drifted",
+      "blocked": "Blocked"
+    }
+  },
+  "loading": "Loading governed skills...",
+  "empty": "No governed skills match the current filters.",
+  "detailLoading": "Loading skill detail...",
+  "selectPrompt": "Select a governed skill to inspect its package preview, governance diagnostics, and downstream actions.",
+  "list": {
+    "builtInBundle": "Built-in bundle",
+    "preview": "Preview"
+  },
+  "detail": {
+    "bundle": "Bundle",
+    "builtInMember": "Official built-in member",
+    "notBuiltIn": "Not in built-in bundle",
+    "category": "Category: {category}",
+    "provenance": "Provenance",
+    "lockSource": "Lock source: {source}",
+    "diagnostics": "Diagnostics",
+    "blockedActions": "Blocked Actions",
+    "downstreamHandoffs": "Downstream Handoffs",
+    "mirrorTargets": "Mirror Targets"
+  },
+  "healthStatus": {
+    "healthy": "Healthy",
+    "warning": "Warning",
+    "drifted": "Drifted",
+    "blocked": "Blocked",
+    "unknown": "Unknown"
+  }
+}

@@ -2,6 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ViewShareDialog } from "./view-share-dialog";
 
+jest.mock("next-intl", () => ({
+  useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
+}));
+
 const updateViewMock = jest.fn();
 
 jest.mock("@/lib/stores/saved-view-store", () => ({
@@ -55,14 +59,14 @@ describe("ViewShareDialog", () => {
     );
 
     await user.type(
-      screen.getByPlaceholderText("reviewer, lead"),
+      screen.getByPlaceholderText("views.viewShareDialog.roleIdsPlaceholder"),
       "reviewer, lead, ",
     );
     await user.type(
-      screen.getByPlaceholderText("member-1, member-2"),
+      screen.getByPlaceholderText("views.viewShareDialog.memberIdsPlaceholder"),
       "member-1, member-2",
     );
-    await user.click(screen.getByRole("button", { name: "Save sharing" }));
+    await user.click(screen.getByRole("button", { name: "views.viewShareDialog.saveSharing" }));
 
     await waitFor(() => {
       expect(updateViewMock).toHaveBeenCalledWith("project-1", "view-1", {

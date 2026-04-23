@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { useMilestoneStore } from "@/lib/stores/milestone-store";
 import type { Sprint } from "@/lib/stores/sprint-store";
 import type { Task } from "@/lib/stores/task-store";
@@ -14,6 +15,7 @@ export function RoadmapView({
   tasks: Task[];
   sprints: Sprint[];
 }) {
+  const t = useTranslations("milestones");
   const milestones = useMilestoneStore((state) => state.milestonesByProject[projectId] ?? []);
   const fetchMilestones = useMilestoneStore((state) => state.fetchMilestones);
 
@@ -32,16 +34,16 @@ export function RoadmapView({
               <div>
                 <div className="text-lg font-semibold">{milestone.name}</div>
                 <div className="text-sm text-muted-foreground">
-                  {milestone.targetDate ?? "No target date"} · {milestone.status}
+                  {milestone.targetDate ?? t("roadmap.noTargetDate")} · {t(`status.${milestone.status}`)}
                 </div>
               </div>
               <div className="text-sm text-muted-foreground">
-                {milestone.metrics?.completionRate ?? 0}% complete
+                {t("roadmap.complete", { rate: milestone.metrics?.completionRate ?? 0 })}
               </div>
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
-                <div className="mb-2 text-sm font-medium">Sprints</div>
+                <div className="mb-2 text-sm font-medium">{t("roadmap.sprints")}</div>
                 <div className="space-y-2">
                   {milestoneSprints.map((sprint) => (
                     <div key={sprint.id} className="rounded-md border px-3 py-2 text-sm">
@@ -51,7 +53,7 @@ export function RoadmapView({
                 </div>
               </div>
               <div>
-                <div className="mb-2 text-sm font-medium">Tasks</div>
+                <div className="mb-2 text-sm font-medium">{t("roadmap.tasks")}</div>
                 <div className="space-y-2">
                   {milestoneTasks.map((task) => (
                     <div key={task.id} className="rounded-md border px-3 py-2 text-sm">

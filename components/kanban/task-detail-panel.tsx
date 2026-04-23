@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   Sheet,
   SheetContent,
@@ -26,6 +27,7 @@ export function TaskDetailPanel({
   open,
   onOpenChange,
 }: TaskDetailPanelProps) {
+  const t = useTranslations("tasks");
   const tasks = useTaskStore((state) => state.tasks);
   const updateTask = useTaskStore((state) => state.updateTask);
   const assignTask = useTaskStore((state) => state.assignTask);
@@ -53,9 +55,9 @@ export function TaskDetailPanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>Task Details</SheetTitle>
+          <SheetTitle>{t("detail.title")}</SheetTitle>
           <SheetDescription>
-            Review task context, update planning details, and manage assignment status.
+            {t("detail.panelDescription")}
           </SheetDescription>
         </SheetHeader>
         <TaskDetailContent

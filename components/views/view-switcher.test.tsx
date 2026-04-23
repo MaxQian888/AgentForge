@@ -2,6 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ViewSwitcher } from "./view-switcher";
 
+jest.mock("next-intl", () => ({
+  useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
+}));
+
 const fetchViewsMock = jest.fn();
 const selectViewMock = jest.fn();
 const setDefaultViewMock = jest.fn();
@@ -105,8 +109,8 @@ describe("ViewSwitcher", () => {
 
     render(<ViewSwitcher projectId="project-1" />);
 
-    expect(screen.getByRole("button", { name: "Share" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Set Default" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "views.viewSwitcher.share" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "views.viewSwitcher.setDefault" })).toBeEnabled();
     expect(saveViewDialogMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         open: false,
@@ -124,13 +128,13 @@ describe("ViewSwitcher", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Save View" }));
+    await user.click(screen.getByRole("button", { name: "views.viewSwitcher.saveView" }));
     expect(await screen.findByTestId("save-view-dialog")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Share" }));
+    await user.click(screen.getByRole("button", { name: "views.viewSwitcher.share" }));
     expect(await screen.findByTestId("view-share-dialog")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Set Default" }));
+    await user.click(screen.getByRole("button", { name: "views.viewSwitcher.setDefault" }));
     expect(setDefaultViewMock).toHaveBeenCalledWith("project-1", "view-1");
   });
 
@@ -141,8 +145,8 @@ describe("ViewSwitcher", () => {
 
     render(<ViewSwitcher projectId="project-1" />);
 
-    expect(screen.getByRole("button", { name: "Share" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Set Default" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "views.viewSwitcher.share" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "views.viewSwitcher.setDefault" })).toBeDisabled();
     expect(viewShareDialogMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         view: null,

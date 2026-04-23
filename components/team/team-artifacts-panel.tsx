@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { FileText, Code, CheckCircle, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -98,6 +99,7 @@ function ArtifactCard({ artifact }: { artifact: TeamArtifact }) {
 }
 
 export function TeamArtifactsPanel({ teamId }: TeamArtifactsPanelProps) {
+  const t = useTranslations("teams");
   const [artifacts, setArtifacts] = useState<TeamArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -116,11 +118,11 @@ export function TeamArtifactsPanel({ teamId }: TeamArtifactsPanelProps) {
       );
       setArtifacts(data ?? []);
     } catch {
-      setError("Unable to load team artifacts");
+      setError(t("artifacts.loadError"));
     } finally {
       setLoading(false);
     }
-  }, [teamId]);
+  }, [teamId, t]);
 
   useEffect(() => {
     void fetchArtifacts();
@@ -151,8 +153,7 @@ export function TeamArtifactsPanel({ teamId }: TeamArtifactsPanelProps) {
   if (artifacts.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-        No artifacts captured yet. Artifacts are recorded when agents complete
-        with structured output.
+        {t("artifacts.empty")}
       </div>
     );
   }
@@ -160,20 +161,20 @@ export function TeamArtifactsPanel({ teamId }: TeamArtifactsPanelProps) {
   return (
     <Tabs defaultValue="all">
       <TabsList>
-        <TabsTrigger value="all">All ({artifacts.length})</TabsTrigger>
+        <TabsTrigger value="all">{t("artifacts.all", { count: artifacts.length })}</TabsTrigger>
         {plannerArtifacts.length > 0 && (
           <TabsTrigger value="plan">
-            Plan ({plannerArtifacts.length})
+            {t("artifacts.plan", { count: plannerArtifacts.length })}
           </TabsTrigger>
         )}
         {coderArtifacts.length > 0 && (
           <TabsTrigger value="code">
-            Code ({coderArtifacts.length})
+            {t("artifacts.code", { count: coderArtifacts.length })}
           </TabsTrigger>
         )}
         {reviewerArtifacts.length > 0 && (
           <TabsTrigger value="review">
-            Review ({reviewerArtifacts.length})
+            {t("artifacts.review", { count: reviewerArtifacts.length })}
           </TabsTrigger>
         )}
       </TabsList>

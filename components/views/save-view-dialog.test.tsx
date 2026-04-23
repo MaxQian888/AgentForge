@@ -2,6 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SaveViewDialog } from "./save-view-dialog";
 
+jest.mock("next-intl", () => ({
+  useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
+}));
+
 const createViewMock = jest.fn();
 
 jest.mock("@/lib/stores/saved-view-store", () => ({
@@ -33,12 +37,12 @@ describe("SaveViewDialog", () => {
       />,
     );
 
-    const saveButton = screen.getByRole("button", { name: "Save" });
+    const saveButton = screen.getByRole("button", { name: "common.action.save" });
     expect(saveButton).toBeDisabled();
 
-    await user.type(screen.getByPlaceholderText("My triage view"), "  Triage  ");
+    await user.type(screen.getByPlaceholderText("views.saveViewDialog.namePlaceholder"), "  Triage  ");
     await user.click(
-      screen.getByRole("checkbox", { name: /shared with project members/i }),
+      screen.getByRole("checkbox", { name: "views.saveViewDialog.sharedLabel" }),
     );
 
     expect(saveButton).toBeEnabled();
@@ -72,7 +76,7 @@ describe("SaveViewDialog", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "common.action.cancel" }));
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(createViewMock).not.toHaveBeenCalled();

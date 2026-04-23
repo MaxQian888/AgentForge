@@ -62,7 +62,8 @@ const EMPTY_PLUGIN_RUNTIME_SUMMARY: PluginRuntimeSummary = {
 };
 
 export default function PluginsPage() {
-  useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Plugins" }]);
+  const tc = useTranslations();
+  useBreadcrumbs([{ label: tc("common.nav.group.configuration"), href: "/" }, { label: tc("common.nav.plugins") }]);
   const t = useTranslations("plugins");
   const { isDesktop: isDesktopBreakpoint } = useBreakpoint();
 
@@ -139,6 +140,7 @@ export default function PluginsPage() {
     setPluginRuntimeSummary(summary);
   });
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- useEffectEvent wrapper reads latest props without subscribing
   useEffect(() => { void loadDesktopState(); }, []);
 
   useEffect(() => {

@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -141,7 +142,8 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
       const { data } = await api.get<ReviewDTO[]>(path, { token });
       set({ allReviews: data ?? [], error: null });
     } catch {
-      set({ error: "Unable to load reviews" });
+      const locale = getPreferredLocale();
+      set({ error: locale === "zh-CN" ? "无法加载评审" : "Unable to load reviews" });
     } finally {
       set({ allReviewsLoading: false });
     }
@@ -162,7 +164,8 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         error: null,
       });
     } catch {
-      set({ error: "Unable to load reviews" });
+      const locale = getPreferredLocale();
+      set({ error: locale === "zh-CN" ? "无法加载评审" : "Unable to load reviews" });
     } finally {
       set({ loading: false });
     }
@@ -177,8 +180,9 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
       const api = createApiClient(API_URL);
       await api.post("/api/v1/reviews/trigger", body, { token });
     } catch {
-      toast.error("Unable to trigger review");
-      set({ error: "Unable to trigger review" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "无法触发评审" : "Unable to trigger review");
+      set({ error: locale === "zh-CN" ? "无法触发评审" : "Unable to trigger review" });
     } finally {
       set({ loading: false });
     }
@@ -200,8 +204,9 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         get().updateReview(data);
       }
     } catch {
-      toast.error("Unable to approve review");
-      set({ error: "Unable to approve review" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "无法批准评审" : "Unable to approve review");
+      set({ error: locale === "zh-CN" ? "无法批准评审" : "Unable to approve review" });
     } finally {
       set({ loading: false });
     }
@@ -223,8 +228,9 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         get().updateReview(data);
       }
     } catch {
-      toast.error("Unable to reject review");
-      set({ error: "Unable to reject review" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "无法拒绝评审" : "Unable to reject review");
+      set({ error: locale === "zh-CN" ? "无法拒绝评审" : "Unable to reject review" });
     } finally {
       set({ loading: false });
     }
@@ -246,8 +252,9 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         get().updateReview(data);
       }
     } catch {
-      toast.error("Unable to request review changes");
-      set({ error: "Unable to request review changes" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "无法请求评审修改" : "Unable to request review changes");
+      set({ error: locale === "zh-CN" ? "无法请求评审修改" : "Unable to request review changes" });
     } finally {
       set({ loading: false });
     }
@@ -269,8 +276,9 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         get().updateReview(data);
       }
     } catch {
-      toast.error("Unable to mark false positive finding");
-      set({ error: "Unable to mark false positive finding" });
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "无法标记误报发现" : "Unable to mark false positive finding");
+      set({ error: locale === "zh-CN" ? "无法标记误报发现" : "Unable to mark false positive finding" });
     } finally {
       set({ loading: false });
     }
@@ -287,9 +295,13 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         { action, comment },
         { token },
       );
-      toast.success(`Finding ${action === "approve" ? "approved" : action === "dismiss" ? "dismissed" : "deferred"}`);
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN"
+        ? `发现已${action === "approve" ? "批准" : action === "dismiss" ? "驳回" : "延期"}`
+        : `Finding ${action === "approve" ? "approved" : action === "dismiss" ? "dismissed" : "deferred"}`);
     } catch {
-      toast.error("Unable to update finding decision");
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "无法更新发现决定" : "Unable to update finding decision");
     }
   },
 

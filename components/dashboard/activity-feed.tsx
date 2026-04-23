@@ -27,16 +27,19 @@ interface ActivityFeedProps {
 type ActivityTypeFilter = "all" | "task" | "review" | "agent" | "system";
 type ActivityTimeRange = "all" | "last24h" | "last7d";
 
-function relativeTime(timestamp: string): string {
+function relativeTime(
+  timestamp: string,
+  t: ReturnType<typeof useTranslations>,
+): string {
   const diff = Date.now() - new Date(timestamp).getTime();
   const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 60) return t("activityFeed.timeAgo.seconds", { seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return t("activityFeed.timeAgo.minutes", { minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("activityFeed.timeAgo.hours", { hours });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return t("activityFeed.timeAgo.days", { days });
 }
 
 function categorizeActivityType(type: string): ActivityTypeFilter {
@@ -137,7 +140,7 @@ export function ActivityFeed({ events }: ActivityFeedProps) {
                 <StatusDot status={event.status} size="sm" />
                 <span className="min-w-0 flex-1 truncate">{event.title}</span>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {relativeTime(event.timestamp)}
+                  {relativeTime(event.timestamp, t)}
                 </span>
               </div>
             ))}

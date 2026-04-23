@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import {
   Bot,
   ClipboardCheck,
@@ -41,11 +42,12 @@ function StatusBanner({
   status: ProjectionStatus | undefined;
   diagnostics?: string;
 }) {
+  const t = useTranslations("docs");
   if (!status || status === "ok") return null;
   if (status === "not_found") {
     return (
       <div className="rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-        This live artifact is no longer available.
+        {t("liveArtifact.status.notFound")}
       </div>
     );
   }
@@ -55,7 +57,7 @@ function StatusBanner({
         className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
         role="status"
       >
-        You do not have access to this live artifact.
+        {t("liveArtifact.status.forbidden")}
       </div>
     );
   }
@@ -65,7 +67,7 @@ function StatusBanner({
       className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
       role="status"
     >
-      <div className="font-medium">Live update temporarily unavailable</div>
+      <div className="font-medium">{t("liveArtifact.status.degradedTitle")}</div>
       {diagnostics ? (
         <div className="mt-1 text-[11px] opacity-80">{diagnostics}</div>
       ) : null}
@@ -96,6 +98,7 @@ export function LiveArtifactChrome({
   children,
   className,
 }: LiveArtifactChromeProps) {
+  const t = useTranslations("docs");
   const canFreeze = status === "ok";
   return (
     <div
@@ -115,7 +118,7 @@ export function LiveArtifactChrome({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label="Live artifact actions"
+              aria-label={t("liveArtifact.chrome.actionsLabel")}
               className="inline-flex size-7 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent"
             >
               <MoreHorizontal className="size-4" aria-hidden="true" />
@@ -123,7 +126,7 @@ export function LiveArtifactChrome({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-[10rem]">
             <DropdownMenuItem onSelect={onOpenSource}>
-              Open source
+              {t("liveArtifact.chrome.openSource")}
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={(event) => {
@@ -136,10 +139,10 @@ export function LiveArtifactChrome({
               disabled={!canFreeze}
               aria-disabled={!canFreeze}
             >
-              Freeze
+              {t("liveArtifact.chrome.freeze")}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onRemove} variant="destructive">
-              Remove
+              {t("liveArtifact.chrome.remove")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

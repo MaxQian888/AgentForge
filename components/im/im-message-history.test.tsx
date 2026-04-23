@@ -70,13 +70,39 @@ jest.mock("@/components/ui/select", () => {
 });
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) =>
-    key.split(".").reduce((value: unknown, part: string) => {
-      if (value && typeof value === "object" && part in (value as Record<string, unknown>)) {
-        return (value as Record<string, unknown>)[part];
+  useTranslations: () => (key: string, options?: Record<string, unknown>) => {
+    const parts = key.split(".");
+    let resolved: unknown = mockImMessages;
+    let i = 0;
+    while (i < parts.length && resolved && typeof resolved === "object") {
+      let found = false;
+      for (let j = parts.length; j > i; j--) {
+        const candidate = parts.slice(i, j).join(".");
+        if (candidate in (resolved as Record<string, unknown>)) {
+          resolved = (resolved as Record<string, unknown>)[candidate];
+          i = j;
+          found = true;
+          break;
+        }
       }
-      return key;
-    }, mockImMessages),
+      if (!found) {
+        resolved = key;
+        break;
+      }
+    }
+    if (typeof resolved !== "string" || resolved === key) {
+      return (options?.defaultValue as string) ?? key;
+    }
+    let result = resolved;
+    if (options) {
+      const { defaultValue: _, ...values } = options;
+      result = Object.entries(values).reduce(
+        (out, [name, value]) => out.replace(new RegExp(`\\{${name}\\}`, "g"), String(value)),
+        result,
+      );
+    }
+    return result;
+  },
 }));
 
 const retryDelivery = jest.fn();
@@ -160,8 +186,8 @@ describe("IMMessageHistory", () => {
     render(<IMMessageHistory />);
 
     expect(screen.getByText("Message History")).toBeInTheDocument();
-    expect(screen.getByText("review.requested")).toBeInTheDocument();
-    expect(screen.getByText("actioncard_send_failed")).toBeInTheDocument();
+    expect(screen.getByText("Review requested")).toBeInTheDocument();
+    expect(screen.getByText("ActionCard send failed")).toBeInTheDocument();
     expect(screen.getByText("Webhook rejected payload")).toBeInTheDocument();
     expect(screen.getByText("5,000 ms")).toBeInTheDocument();
 
@@ -177,7 +203,7 @@ describe("IMMessageHistory", () => {
     await user.click(screen.getByRole("button", { name: "Preview payload" }));
 
     expect(screen.getByText("Delivery payload")).toBeInTheDocument();
-    expect(screen.getByText(/Review requested/)).toBeInTheDocument();
+    expect(screen.getAllByText("Review requested").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(new Date(createdAt).toLocaleString()).length).toBeGreaterThan(0);
     expect(screen.getByText("Queued at")).toBeInTheDocument();
     expect(screen.getByText("Processed at")).toBeInTheDocument();

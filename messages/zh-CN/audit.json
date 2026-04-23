@@ -46,7 +46,20 @@
     "ip": "IP 地址",
     "userAgent": "User Agent",
     "payload": "载荷快照",
+    "loading": "加载中…",
     "close": "关闭"
+  },
+  "resourceTypes": {
+    "project": "项目",
+    "member": "成员",
+    "task": "任务",
+    "team_run": "团队执行",
+    "workflow": "工作流",
+    "wiki": "Wiki",
+    "settings": "设置",
+    "automation": "自动化",
+    "dashboard": "仪表盘",
+    "auth": "认证"
   },
   "errors": {
     "loadFailed": "加载审计事件失败",

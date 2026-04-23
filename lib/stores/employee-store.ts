@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -85,7 +86,8 @@ export const useEmployeeStore = create<EmployeeStoreState>()((set, get) => ({
         employeesByProject: { ...s.employeesByProject, [projectId]: data ?? [] },
       }));
     } catch (err) {
-      toast.error(`加载员工失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `加载员工失败: ${(err as Error).message}` : `Failed to load employees: ${(err as Error).message}`);
     } finally {
       set((s) => ({ loadingByProject: { ...s.loadingByProject, [projectId]: false } }));
     }
@@ -101,7 +103,8 @@ export const useEmployeeStore = create<EmployeeStoreState>()((set, get) => ({
       );
       return data;
     } catch (err) {
-      toast.error(`加载员工详情失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `加载员工详情失败: ${(err as Error).message}` : `Failed to load employee details: ${(err as Error).message}`);
       return null;
     }
   },
@@ -121,10 +124,12 @@ export const useEmployeeStore = create<EmployeeStoreState>()((set, get) => ({
           [projectId]: [data, ...(s.employeesByProject[projectId] ?? [])],
         },
       }));
-      toast.success(`员工 ${data.name} 已创建`);
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? `员工 ${data.name} 已创建` : `Employee ${data.name} created`);
       return data;
     } catch (err) {
-      toast.error(`创建员工失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `创建员工失败: ${(err as Error).message}` : `Failed to create employee: ${(err as Error).message}`);
       return null;
     }
   },
@@ -148,7 +153,8 @@ export const useEmployeeStore = create<EmployeeStoreState>()((set, get) => ({
       }));
       return data;
     } catch (err) {
-      toast.error(`更新员工失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `更新员工失败: ${(err as Error).message}` : `Failed to update employee: ${(err as Error).message}`);
       return null;
     }
   },
@@ -167,7 +173,8 @@ export const useEmployeeStore = create<EmployeeStoreState>()((set, get) => ({
         },
       }));
     } catch (err) {
-      toast.error(`状态更新失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `状态更新失败: ${(err as Error).message}` : `Failed to update status: ${(err as Error).message}`);
     }
   },
 
@@ -182,9 +189,11 @@ export const useEmployeeStore = create<EmployeeStoreState>()((set, get) => ({
           [projectId]: (s.employeesByProject[projectId] ?? []).filter((e) => e.id !== id),
         },
       }));
-      toast.success("员工已删除");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "员工已删除" : "Employee deleted");
     } catch (err) {
-      toast.error(`删除员工失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `删除员工失败: ${(err as Error).message}` : `Failed to delete employee: ${(err as Error).message}`);
     }
   },
 
@@ -199,7 +208,8 @@ export const useEmployeeStore = create<EmployeeStoreState>()((set, get) => ({
       );
       await get().fetchEmployees(projectId);
     } catch (err) {
-      toast.error(`添加技能失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `添加技能失败: ${(err as Error).message}` : `Failed to add skill: ${(err as Error).message}`);
     }
   },
 
@@ -213,7 +223,8 @@ export const useEmployeeStore = create<EmployeeStoreState>()((set, get) => ({
       );
       await get().fetchEmployees(projectId);
     } catch (err) {
-      toast.error(`移除技能失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `移除技能失败: ${(err as Error).message}` : `Failed to remove skill: ${(err as Error).message}`);
     }
   },
 }));

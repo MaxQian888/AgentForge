@@ -244,7 +244,7 @@ export function IMChannelConfig({
                       onChange={() => toggleEvent(event)}
                       className="size-4 rounded border-input accent-primary"
                     />
-                    {event}
+                    {t(`eventLabels.${event}`, { defaultValue: event })}
                   </label>
                 ))}
               </div>
@@ -317,14 +317,19 @@ export function IMChannelConfig({
                           : "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
                       )}
                     >
-                      {channel.active ? "Active" : "Inactive"}
+                      {channel.active ? t("channels.statusActive") : t("channels.statusInactive")}
                     </Badge>
                   </div>
                 </div>
                 <CardDescription className="text-xs">{channel.channelId}</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
-                <EventBadgeList events={channel.events} />
+                <EventBadgeList
+                  events={channel.events}
+                  getEventLabel={(event) =>
+                    t(`eventLabels.${event}`, { defaultValue: event })
+                  }
+                />
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"

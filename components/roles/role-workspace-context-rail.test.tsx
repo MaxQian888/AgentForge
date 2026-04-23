@@ -39,6 +39,19 @@ jest.mock("next-intl", () => ({
       "workspace.skillPartReferences": "References",
       "workspace.skillPartScripts": "Scripts",
       "workspace.skillPartAssets": "Assets",
+      "contextRail.pluginDependencies": "Plugin dependencies",
+      "contextRail.downstreamPluginConsumers": "Downstream plugin consumers",
+      "contextRail.fieldProvenance": "Field provenance",
+      "contextRail.loadedSkills": "Loaded skills",
+      "contextRail.onDemandSkills": "On-demand skills",
+      "contextRail.skillDiagnostics": "Skill diagnostics",
+      "contextRail.effectiveRole": "Effective role: {name} ({id})",
+      "sections.review.label": "Review",
+      "guidance.review.title": "Preview Before You Save",
+      "guidance.review.summary": "Inspect the execution summary, YAML, and authoritative preview or sandbox results before persisting the draft.",
+      "guidance.review.bullet0": "Preview resolves the effective manifest and execution profile without calling a model.",
+      "guidance.review.bullet1": "Sandbox reuses the same draft but adds readiness checks and one bounded prompt probe.",
+      "guidance.review.bullet2": "Review the YAML mapping so the structured inputs match the canonical role asset you expect.",
     };
     let template = map[key] ?? key;
     if (key === "contextRail.guidanceFor") {

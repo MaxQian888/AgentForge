@@ -66,7 +66,8 @@ export function AgentPerformanceTable({ data }: AgentPerformanceTableProps) {
         {
           key: "avg-duration",
           header: t("colAvgDuration"),
-          renderCell: (agent) => `${agent.avgDurationMinutes.toFixed(0)}m`,
+          renderCell: (agent) =>
+            `${agent.avgDurationMinutes.toFixed(0)}${t("durationMinutesSuffix")}`,
           hideOnTablet: true,
         },
         {

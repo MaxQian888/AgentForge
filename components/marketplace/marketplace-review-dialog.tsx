@@ -15,12 +15,14 @@ import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMarketplaceStore } from "@/lib/stores/marketplace-store";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 interface Props {
   itemId: string;
 }
 
 export function MarketplaceReviewDialog({ itemId }: Props) {
+  const t = useTranslations("marketplace");
   const { submitReview } = useMarketplaceStore();
   const [open, setOpen] = useState(false);
   const [rating, setRating] = useState(5);
@@ -32,13 +34,13 @@ export function MarketplaceReviewDialog({ itemId }: Props) {
     setLoading(true);
     try {
       await submitReview(itemId, rating, comment);
-      toast.success("Review submitted");
+      toast.success(t("review.toastSuccess"));
       setOpen(false);
       setComment("");
       setRating(5);
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to submit review",
+        err instanceof Error ? err.message : t("review.toastFailed"),
       );
     } finally {
       setLoading(false);
@@ -49,16 +51,16 @@ export function MarketplaceReviewDialog({ itemId }: Props) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
-          Write a Review
+          {t("review.title")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Write a Review</DialogTitle>
+          <DialogTitle>{t("review.title")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div>
-            <Label className="mb-2 block">Rating</Label>
+            <Label className="mb-2 block">{t("review.ratingLabel")}</Label>
             <div className="flex gap-1">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Star
@@ -77,13 +79,13 @@ export function MarketplaceReviewDialog({ itemId }: Props) {
             </div>
           </div>
           <div>
-            <Label htmlFor="review-comment">Comment</Label>
+            <Label htmlFor="review-comment">{t("review.commentLabel")}</Label>
             <Textarea
               id="review-comment"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               rows={3}
-              placeholder="Share your experience..."
+              placeholder={t("review.commentPlaceholder")}
             />
           </div>
           <Button
@@ -91,7 +93,7 @@ export function MarketplaceReviewDialog({ itemId }: Props) {
             onClick={handleSubmit}
             disabled={loading}
           >
-            {loading ? "Submitting..." : "Submit Review"}
+            {loading ? t("review.submitting") : t("review.submit")}
           </Button>
         </div>
       </DialogContent>

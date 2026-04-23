@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { useTranslations } from "next-intl";
 import { PluginDetailSection } from "@/components/plugins/plugin-detail-section";
 import type { PluginRecord } from "@/lib/stores/plugin-store";
 
@@ -9,18 +10,19 @@ interface PluginKindDetailProps {
 }
 
 function WorkflowDetail({ plugin }: { plugin: PluginRecord }) {
+  const t = useTranslations("plugins");
   const workflow = plugin.spec.workflow;
   if (!workflow) return null;
   const roleDependencies = plugin.roleDependencies ?? [];
 
   return (
     <div className="flex flex-col gap-3">
-      <PluginDetailSection title="Process mode">
+      <PluginDetailSection title={t("kindDetail.processMode")}>
         {workflow.process}
       </PluginDetailSection>
 
       {workflow.roles && workflow.roles.length > 0 ? (
-        <PluginDetailSection title="Roles">
+        <PluginDetailSection title={t("kindDetail.roles")}>
           <div className="flex flex-wrap gap-1.5">
             {workflow.roles.map((role) => (
               <Badge key={role.id} variant="secondary" className="text-xs">
@@ -31,7 +33,7 @@ function WorkflowDetail({ plugin }: { plugin: PluginRecord }) {
         </PluginDetailSection>
       ) : null}
 
-      <PluginDetailSection title="Steps">
+      <PluginDetailSection title={t("kindDetail.steps")}>
         <div className="flex flex-col gap-2">
           {workflow.steps.map((step) => (
             <div
@@ -39,9 +41,12 @@ function WorkflowDetail({ plugin }: { plugin: PluginRecord }) {
               className="rounded-md bg-muted/40 px-2 py-1.5 text-xs"
             >
               <p className="font-medium text-foreground">{step.id}</p>
-              <p>Role: {step.role} · Action: {step.action}</p>
+              <p>
+                {t("kindDetail.roleLabel", { role: step.role })} ·{" "}
+                {t("kindDetail.actionLabel", { action: step.action })}
+              </p>
               {step.next && step.next.length > 0 ? (
-                <p>Next: {step.next.join(", ")}</p>
+                <p>{t("kindDetail.nextLabel", { next: step.next.join(", ") })}</p>
               ) : null}
             </div>
           ))}
@@ -49,23 +54,25 @@ function WorkflowDetail({ plugin }: { plugin: PluginRecord }) {
       </PluginDetailSection>
 
       {workflow.triggers && workflow.triggers.length > 0 ? (
-        <PluginDetailSection title="Triggers">
+        <PluginDetailSection title={t("kindDetail.triggers")}>
           <div className="flex flex-col gap-1">
             {workflow.triggers.map((trigger, idx) => (
-              <p key={idx}>{trigger.event ?? "Unknown trigger"}</p>
+              <p key={idx}>
+                {trigger.event ?? t("kindDetail.unknownTrigger")}
+              </p>
             ))}
           </div>
         </PluginDetailSection>
       ) : null}
 
       {workflow.limits?.maxRetries != null ? (
-        <PluginDetailSection title="Limits">
-          Max retries: {workflow.limits.maxRetries}
+        <PluginDetailSection title={t("kindDetail.limits")}>
+          {t("kindDetail.maxRetries", { count: workflow.limits.maxRetries })}
         </PluginDetailSection>
       ) : null}
 
       {roleDependencies.length > 0 ? (
-        <PluginDetailSection title="Role dependency health">
+        <PluginDetailSection title={t("kindDetail.roleDependencyHealth")}>
           <div className="flex flex-col gap-2 text-xs">
             {roleDependencies.map((dependency) => (
               <div
@@ -79,7 +86,11 @@ function WorkflowDetail({ plugin }: { plugin: PluginRecord }) {
                   · {dependency.status}
                 </p>
                 {dependency.references?.length ? (
-                  <p>References: {dependency.references.join(", ")}</p>
+                  <p>
+                    {t("kindDetail.references", {
+                      refs: dependency.references.join(", "),
+                    })}
+                  </p>
                 ) : null}
                 {dependency.message ? <p>{dependency.message}</p> : null}
               </div>
@@ -92,18 +103,19 @@ function WorkflowDetail({ plugin }: { plugin: PluginRecord }) {
 }
 
 function ReviewDetail({ plugin }: { plugin: PluginRecord }) {
+  const t = useTranslations("plugins");
   const review = plugin.spec.review;
   if (!review) return null;
 
   return (
     <div className="flex flex-col gap-3">
       {review.entrypoint ? (
-        <PluginDetailSection title="Entrypoint">
+        <PluginDetailSection title={t("kindDetail.entrypoint")}>
           {review.entrypoint}
         </PluginDetailSection>
       ) : null}
 
-      <PluginDetailSection title="Trigger events">
+      <PluginDetailSection title={t("kindDetail.triggerEvents")}>
         <div className="flex flex-wrap gap-1.5">
           {review.triggers.events.map((evt) => (
             <Badge key={evt} variant="secondary" className="text-xs">
@@ -114,7 +126,7 @@ function ReviewDetail({ plugin }: { plugin: PluginRecord }) {
       </PluginDetailSection>
 
       {review.triggers.filePatterns && review.triggers.filePatterns.length > 0 ? (
-        <PluginDetailSection title="File patterns">
+        <PluginDetailSection title={t("kindDetail.filePatterns")}>
           <div className="flex flex-wrap gap-1.5">
             {review.triggers.filePatterns.map((pat) => (
               <Badge key={pat} variant="outline" className="text-xs font-mono">
@@ -125,7 +137,7 @@ function ReviewDetail({ plugin }: { plugin: PluginRecord }) {
         </PluginDetailSection>
       ) : null}
 
-      <PluginDetailSection title="Output format">
+      <PluginDetailSection title={t("kindDetail.outputFormat")}>
         {review.output.format}
       </PluginDetailSection>
     </div>
@@ -133,12 +145,13 @@ function ReviewDetail({ plugin }: { plugin: PluginRecord }) {
 }
 
 function IntegrationDetail({ plugin }: { plugin: PluginRecord }) {
+  const t = useTranslations("plugins");
   const capabilities = plugin.spec.capabilities;
   if (!capabilities || capabilities.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-3">
-      <PluginDetailSection title="Capabilities">
+      <PluginDetailSection title={t("kindDetail.capabilities")}>
         <div className="flex flex-wrap gap-1.5">
           {capabilities.map((cap) => (
             <Badge key={cap} variant="secondary" className="text-xs">
@@ -152,10 +165,11 @@ function IntegrationDetail({ plugin }: { plugin: PluginRecord }) {
 }
 
 function RoleDetail({ plugin }: { plugin: PluginRecord }) {
+  const t = useTranslations("plugins");
   return (
     <div className="flex flex-col gap-3">
       {plugin.metadata.tags && plugin.metadata.tags.length > 0 ? (
-        <PluginDetailSection title="Tags">
+        <PluginDetailSection title={t("kindDetail.tags")}>
           <div className="flex flex-wrap gap-1.5">
             {plugin.metadata.tags.map((tag) => (
               <Badge key={tag} variant="secondary" className="text-xs">
@@ -166,45 +180,62 @@ function RoleDetail({ plugin }: { plugin: PluginRecord }) {
         </PluginDetailSection>
       ) : null}
 
-      <PluginDetailSection title="Description">
-        {plugin.metadata.description || "No description provided."}
+      <PluginDetailSection title={t("kindDetail.description")}>
+        {plugin.metadata.description || t("kindDetail.noDescription")}
       </PluginDetailSection>
     </div>
   );
 }
 
 function ToolMCPDetail({ plugin }: { plugin: PluginRecord }) {
+  const t = useTranslations("plugins");
   const mcp = plugin.runtime_metadata?.mcp;
   if (!mcp) return null;
 
   return (
     <div className="flex flex-col gap-3">
-      <PluginDetailSection title="MCP summary">
+      <PluginDetailSection title={t("kindDetail.mcpSummary")}>
         <div className="grid gap-1">
-          <p>Transport: {mcp.transport}</p>
-          <p>Tools: {mcp.tool_count}</p>
-          <p>Resources: {mcp.resource_count}</p>
-          <p>Prompts: {mcp.prompt_count}</p>
+          <p>{t("kindDetail.transport", { transport: mcp.transport })}</p>
+          <p>{t("kindDetail.tools", { count: mcp.tool_count })}</p>
+          <p>{t("kindDetail.resources", { count: mcp.resource_count })}</p>
+          <p>{t("kindDetail.prompts", { count: mcp.prompt_count })}</p>
           {mcp.last_discovery_at ? (
-            <p>Last discovery: {mcp.last_discovery_at}</p>
+            <p>{t("kindDetail.lastDiscovery", { date: mcp.last_discovery_at })}</p>
           ) : null}
         </div>
       </PluginDetailSection>
 
       {mcp.latest_interaction ? (
-        <PluginDetailSection title="Latest interaction">
+        <PluginDetailSection title={t("kindDetail.latestInteraction")}>
           <div className="grid gap-1">
-            <p>Operation: {mcp.latest_interaction.operation}</p>
-            <p>Status: {mcp.latest_interaction.status}</p>
+            <p>
+              {t("kindDetail.operation", {
+                operation: mcp.latest_interaction.operation,
+              })}
+            </p>
+            <p>
+              {t("kindDetail.status", { status: mcp.latest_interaction.status })}
+            </p>
             {mcp.latest_interaction.target ? (
-              <p>Target: {mcp.latest_interaction.target}</p>
+              <p>
+                {t("kindDetail.target", {
+                  target: mcp.latest_interaction.target,
+                })}
+              </p>
             ) : null}
             {mcp.latest_interaction.summary ? (
-              <p>Summary: {mcp.latest_interaction.summary}</p>
+              <p>
+                {t("kindDetail.summary", {
+                  summary: mcp.latest_interaction.summary,
+                })}
+              </p>
             ) : null}
             {mcp.latest_interaction.error_message ? (
               <p className="text-red-600 dark:text-red-400">
-                Error: {mcp.latest_interaction.error_message}
+                {t("kindDetail.error", {
+                  message: mcp.latest_interaction.error_message,
+                })}
               </p>
             ) : null}
           </div>
@@ -215,6 +246,7 @@ function ToolMCPDetail({ plugin }: { plugin: PluginRecord }) {
 }
 
 export function PluginKindDetail({ plugin }: PluginKindDetailProps) {
+  const t = useTranslations("plugins");
   switch (plugin.kind) {
     case "WorkflowPlugin":
       return <WorkflowDetail plugin={plugin} />;
@@ -229,7 +261,7 @@ export function PluginKindDetail({ plugin }: PluginKindDetailProps) {
     default:
       return (
         <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-          No kind-specific details available for this plugin type.
+          {t("kindDetail.noKindDetails")}
         </div>
       );
   }

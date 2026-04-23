@@ -241,13 +241,13 @@ export function RoleWorkspaceEditor({
   const skillCompatibilityLabel = (resolution: RoleSkillResolution) => {
     switch (resolution.compatibilityStatus) {
       case "blocking":
-        return "Blocking compatibility issue";
+        return t("skillCompatibility.blocking");
       case "warning":
-        return "Warning-only compatibility issue";
+        return t("skillCompatibility.warning");
       case "compatible":
-        return "Compatibility OK";
+        return t("skillCompatibility.compatible");
       default:
-        return "Compatibility unknown";
+        return t("skillCompatibility.unknown");
     }
   };
   return (
@@ -295,7 +295,7 @@ export function RoleWorkspaceEditor({
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {section.label}
+              {t(`sections.${section.id}.label`)}
               {hasErrors ? (
                 <span className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive align-middle" />
               ) : null}
@@ -808,7 +808,7 @@ export function RoleWorkspaceEditor({
               <div className="grid gap-1 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                 <p className="font-medium text-foreground">{t("workspace.availableSkillsTitle")}</p>
                 {skillCatalogLoading ? (
-                  <p>Loading...</p>
+                  <p>{t("workspace.loading")}</p>
                 ) : skillCatalog.length > 0 ? (
                   <p>{skillCatalog.map((skill) => skill.label).join(", ")}</p>
                 ) : (
@@ -875,19 +875,19 @@ export function RoleWorkspaceEditor({
                           ) : null}
                           {resolution?.requires?.length ? (
                             <p className="text-xs text-muted-foreground">
-                              Dependencies: {resolution.requires.join(", ")}
+                              {t("workspace.dependencies", { deps: resolution.requires.join(", ") })}
                             </p>
                           ) : null}
                           {resolution?.tools?.length ? (
                             <p className="text-xs text-muted-foreground">
-                              Declared tools: {resolution.tools.join(", ")}
+                              {t("workspace.declaredTools", { tools: resolution.tools.join(", ") })}
                             </p>
                           ) : null}
                           {resolution ? (
                             <p className="text-xs text-muted-foreground">
                               {skillCompatibilityLabel(resolution)}
                               {resolution.missingTools?.length
-                                ? ` · Missing: ${resolution.missingTools.join(", ")}`
+                                ? ` · ${t("workspace.missingTools", { tools: resolution.missingTools.join(", ") })}`
                                 : ""}
                             </p>
                           ) : null}

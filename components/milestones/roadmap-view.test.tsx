@@ -2,6 +2,26 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { RoadmapView } from "./roadmap-view";
 import { useMilestoneStore } from "@/lib/stores/milestone-store";
 
+jest.mock("next-intl", () => ({
+  useTranslations: (ns: string) => (key: string, values?: Record<string, string | number>) => {
+    const map: Record<string, string> = {
+      "milestones.roadmap.noTargetDate": "No target date",
+      "milestones.roadmap.complete": "{rate}% complete",
+      "milestones.roadmap.sprints": "Sprints",
+      "milestones.roadmap.tasks": "Tasks",
+      "milestones.status.planned": "Planned",
+      "milestones.status.in_progress": "In Progress",
+      "milestones.status.completed": "Completed",
+      "milestones.status.missed": "Missed",
+    };
+    const result = map[`${ns}.${key}`] ?? `${ns}.${key}`;
+    if (values) {
+      return result.replace(/{(\w+)}/g, (_m, k) => String(values[k] ?? ""));
+    }
+    return result;
+  },
+}));
+
 const fetchMilestonesMock = jest.fn();
 
 describe("RoadmapView", () => {

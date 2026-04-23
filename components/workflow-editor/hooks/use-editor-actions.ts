@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useRef } from "react";
+import { useTranslations } from "next-intl";
 import type { Node, Edge } from "@xyflow/react";
 import { useReactFlow, MarkerType } from "@xyflow/react";
 import { useEditor } from "../context";
@@ -81,6 +82,7 @@ export function useEditorActions(props: UseEditorActionsProps) {
   const { onSave, definitionId } = props;
   const { state, dispatch } = useEditor();
   const reactFlow = useReactFlow();
+  const t = useTranslations("workflow");
 
   // Keep a stable ref to onSave so the keyboard handler never goes stale
   const onSaveRef = useRef(onSave);
@@ -170,7 +172,7 @@ export function useEditorActions(props: UseEditorActionsProps) {
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const safeName = (state.name || "workflow").replace(/[^a-z0-9-_]+/gi, "_");
+    const safeName = (state.name || t("editor.exportFallbackName")).replace(/[^a-z0-9-_]+/gi, "_");
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = `${safeName}.workflow.json`;
@@ -221,12 +223,12 @@ export function useEditorActions(props: UseEditorActionsProps) {
         const text = await file.text();
         const parsed: unknown = JSON.parse(text);
         if (!isWorkflowExportPayload(parsed)) {
-          return { ok: false, error: "Invalid workflow file" };
+          return { ok: false, error: t("editor.importInvalid") };
         }
         applyImportPayload(parsed);
         return { ok: true };
       } catch {
-        return { ok: false, error: "Unable to parse JSON" };
+        return { ok: false, error: t("editor.importParseError") };
       }
     },
     [applyImportPayload]

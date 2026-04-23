@@ -307,8 +307,8 @@ describe("RoleWorkspaceEditor", () => {
     expect(screen.getByText("Guide React work in the current repo.")).toBeInTheDocument();
     expect(screen.getAllByText("Agents").length).toBeGreaterThan(0);
     expect(screen.getAllByText("References").length).toBeGreaterThan(0);
-    expect(screen.getByText("template")).toBeInTheDocument();
-    expect(screen.getByText("inherited")).toBeInTheDocument();
+    expect(screen.getByText("Template")).toBeInTheDocument();
+    expect(screen.getByText("Inherited")).toBeInTheDocument();
     expect(screen.getByText(/React from skills/)).toBeInTheDocument();
     expect(screen.getByText("Parts:")).toBeInTheDocument();
     expect(screen.getByText("Dependencies: skills/typescript")).toBeInTheDocument();

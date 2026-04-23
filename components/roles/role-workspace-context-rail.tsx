@@ -65,9 +65,14 @@ export function RoleWorkspaceContextRail({
     }
   };
   const activeSectionLabel =
-    ROLE_WORKSPACE_SECTIONS.find((section) => section.id === activeSection)?.label ??
-    "Review";
-  const guidance = ROLE_WORKSPACE_GUIDANCE[activeSection];
+    t(`sections.${activeSection}.label`);
+  const guidanceTitle = t(`guidance.${activeSection}.title`);
+  const guidanceSummary = t(`guidance.${activeSection}.summary`);
+  const guidanceBullets = [
+    t(`guidance.${activeSection}.bullet0`),
+    t(`guidance.${activeSection}.bullet1`),
+    t(`guidance.${activeSection}.bullet2`),
+  ];
   const effectiveManifest =
     sandboxResult?.effectiveManifest ?? previewResult?.effectiveManifest;
   const inheritanceParent =
@@ -109,10 +114,10 @@ export function RoleWorkspaceContextRail({
         </p>
       </div>
       <div className="border-b px-4 py-3 text-xs text-muted-foreground">
-        <p className="mb-1 font-medium text-foreground">{guidance.title}</p>
-        <p className="mb-2">{guidance.summary}</p>
+        <p className="mb-1 font-medium text-foreground">{guidanceTitle}</p>
+        <p className="mb-2">{guidanceSummary}</p>
         <ul className="list-disc space-y-0.5 pl-4">
-          {guidance.bullets.map((bullet) => (
+          {guidanceBullets.map((bullet) => (
             <li key={bullet}>{bullet}</li>
           ))}
         </ul>
@@ -155,7 +160,7 @@ export function RoleWorkspaceContextRail({
         </div>
         {previewResult?.executionProfile ? (
           <p className="mt-2 text-xs text-muted-foreground">
-            Effective role: {previewResult.executionProfile.name} ({previewResult.executionProfile.role_id})
+            {t("contextRail.effectiveRole", { name: previewResult.executionProfile.name, id: previewResult.executionProfile.role_id })}
           </p>
         ) : null}
         {sandboxResult?.selection ? (
@@ -195,7 +200,7 @@ export function RoleWorkspaceContextRail({
           </div>
           {pluginDependencies.length > 0 ? (
             <div>
-              <p className="text-xs font-medium">Plugin dependencies</p>
+              <p className="text-xs font-medium">{t("contextRail.pluginDependencies")}</p>
               <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
                 {pluginDependencies.map((dependency) => (
                   <li key={`${dependency.pluginId}:${dependency.referenceType}`}>
@@ -208,7 +213,7 @@ export function RoleWorkspaceContextRail({
           ) : null}
           {pluginConsumers.length > 0 ? (
             <div>
-              <p className="text-xs font-medium">Downstream plugin consumers</p>
+              <p className="text-xs font-medium">{t("contextRail.downstreamPluginConsumers")}</p>
               <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
                 {pluginConsumers.map((consumer) => (
                   <li key={`${consumer.pluginId}:${consumer.status}`}>
@@ -318,7 +323,7 @@ export function RoleWorkspaceContextRail({
             if (all.length === 0) return null;
             return (
               <div>
-                <p className="font-medium">Field provenance</p>
+                <p className="font-medium">{t("contextRail.fieldProvenance")}</p>
                 <p className="text-muted-foreground">
                   {t("workspace.provenanceSummary", { inherited: String(inherited), template: String(template), explicit: String(explicit) })}
                 </p>
@@ -348,7 +353,7 @@ export function RoleWorkspaceContextRail({
             <p className="text-muted-foreground">{t("contextRail.runtimeProjectionDesc")}</p>
             {runtimeExecutionProfile?.loaded_skills?.length ? (
               <div className="mt-1.5">
-                <p className="font-medium text-foreground">Loaded skills</p>
+                <p className="font-medium text-foreground">{t("contextRail.loadedSkills")}</p>
                 <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                   {runtimeExecutionProfile.loaded_skills.map((skill) => (
                     <li key={`loaded-${skill.path}`}>
@@ -368,7 +373,7 @@ export function RoleWorkspaceContextRail({
             ) : null}
             {runtimeExecutionProfile?.available_skills?.length ? (
               <div className="mt-1.5">
-                <p className="font-medium text-foreground">On-demand skills</p>
+                <p className="font-medium text-foreground">{t("contextRail.onDemandSkills")}</p>
                 <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                   {runtimeExecutionProfile.available_skills.map((skill) => (
                     <li key={`available-${skill.path}`}>
@@ -387,7 +392,7 @@ export function RoleWorkspaceContextRail({
             ) : null}
             {runtimeExecutionProfile?.skill_diagnostics?.length ? (
               <div className="mt-1.5">
-                <p className="font-medium text-foreground">Skill diagnostics</p>
+                <p className="font-medium text-foreground">{t("contextRail.skillDiagnostics")}</p>
                 <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                   {runtimeExecutionProfile.skill_diagnostics.map((diagnostic, index) => (
                     <li key={`${diagnostic.code}:${diagnostic.path ?? "global"}:${index}`}>

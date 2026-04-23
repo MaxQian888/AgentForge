@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { LiveArtifactChrome } from "./live-artifact-chrome";
 import { SharedBody } from "./shared-body";
 import { useLiveArtifactActions } from "./use-live-artifact-actions";
@@ -26,6 +27,7 @@ export function AgentRunBlock({
   projection,
   cachedOk,
 }: AgentRunBlockProps) {
+  const t = useTranslations("docs");
   const router = useRouter();
   const actions = useLiveArtifactActions();
 
@@ -52,7 +54,7 @@ export function AgentRunBlock({
   return (
     <LiveArtifactChrome
       kind="agent_run"
-      title="Agent run"
+      title={t("liveArtifact.blocks.agentRun.title")}
       status={projection?.status}
       diagnostics={projection?.diagnostics}
       onOpenSource={handleOpenSource}
@@ -63,8 +65,8 @@ export function AgentRunBlock({
         projection={projection}
         cachedOk={cachedOk}
         onRemove={handleRemove}
-        notFoundMessage="This live artifact is no longer available. The referenced agent run may have been deleted."
-        forbiddenMessage="The details of this agent run are hidden from your current role."
+        notFoundMessage={t("liveArtifact.blocks.agentRun.notFound")}
+        forbiddenMessage={t("liveArtifact.blocks.agentRun.forbidden")}
       />
     </LiveArtifactChrome>
   );

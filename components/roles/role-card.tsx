@@ -101,25 +101,25 @@ export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCard
         {unresolvedCount > 0 ? (
           <span className="flex items-center gap-1 text-destructive">
             <AlertCircle className="size-3" />
-            {unresolvedCount} unresolved
+            {t("card.unresolvedCount", { count: unresolvedCount })}
           </span>
         ) : null}
         {blockingCount > 0 ? (
           <span className="flex items-center gap-1 text-destructive">
             <AlertCircle className="size-3" />
-            {blockingCount} blocking
+            {t("card.blockingCount", { count: blockingCount })}
           </span>
         ) : null}
         {warningCount > 0 ? (
           <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
             <AlertCircle className="size-3" />
-            {warningCount} warning
+            {t("card.warningCount", { count: warningCount })}
           </span>
         ) : null}
         {pluginConsumerCount > 0 ? (
           <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
             <AlertCircle className="size-3" />
-            {pluginConsumerCount} plugin consumer
+            {t("card.pluginConsumerCount", { count: pluginConsumerCount })}
           </span>
         ) : null}
       </div>

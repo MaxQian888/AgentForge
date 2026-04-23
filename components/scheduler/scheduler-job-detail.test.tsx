@@ -29,6 +29,33 @@ jest.mock("next-intl", () => ({
       "jobDetail.configFields": "Config Fields",
       "jobDetail.configManagedByBackend": "Managed by backend",
       "jobDetail.selectJob": "Select a job",
+      "statusLabels.succeeded": "Succeeded",
+      "statusLabels.failed": "Failed",
+      "statusLabels.running": "Running",
+      "statusLabels.cancel_requested": "Cancel Requested",
+      "statusLabels.cancelled": "Cancelled",
+      "statusLabels.pending": "Pending",
+      "statusLabels.skipped": "Skipped",
+      "statusLabels.paused": "Paused",
+      "statusLabels.disabled": "Disabled",
+      "statusLabels.never-run": "Never Run",
+      "controlStateLabels.active": "Active",
+      "controlStateLabels.paused": "Paused",
+      "overlapPolicyLabels.skip": "Skip",
+      "overlapPolicyLabels.allow": "Allow",
+      "executionModeLabels.in_process": "In Process",
+      "executionModeLabels.os_registered": "OS Registered",
+      "runStatusOptions.failed": "Failed",
+      "runStatusOptions.running": "Running",
+      "runStatusOptions.cancel_requested": "Cancel Requested",
+      "runStatusOptions.cancelled": "Cancelled",
+      "triggerSourceLabels.manual": "Manual",
+      "triggerSourceLabels.cron": "Cron",
+      "triggerSourceLabels.system": "System",
+      "triggerSourceLabels.startup": "Startup",
+      "triggerSourceLabels.reconcile": "Reconcile",
+      "scopeLabels.system": "System",
+      "scopeLabels.project": "Project",
       "runHistory.filterStatus": "Status Filter",
       "runHistory.filterTrigger": "Trigger Filter",
       "runHistory.filterAll": "All",
@@ -234,7 +261,7 @@ describe("SchedulerJobDetail", () => {
       />,
     );
 
-    expect(screen.getAllByText("paused")).toHaveLength(2);
+    expect(screen.getAllByText("Paused")).toHaveLength(2);
     expect(screen.getByTitle("job is paused")).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Resume" }));

@@ -25,6 +25,37 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }));
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      runsLink: "Runs",
+      title: "Employees",
+      description: "desc",
+      create: "Create",
+      loading: "Loading...",
+      empty: "Empty",
+      "table.name": "Name",
+      "table.role": "Role",
+      "table.status": "Status",
+      "table.createdAt": "Created At",
+      "table.actions": "Actions",
+      "action.edit": "Edit",
+      "action.activate": "Activate",
+      "action.pause": "Pause",
+      "action.archive": "Archive",
+      "action.delete": "Delete",
+      "delete.confirmTitle": "Delete?",
+      "delete.confirmDescription": "Desc",
+      "delete.cancel": "Cancel",
+      "delete.confirm": "Confirm",
+      "status.active": "active",
+      "status.paused": "paused",
+      "status.archived": "archived",
+    };
+    return map[key] ?? key;
+  },
+}));
+
 import { render, screen, waitFor } from "@testing-library/react";
 import { EmployeesSection } from "./employees-section";
 import { useEmployeeStore } from "@/lib/stores/employee-store";

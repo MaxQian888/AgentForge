@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +59,7 @@ function formatDate(iso: string): string {
 }
 
 export function SprintManagement({ projectId, sprints }: SprintManagementProps) {
+  const t = useTranslations("sprints");
   const createSprint = useSprintStore((s) => s.createSprint);
   const updateSprint = useSprintStore((s) => s.updateSprint);
 
@@ -81,7 +83,7 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
 
   const handleCreate = async () => {
     if (!name.trim() || !startDate || !endDate) {
-      setError("Name, start date, and end date are required.");
+      setError(t("dialog.error.requiredFields"));
       return;
     }
 
@@ -98,7 +100,7 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
       resetForm();
       setDialogOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create sprint");
+      setError(err instanceof Error ? err.message : t("dialog.error.createFailed"));
     } finally {
       setCreating(false);
     }
@@ -116,35 +118,35 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>Sprints</CardTitle>
+          <CardTitle>{t("card.title")}</CardTitle>
           <CardDescription>
-            Manage sprint cycles for this project.
+            {t("card.description")}
           </CardDescription>
         </div>
         <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
           <DialogTrigger asChild>
-            <Button size="sm">Create Sprint</Button>
+            <Button size="sm">{t("dialog.createTitle")}</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create Sprint</DialogTitle>
+              <DialogTitle>{t("dialog.createTitle")}</DialogTitle>
               <DialogDescription>
-                Define the sprint name, date range, and optional budget.
+                {t("dialog.createDescription")}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="sprint-name">Name</Label>
+                <Label htmlFor="sprint-name">{t("dialog.name")}</Label>
                 <Input
                   id="sprint-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Sprint 1"
+                  placeholder={t("dialog.namePlaceholder")}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="sprint-start">Start date</Label>
+                  <Label htmlFor="sprint-start">{t("dialog.startDate")}</Label>
                   <Input
                     id="sprint-start"
                     type="date"
@@ -153,7 +155,7 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="sprint-end">End date</Label>
+                  <Label htmlFor="sprint-end">{t("dialog.endDate")}</Label>
                   <Input
                     id="sprint-end"
                     type="date"
@@ -163,7 +165,7 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="sprint-budget">Budget (USD)</Label>
+                <Label htmlFor="sprint-budget">{t("dialog.budgetUsd")}</Label>
                 <Input
                   id="sprint-budget"
                   type="number"
@@ -180,10 +182,10 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
-                Cancel
+                {t("dialog.cancel")}
               </Button>
               <Button onClick={handleCreate} disabled={creating}>
-                {creating ? "Creating..." : "Create"}
+                {creating ? t("dialog.saving") : t("dialog.create")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -192,18 +194,18 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
       <CardContent>
         {sprints.length === 0 ? (
           <div className="text-sm text-muted-foreground">
-            No sprints yet. Create the first sprint to begin tracking cycles.
+            {t("empty.createFirst")}
           </div>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Date range</TableHead>
-                <TableHead>Budget</TableHead>
-                <TableHead>Spent</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t("table.name")}</TableHead>
+                <TableHead>{t("table.status")}</TableHead>
+                <TableHead>{t("table.dateRange")}</TableHead>
+                <TableHead>{t("table.budget")}</TableHead>
+                <TableHead>{t("table.spent")}</TableHead>
+                <TableHead className="text-right">{t("table.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -212,7 +214,7 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
                   <TableCell className="font-medium">{sprint.name}</TableCell>
                   <TableCell>
                     <Badge variant={statusBadgeVariant(sprint.status)}>
-                      {sprint.status}
+                      {t(`status.${sprint.status}`)}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -228,7 +230,7 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
                           variant="outline"
                           onClick={() => handleStatusChange(sprint, "active")}
                         >
-                          Activate
+                          {t("actions.activate")}
                         </Button>
                       )}
                       {sprint.status === "active" && (
@@ -237,7 +239,7 @@ export function SprintManagement({ projectId, sprints }: SprintManagementProps) 
                           variant="outline"
                           onClick={() => handleStatusChange(sprint, "closed")}
                         >
-                          Close
+                          {t("actions.close")}
                         </Button>
                       )}
                     </div>

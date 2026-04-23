@@ -54,6 +54,10 @@ jest.mock("next-intl", () => ({
       "activityFeed.timeRange.all": "All Time",
       "activityFeed.timeRange.last24h": "Last 24 Hours",
       "activityFeed.timeRange.last7d": "Last 7 Days",
+      "activityFeed.timeAgo.seconds": `${values?.seconds ?? 0}s ago`,
+      "activityFeed.timeAgo.minutes": `${values?.minutes ?? 0}m ago`,
+      "activityFeed.timeAgo.hours": `${values?.hours ?? 0}h ago`,
+      "activityFeed.timeAgo.days": `${values?.days ?? 0}d ago`,
     };
     if (key === "activityFeed.count") {
       return `Events: ${values?.count ?? 0}`;

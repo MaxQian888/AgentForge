@@ -60,6 +60,7 @@
   "widget.filter.timeRange.7d": "最近 7 天",
   "widget.filter.timeRange.30d": "最近 30 天",
   "widget.filter.timeRange.current_sprint": "当前冲刺",
+  "widget.filter.timeRange.14d": "最近 14 天",
   "widget.filter.category.all": "全部分类",
   "widget.filter.category.tasks": "任务",
   "widget.filter.category.reviews": "评审",
@@ -81,6 +82,8 @@
   "widget.config.chartType": "图表类型",
   "widget.config.chartType.bar": "柱状图",
   "widget.config.chartType.line": "折线图",
+  "widget.config.groupBy.day": "按天",
+  "widget.config.groupBy.week": "按周",
   "widget.config.invalid": "组件配置无效。",
   "widget.alert.budget.title": "预算阈值已超出",
   "widget.alert.budget.message": "预算使用率已超过 90%。",
@@ -145,6 +148,10 @@
   "activityFeed.timeRange.all": "全部时间",
   "activityFeed.timeRange.last24h": "最近 24 小时",
   "activityFeed.timeRange.last7d": "最近 7 天",
+  "activityFeed.timeAgo.seconds": "{seconds}秒前",
+  "activityFeed.timeAgo.minutes": "{minutes}分钟前",
+  "activityFeed.timeAgo.hours": "{hours}小时前",
+  "activityFeed.timeAgo.days": "{days}天前",
   "agentFleet.title": "代理舰队",
   "agentFleet.empty": "暂无活跃代理。",
   "agentFleet.name": "名称",
@@ -163,5 +170,9 @@
   "budget.utilization": "利用率",
   "actions.newSprint": "新建冲刺",
   "actions.createTeam": "创建团队",
-  "projectDashboard.title": "项目仪表盘"
+  "projectDashboard.title": "项目仪表盘",
+  "bootstrap.title": "项目引导",
+  "bootstrap.state.ready": "就绪",
+  "bootstrap.state.attention": "需注意",
+  "bootstrap.state.blocked": "已阻塞"
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { AlertTriangle, CheckCircle2, ExternalLink, GitBranch, Search, ShieldAlert, Wrench } from "lucide-react";
 import { SkillPackagePreviewPane } from "@/components/marketplace/skill-package-preview";
 import { Badge } from "@/components/ui/badge";
@@ -33,21 +34,6 @@ interface SkillsWorkspaceProps {
   onSetFilters: (next: Partial<SkillsFilters>) => void;
 }
 
-const familyOptions: Array<{ value: SkillsFilters["family"]; label: string }> = [
-  { value: "all", label: "All Families" },
-  { value: "built-in-runtime", label: "Built-in Runtime" },
-  { value: "repo-assistant", label: "Repo Assistant" },
-  { value: "workflow-mirror", label: "Workflow Mirror" },
-];
-
-const statusOptions: Array<{ value: SkillsFilters["status"]; label: string }> = [
-  { value: "all", label: "All Statuses" },
-  { value: "healthy", label: "Healthy" },
-  { value: "warning", label: "Warning" },
-  { value: "drifted", label: "Drifted" },
-  { value: "blocked", label: "Blocked" },
-];
-
 function statusIcon(status: SkillHealthStatus) {
   switch (status) {
     case "healthy":
@@ -78,19 +64,6 @@ function statusTone(status: SkillHealthStatus) {
   }
 }
 
-function familyLabel(value: SkillFamily) {
-  switch (value) {
-    case "built-in-runtime":
-      return "Built-in Runtime";
-    case "repo-assistant":
-      return "Repo Assistant";
-    case "workflow-mirror":
-      return "Workflow Mirror";
-    default:
-      return value;
-  }
-}
-
 export function SkillsWorkspace({
   items,
   selectedSkill,
@@ -105,6 +78,57 @@ export function SkillsWorkspace({
   onSyncMirrors,
   onSetFilters,
 }: SkillsWorkspaceProps) {
+  const t = useTranslations("skills");
+
+  const familyOptions: Array<{ value: SkillsFilters["family"]; label: string }> = useMemo(
+    () => [
+      { value: "all", label: t("filters.family.all") },
+      { value: "built-in-runtime", label: t("filters.family.builtInRuntime") },
+      { value: "repo-assistant", label: t("filters.family.repoAssistant") },
+      { value: "workflow-mirror", label: t("filters.family.workflowMirror") },
+    ],
+    [t],
+  );
+
+  const statusOptions: Array<{ value: SkillsFilters["status"]; label: string }> = useMemo(
+    () => [
+      { value: "all", label: t("filters.status.all") },
+      { value: "healthy", label: t("healthStatus.healthy") },
+      { value: "warning", label: t("healthStatus.warning") },
+      { value: "drifted", label: t("healthStatus.drifted") },
+      { value: "blocked", label: t("healthStatus.blocked") },
+    ],
+    [t],
+  );
+
+  function familyLabel(value: SkillFamily) {
+    switch (value) {
+      case "built-in-runtime":
+        return t("filters.family.builtInRuntime");
+      case "repo-assistant":
+        return t("filters.family.repoAssistant");
+      case "workflow-mirror":
+        return t("filters.family.workflowMirror");
+      default:
+        return value;
+    }
+  }
+
+  function healthStatusLabel(status: SkillHealthStatus) {
+    switch (status) {
+      case "healthy":
+        return t("healthStatus.healthy");
+      case "warning":
+        return t("healthStatus.warning");
+      case "drifted":
+        return t("healthStatus.drifted");
+      case "blocked":
+        return t("healthStatus.blocked");
+      default:
+        return t("healthStatus.unknown");
+    }
+  }
+
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       if (filters.family !== "all" && item.family !== filters.family) {
@@ -134,23 +158,23 @@ export function SkillsWorkspace({
     <div className="flex h-full flex-col border-t bg-card">
       <div className="flex flex-col gap-4 border-b px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">
-          <h1 className="text-sm font-semibold">Skills</h1>
+          <h1 className="text-sm font-semibold">{t("title")}</h1>
           <p className="text-xs text-muted-foreground">
-            Inspect governed skills, verify health, sync workflow mirrors, and hand off into the right downstream workspace.
+            {t("description")}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => void onVerifyInternal()} disabled={actionLoading}>
-            Verify Internal Skills
+            {t("actions.verifyInternal")}
           </Button>
           {canVerifyBuiltIns ? (
             <Button size="sm" variant="outline" onClick={() => void onVerifyBuiltIns()} disabled={actionLoading}>
-              Verify Built-in Skills
+              {t("actions.verifyBuiltIns")}
             </Button>
           ) : null}
           {canSyncMirrors ? (
             <Button size="sm" onClick={() => void onSyncMirrors()} disabled={actionLoading}>
-              Sync Mirrors
+              {t("actions.syncMirrors")}
             </Button>
           ) : null}
         </div>
@@ -164,7 +188,7 @@ export function SkillsWorkspace({
               <Input
                 value={filters.query}
                 onChange={(event) => onSetFilters({ query: event.target.value })}
-                placeholder="Search skills..."
+                placeholder={t("searchPlaceholder")}
                 className="pl-9"
               />
             </div>
@@ -198,7 +222,7 @@ export function SkillsWorkspace({
             <div className="space-y-2 p-3">
               {loading ? (
                 <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                  Loading governed skills...
+                  {t("loading")}
                 </div>
               ) : filteredItems.length > 0 ? (
                 filteredItems.map((item) => {
@@ -227,20 +251,20 @@ export function SkillsWorkspace({
                           className={cn("gap-1 capitalize", statusTone(item.health.status))}
                         >
                           {statusIcon(item.health.status)}
-                          {item.health.status}
+                          {healthStatusLabel(item.health.status)}
                         </Badge>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <span>{familyLabel(item.family)}</span>
-                        {item.bundle.member ? <span>Built-in bundle</span> : null}
-                        {item.previewAvailable ? <span>Preview</span> : null}
+                        {item.bundle.member ? <span>{t("list.builtInBundle")}</span> : null}
+                        {item.previewAvailable ? <span>{t("list.preview")}</span> : null}
                       </div>
                     </button>
                   );
                 })
               ) : (
                 <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                  No governed skills match the current filters.
+                  {t("empty")}
                 </div>
               )}
             </div>
@@ -261,7 +285,7 @@ export function SkillsWorkspace({
               {detailLoading ? (
                 <Card>
                   <CardContent className="pt-6 text-sm text-muted-foreground">
-                    Loading skill detail...
+                    {t("detailLoading")}
                   </CardContent>
                 </Card>
               ) : selectedSkill ? (
@@ -284,7 +308,7 @@ export function SkillsWorkspace({
                             variant="outline"
                             className={cn("capitalize", statusTone(selectedSkill.health.status))}
                           >
-                            {selectedSkill.health.status}
+                            {healthStatusLabel(selectedSkill.health.status)}
                           </Badge>
                         </div>
                       </div>
@@ -292,22 +316,22 @@ export function SkillsWorkspace({
                     <CardContent className="space-y-4 text-sm">
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="rounded-lg border p-3">
-                          <p className="text-xs font-medium text-muted-foreground">Bundle</p>
+                          <p className="text-xs font-medium text-muted-foreground">{t("detail.bundle")}</p>
                           <p className="mt-1 font-medium">
-                            {selectedSkill.bundle.member ? "Official built-in member" : "Not in built-in bundle"}
+                            {selectedSkill.bundle.member ? t("detail.builtInMember") : t("detail.notBuiltIn")}
                           </p>
                           {selectedSkill.bundle.category ? (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Category: {selectedSkill.bundle.category}
+                              {t("detail.category", { category: selectedSkill.bundle.category })}
                             </p>
                           ) : null}
                         </div>
                         <div className="rounded-lg border p-3">
-                          <p className="text-xs font-medium text-muted-foreground">Provenance</p>
+                          <p className="text-xs font-medium text-muted-foreground">{t("detail.provenance")}</p>
                           <p className="mt-1 font-medium">{selectedSkill.sourceType}</p>
                           {selectedSkill.lock?.source ? (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Lock source: {selectedSkill.lock.source}
+                              {t("detail.lockSource", { source: selectedSkill.lock.source })}
                             </p>
                           ) : null}
                         </div>
@@ -322,7 +346,7 @@ export function SkillsWorkspace({
 
                       {selectedSkill.health.issues.length > 0 ? (
                         <div className="space-y-2">
-                          <p className="text-xs font-medium">Diagnostics</p>
+                          <p className="text-xs font-medium">{t("detail.diagnostics")}</p>
                           {selectedSkill.health.issues.map((issue) => (
                             <div
                               key={`${issue.code}-${issue.targetPath ?? issue.message}`}
@@ -339,7 +363,7 @@ export function SkillsWorkspace({
 
                       {selectedSkill.blockedActions?.length ? (
                         <div className="space-y-2">
-                          <p className="text-xs font-medium">Blocked Actions</p>
+                          <p className="text-xs font-medium">{t("detail.blockedActions")}</p>
                           {selectedSkill.blockedActions.map((action) => (
                             <div key={action.id} className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
                               {action.reason}
@@ -350,7 +374,7 @@ export function SkillsWorkspace({
 
                       {selectedSkill.consumerSurfaces.length > 0 ? (
                         <div className="space-y-2">
-                          <p className="text-xs font-medium">Downstream Handoffs</p>
+                          <p className="text-xs font-medium">{t("detail.downstreamHandoffs")}</p>
                           <div className="flex flex-wrap gap-2">
                             {selectedSkill.consumerSurfaces.map((surface) =>
                               surface.href ? (
@@ -385,7 +409,7 @@ export function SkillsWorkspace({
                       <Separator />
                       <Card>
                         <CardHeader>
-                          <CardTitle className="text-sm">Mirror Targets</CardTitle>
+                          <CardTitle className="text-sm">{t("detail.mirrorTargets")}</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-2 text-xs text-muted-foreground">
                           {selectedSkill.mirrorTargets.map((target) => (
@@ -401,7 +425,7 @@ export function SkillsWorkspace({
               ) : (
                 <Card>
                   <CardContent className="pt-6 text-sm text-muted-foreground">
-                    Select a governed skill to inspect its package preview, governance diagnostics, and downstream actions.
+                    {t("selectPrompt")}
                   </CardContent>
                 </Card>
               )}

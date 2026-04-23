@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
 import { TerminalSquareIcon } from "lucide-react";
 import {
   Empty,
@@ -16,6 +17,7 @@ interface OutputStreamProps {
 }
 
 export function OutputStream({ lines }: OutputStreamProps) {
+  const t = useTranslations("agents");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,9 +32,9 @@ export function OutputStream({ lines }: OutputStreamProps) {
             <EmptyMedia variant="icon">
               <TerminalSquareIcon className="size-5" />
             </EmptyMedia>
-            <EmptyTitle>Waiting for output</EmptyTitle>
+            <EmptyTitle>{t("outputStream.waitingTitle")}</EmptyTitle>
             <EmptyDescription>
-              Runtime logs will appear here once the agent starts producing output.
+              {t("outputStream.waitingDescription")}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

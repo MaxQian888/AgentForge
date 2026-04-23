@@ -58,7 +58,7 @@ export function TaskComments({
                       type="button"
                       size="sm"
                       variant="ghost"
-                      aria-label={`Reopen ${comment.id}`}
+                      aria-label={t("comments.reopen")}
                       onClick={() => onReopenComment?.(comment.id)}
                     >
                       {t("comments.reopen")}
@@ -68,7 +68,7 @@ export function TaskComments({
                       type="button"
                       size="sm"
                       variant="ghost"
-                      aria-label={`Resolve ${comment.id}`}
+                      aria-label={t("comments.resolve")}
                       onClick={() => onResolveComment?.(comment.id)}
                     >
                       {t("comments.resolve")}

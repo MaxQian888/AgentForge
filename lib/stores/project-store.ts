@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 export interface CodingAgentSelection {
   runtime: string;
@@ -497,8 +498,9 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       set((s) => ({ projects: [...s.projects, project] }));
       return project;
     } catch (error) {
-      toast.error("Failed to create project", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "创建项目失败" : "Failed to create project", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }
@@ -521,8 +523,9 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       }));
       return updated;
     } catch (error) {
-      toast.error("Failed to update project", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "更新项目失败" : "Failed to update project", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }
@@ -539,8 +542,9 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
         currentProject: s.currentProject?.id === id ? null : s.currentProject,
       }));
     } catch (error) {
-      toast.error("Failed to delete project", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "删除项目失败" : "Failed to delete project", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }
@@ -563,8 +567,9 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       }));
       return updated;
     } catch (error) {
-      toast.error("Failed to archive project", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "归档项目失败" : "Failed to archive project", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }
@@ -587,8 +592,9 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       }));
       return updated;
     } catch (error) {
-      toast.error("Failed to unarchive project", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "取消归档项目失败" : "Failed to unarchive project", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }

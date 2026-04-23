@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import type { FieldProvenance } from "@/lib/roles/role-management";
 
@@ -15,6 +16,7 @@ interface ProvenanceBadgeProps {
 }
 
 export function ProvenanceBadge({ provenance, className }: ProvenanceBadgeProps) {
+  const t = useTranslations("roles");
   return (
     <span
       className={cn(
@@ -23,7 +25,7 @@ export function ProvenanceBadge({ provenance, className }: ProvenanceBadgeProps)
         className,
       )}
     >
-      {provenance}
+      {t(`provenance.${provenance}`)}
     </span>
   );
 }

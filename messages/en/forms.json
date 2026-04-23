@@ -15,5 +15,13 @@
   "taskTitle": "Task title",
   "taskDescription": "Task description",
   "taskPriority": "Task priority",
-  "customField": "Custom field: {name}"
+  "customField": "Custom field: {name}",
+  "loadingForm": "Loading form",
+  "checkingForm": "Checking the requested form link...",
+  "formNotFound": "Form not found",
+  "formNotFoundDesc": "Provide a form slug in the query string to load a public form.",
+  "checkingAccess": "Checking access and loading form details...",
+  "noFormMatched": "No form matched slug \"{slug}\".",
+  "formUnavailable": "Form unavailable",
+  "submitDescription": "Submit this form to create a task in this project."
 }

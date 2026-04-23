@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -46,15 +47,17 @@ function parseUnifiedDiff(patch: string): { oldValue: string; newValue: string }
 }
 
 export function FindingPatchModal({ patch, open, onClose }: FindingPatchModalProps) {
+  const t = useTranslations("reviews");
+
   if (!patch) {
     return (
       <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Suggested Patch</DialogTitle>
+            <DialogTitle>{t("patchTitle")}</DialogTitle>
           </DialogHeader>
           <p className="py-4 text-center text-sm text-muted-foreground">
-            No patch available.
+            {t("patchUnavailable")}
           </p>
         </DialogContent>
       </Dialog>
@@ -67,7 +70,7 @@ export function FindingPatchModal({ patch, open, onClose }: FindingPatchModalPro
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-auto">
         <DialogHeader>
-          <DialogTitle>Suggested Patch</DialogTitle>
+          <DialogTitle>{t("patchTitle")}</DialogTitle>
         </DialogHeader>
         <div className="text-xs">
           <ReactDiffViewer

@@ -70,12 +70,6 @@ const DEFAULT_FILTERS: DashboardFilterState = {
 type AutoRefreshInterval = "30s" | "60s" | "300s" | "off";
 
 const DEFAULT_AUTO_REFRESH_INTERVAL: AutoRefreshInterval = "30s";
-const AUTO_REFRESH_LABELS: Record<AutoRefreshInterval, string> = {
-  "30s": "30s",
-  "60s": "60s",
-  "300s": "5m",
-  off: "Off",
-};
 
 function toAutoRefreshMs(interval: AutoRefreshInterval) {
   switch (interval) {
@@ -886,7 +880,7 @@ export function DashboardGrid({
                   paused: autoRefreshPaused,
                   lastUpdatedLabel: lastUpdated
                     ? t("widget.lastUpdated", {
-                        time: AUTO_REFRESH_LABELS[autoRefreshInterval],
+                        time: t(`widget.autoRefresh.interval.${autoRefreshInterval}`),
                       })
                     : undefined,
                   onPauseToggle: async () => {
@@ -1002,10 +996,10 @@ export function DashboardGrid({
                     }))
                   }
                 >
-                  <option value="7d">7d</option>
-                  <option value="14d">14d</option>
-                  <option value="30d">30d</option>
-                  <option value="current_sprint">current_sprint</option>
+                  <option value="7d">{t("widget.filter.timeRange.7d")}</option>
+                  <option value="14d">{t("widget.filter.timeRange.14d")}</option>
+                  <option value="30d">{t("widget.filter.timeRange.30d")}</option>
+                  <option value="current_sprint">{t("widget.filter.timeRange.current_sprint")}</option>
                 </select>
               </div>
               <div className="space-y-2">
@@ -1023,8 +1017,8 @@ export function DashboardGrid({
                     }))
                   }
                 >
-                  <option value="day">day</option>
-                  <option value="week">week</option>
+                  <option value="day">{t("widget.config.groupBy.day")}</option>
+                  <option value="week">{t("widget.config.groupBy.week")}</option>
                 </select>
               </div>
               {configuringWidget?.widgetType === "throughput_chart" ? (

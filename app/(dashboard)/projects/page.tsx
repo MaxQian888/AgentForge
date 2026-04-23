@@ -116,7 +116,8 @@ function ProjectCardSkeleton() {
 }
 
 export default function ProjectsPage() {
-  useBreadcrumbs([{ label: "Workspace", href: "/" }, { label: "Projects" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.workspace"), href: "/" }, { label: tc("nav.projects") }]);
   const t = useTranslations("projects");
   const {
     projects,

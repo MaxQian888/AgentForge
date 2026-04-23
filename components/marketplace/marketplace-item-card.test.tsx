@@ -5,6 +5,31 @@ import type {
   MarketplaceItem,
 } from "@/lib/stores/marketplace-store";
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, values?: Record<string, string | number>) => {
+    const map: Record<string, string> = {
+      "item.install": "Install",
+      "item.installed": "Installed",
+      "item.manage": "Manage",
+      "item.blocked": "Blocked",
+      "item.update": "Update",
+      "item.updateVersion": "Update: v{version}",
+      "item.byAuthor": "by {author}",
+      "item.builtin": "Built-in",
+      "item.noDescription": "No description provided.",
+      "item.verified": "Verified",
+      "item.featured": "Featured",
+    };
+    let result = map[key] ?? key;
+    if (values) {
+      Object.entries(values).forEach(([k, v]) => {
+        result = result.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+      });
+    }
+    return result;
+  },
+}));
+
 const mockItem: MarketplaceItem = {
   id: "test-id",
   type: "plugin",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +40,7 @@ export function PendingInvitationsPanel({
   projectId,
   canManage,
 }: PendingInvitationsPanelProps) {
+  const t = useTranslations("invitations");
   const invitations = useInvitationStore(
     (s) => s.invitationsByProject[projectId] ?? [],
   );
@@ -87,7 +89,7 @@ export function PendingInvitationsPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Pending Invitations</CardTitle>
+        <CardTitle>{t("pendingTitle")}</CardTitle>
       </CardHeader>
       <CardContent>
         {error ? (
@@ -95,17 +97,17 @@ export function PendingInvitationsPanel({
         ) : null}
         {pending.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No pending invitations.
+            {t("noPending")}
           </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Invited Identity</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Expires</TableHead>
-                <TableHead>Delivery</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t("roster.invitedIdentity")}</TableHead>
+                <TableHead>{t("roster.role")}</TableHead>
+                <TableHead>{t("roster.expires")}</TableHead>
+                <TableHead>{t("roster.delivery")}</TableHead>
+                <TableHead className="text-right">{t("roster.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -140,7 +142,7 @@ export function PendingInvitationsPanel({
                         disabled={!canManage || busyId === invitation.id}
                         onClick={() => void handleResend(invitation.id)}
                       >
-                        Resend
+                        {t("roster.resend")}
                       </Button>
                       <Button
                         type="button"
@@ -150,7 +152,7 @@ export function PendingInvitationsPanel({
                         disabled={!canManage || busyId === invitation.id}
                         onClick={() => void handleRevoke(invitation.id)}
                       >
-                        Revoke
+                        {t("roster.revoke")}
                       </Button>
                     </div>
                   </TableCell>

@@ -1,6 +1,7 @@
 "use client"
 
 import type { FormEvent } from "react"
+import { useTranslations } from "next-intl"
 import { Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -32,12 +33,13 @@ export function WorkflowTemplateVarsDialog({
   onSubmit,
   loading,
 }: TemplateVarsDialogProps) {
-  const title =
-    (mode === "clone" ? "Create Workflow Copy: " : "Start Template Execution: ") + template.name
-  const description =
-    mode === "clone"
-      ? "This creates a project-owned workflow definition you can continue editing safely."
-      : "This starts an execution by cloning the template into your project with the variables below."
+  const t = useTranslations("workflow")
+  const title = mode === "clone"
+    ? t("templateDialog.cloneTitle", { name: template.name })
+    : t("templateDialog.executeTitle", { name: template.name })
+  const description = mode === "clone"
+    ? t("templateDialog.cloneDesc")
+    : t("templateDialog.executeDesc")
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -84,11 +86,11 @@ export function WorkflowTemplateVarsDialog({
 
             {mode === "execute" && (
               <div className="grid gap-1.5">
-                <Label htmlFor="var-taskId">Task ID (optional)</Label>
+                <Label htmlFor="var-taskId">{t("templateDialog.taskIdLabel")}</Label>
                 <Input
                   id="var-taskId"
                   name="taskId"
-                  placeholder="Task ID (optional)"
+                  placeholder={t("templateDialog.taskIdPlaceholder")}
                 />
               </div>
             )}
@@ -102,11 +104,11 @@ export function WorkflowTemplateVarsDialog({
             onClick={() => onOpenChange(false)}
             disabled={loading}
           >
-            Cancel
+            {t("templateDialog.cancel")}
           </Button>
           <Button type="submit" form="template-vars-form" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {mode === "clone" ? "Create Workflow Copy" : "Start Execution"}
+            {mode === "clone" ? t("templateDialog.createCopy") : t("templateDialog.startExecution")}
           </Button>
         </DialogFooter>
       </DialogContent>

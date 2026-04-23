@@ -1,6 +1,19 @@
 import { render, screen } from "@testing-library/react";
 import { MarketplaceVersionList } from "./marketplace-version-list";
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      "versions.noVersions": "No versions published yet.",
+      "versions.latest": "latest",
+      "versions.yanked": "yanked",
+      "versions.download": "Download",
+      "versions.yank": "Yank",
+    };
+    return map[key] ?? key;
+  },
+}));
+
 jest.mock("@/lib/stores/marketplace-store", () => ({
   useMarketplaceStore: jest.fn(() => ({
     fetchItemVersions: jest.fn(),

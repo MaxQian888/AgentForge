@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Droppable } from "@hello-pangea/dnd";
 import { Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -11,19 +12,6 @@ import { TaskCard } from "./task-card";
 import type { TaskWorkspaceDisplayOptions } from "@/lib/stores/task-workspace-store";
 import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
 import type { LinkedDocItem } from "@/components/tasks/linked-docs-panel";
-
-const columnLabels: Record<TaskStatus, string> = {
-  inbox: "Inbox",
-  triaged: "Triaged",
-  assigned: "Assigned",
-  in_progress: "In Progress",
-  blocked: "Blocked",
-  in_review: "In Review",
-  changes_requested: "Changes Requested",
-  done: "Done",
-  cancelled: "Cancelled",
-  budget_exceeded: "Budget Exceeded",
-};
 
 interface ColumnProps {
   status: TaskStatus;
@@ -58,6 +46,8 @@ export function Column({
   onQuickPriorityChange,
   onQuickCreateTask,
 }: ColumnProps) {
+  const t = useTranslations("tasks");
+  const tc = useTranslations("common");
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [quickCreateTitle, setQuickCreateTitle] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -80,7 +70,7 @@ export function Column({
       setQuickCreateOpen(false);
     } catch (error) {
       setCreateError(
-        error instanceof Error ? error.message : "Failed to create task."
+        error instanceof Error ? error.message : t("board.createTaskError")
       );
     } finally {
       setSubmitting(false);
@@ -93,7 +83,7 @@ export function Column({
       data-board-column={status}
     >
       <div className="flex items-center justify-between px-3 py-2">
-        <h3 className="text-sm font-semibold">{columnLabels[status]}</h3>
+        <h3 className="text-sm font-semibold">{t(`status.${status}`)}</h3>
         <div className="flex items-center gap-1">
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
             {tasks.length}
@@ -104,7 +94,7 @@ export function Column({
               size="icon"
               variant="ghost"
               className="size-7"
-              aria-label={`Quick create in ${columnLabels[status]}`}
+              aria-label={t("board.quickCreateInColumn", { column: t(`status.${status}`) })}
               onClick={() => {
                 setCreateError(null);
                 setQuickCreateOpen((open) => !open);
@@ -118,11 +108,11 @@ export function Column({
       {quickCreateOpen ? (
         <form className="flex flex-col gap-2 px-3 pb-2" onSubmit={(event) => void handleQuickCreate(event)}>
           <Input
-            aria-label="Task title"
+            aria-label={t("board.taskTitlePlaceholder")}
             className="h-8 bg-background text-xs"
             value={quickCreateTitle}
             onChange={(event) => setQuickCreateTitle(event.target.value)}
-            placeholder="Task title"
+            placeholder={t("board.taskTitlePlaceholder")}
           />
           <div className="flex items-center justify-end gap-2">
             <Button
@@ -136,7 +126,7 @@ export function Column({
                 setQuickCreateTitle("");
               }}
             >
-              Cancel
+              {tc("action.cancel")}
             </Button>
             <Button
               type="submit"
@@ -144,7 +134,7 @@ export function Column({
               className="h-7 px-2 text-xs"
               disabled={!quickCreateTitle.trim() || submitting}
             >
-              {submitting ? "Adding..." : "Add task"}
+              {submitting ? t("board.addingTask") : t("board.addTask")}
             </Button>
           </div>
           {createError ? (

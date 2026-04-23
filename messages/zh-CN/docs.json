@@ -147,5 +147,129 @@
     "createRootTasks": "创建根级待办任务",
     "cancel": "取消",
     "createTasks": "创建任务"
+  },
+  "blockEditor": {
+    "selectedBlocks": "已选区块",
+    "createTasks": "创建任务",
+    "taskCount": "{count} 个任务",
+    "inlineCommentAnchors": "行内评论锚点："
+  },
+  "liveArtifact": {
+    "chrome": {
+      "actionsLabel": "实时产物操作",
+      "openSource": "打开来源",
+      "freeze": "冻结",
+      "remove": "移除"
+    },
+    "status": {
+      "notFound": "该实时产物已不可用。",
+      "forbidden": "你无权访问该实时产物。",
+      "degradedTitle": "实时更新暂时不可用"
+    },
+    "sharedBody": {
+      "lastKnownUnavailable": "无法显示上次已知数据。",
+      "removeBlock": "移除区块",
+      "loadingLabel": "正在加载实时产物"
+    },
+    "unknownKind": "未知的实时产物类型：{kind}",
+    "unknownKindEmpty": "（空）",
+    "slashMenu": {
+      "group": "实时产物",
+      "agentRun": {
+        "title": "实时智能体运行",
+        "subtext": "嵌入一个实时更新的智能体运行（状态、步骤、费用）。"
+      },
+      "costSummary": {
+        "title": "实时费用汇总",
+        "subtext": "按运行时、提供商或成员聚合费用。"
+      },
+      "review": {
+        "title": "实时评审",
+        "subtext": "嵌入一个带有实时状态和发现预览的评审。"
+      },
+      "taskGroup": {
+        "title": "实时任务组",
+        "subtext": "嵌入一个基于保存视图或过滤器的任务列表。"
+      }
+    },
+    "dialogs": {
+      "agentRun": {
+        "title": "嵌入实时智能体运行",
+        "desc": "选择一个最近的智能体运行。该区块将同步其状态、步骤和费用。",
+        "searchAriaLabel": "搜索智能体运行",
+        "searchPlaceholder": "按 ID、任务、状态、运行时筛选",
+        "listAriaLabel": "智能体运行",
+        "empty": "没有匹配此搜索的智能体运行。",
+        "started": "开始于",
+        "cost": "${amount}"
+      },
+      "costSummary": {
+        "title": "嵌入实时费用汇总",
+        "desc": "聚合指定日期范围内的费用。筛选和分组条件保存在区块中，每次渲染时重新投影。",
+        "startDate": "开始日期",
+        "endDate": "结束日期",
+        "runtime": "运行时",
+        "anyRuntime": "任意运行时",
+        "provider": "提供商",
+        "anyProvider": "任意提供商",
+        "member": "成员",
+        "anyMember": "任意成员",
+        "groupBy": "分组方式",
+        "noGrouping": "不分组",
+        "topN": "前 N 行"
+      },
+      "review": {
+        "title": "嵌入实时评审",
+        "desc": "关联一个评审。状态、风险等级和发现数量会保持同步。",
+        "searchAriaLabel": "搜索评审",
+        "searchPlaceholder": "按 ID、任务、状态、风险筛选",
+        "listAriaLabel": "评审",
+        "empty": "没有匹配此搜索的评审。",
+        "risk": "风险：{level}",
+        "unknown": "未知"
+      },
+      "taskGroup": {
+        "title": "嵌入实时任务组",
+        "desc": "选择一个保存的视图或定义内联过滤器。任务变更时行会更新。",
+        "filterModeAriaLabel": "筛选模式",
+        "savedViewTab": "保存视图",
+        "inlineFilterTab": "内联过滤器",
+        "savedViewLabel": "保存视图",
+        "selectSavedView": "选择保存视图",
+        "noSavedViews": "该项目暂无保存视图。",
+        "status": "状态",
+        "statusPlaceholder": "例如 in_progress",
+        "assignee": "负责人",
+        "assigneePlaceholder": "成员 ID",
+        "tag": "标签",
+        "sprint": "迭代",
+        "milestone": "里程碑",
+        "rowsPerPage": "每页行数"
+      },
+      "cancel": "取消",
+      "insert": "插入"
+    },
+    "blocks": {
+      "agentRun": {
+        "title": "智能体运行",
+        "notFound": "该实时产物已不可用。关联的智能体运行可能已被删除。",
+        "forbidden": "你当前角色无法查看此智能体运行的详情。"
+      },
+      "costSummary": {
+        "title": "费用汇总",
+        "notFound": "该实时产物已不可用。关联的费用窗口未产生数据。",
+        "forbidden": "你无权访问此窗口的费用数据。"
+      },
+      "review": {
+        "title": "评审",
+        "notFound": "该实时产物已不可用。关联的评审可能已被删除。",
+        "forbidden": "你当前角色无法查看此评审的详情。"
+      },
+      "taskGroup": {
+        "title": "任务组",
+        "notFound": "该实时产物已不可用。关联的保存视图或过滤器可能已被移除。",
+        "forbidden": "你无权访问此过滤器匹配的任务。"
+      }
+    }
   }
 }

@@ -336,7 +336,7 @@ export function TaskDependencyGraph({ tasks, onTaskClick }: TaskDependencyGraphP
               fontSize={10}
               fill={statusColor(node.status)}
             >
-              {node.status.replace("_", " ")}
+              {t(`status.${node.status}`)}
             </text>
           </g>
         ))}

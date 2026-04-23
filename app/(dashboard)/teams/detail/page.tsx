@@ -5,10 +5,12 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { TeamDetailView } from "@/components/team/team-detail-view";
 import { PageHeader } from "@/components/shared/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useTranslations } from "next-intl";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 function TeamDetailContent() {
-  useBreadcrumbs([{ label: "Teams", href: "/teams" }, { label: "Detail" }]);
+  const t = useTranslations();
+  useBreadcrumbs([{ label: t("common.nav.teams"), href: "/teams" }, { label: t("common.nav.team") }]);
   const searchParams = useSearchParams();
   const router = useRouter();
   const teamId = searchParams.get("id");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,8 @@ export function ViewShareDialog({
   projectId: string;
   view: SavedView | null;
 }) {
+  const t = useTranslations("views");
+  const tCommon = useTranslations("common");
   const updateView = useSavedViewStore((state) => state.updateView);
   const [roleIds, setRoleIds] = useState("");
   const [memberIds, setMemberIds] = useState("");
@@ -28,22 +31,22 @@ export function ViewShareDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Share View</DialogTitle>
-          <DialogDescription>Share this view with role IDs or member IDs.</DialogDescription>
+          <DialogTitle>{t("viewShareDialog.title")}</DialogTitle>
+          <DialogDescription>{t("viewShareDialog.description")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Role IDs</Label>
-            <Input value={roleIds} onChange={(event) => setRoleIds(event.target.value)} placeholder="reviewer, lead" />
+            <Label>{t("viewShareDialog.roleIdsLabel")}</Label>
+            <Input value={roleIds} onChange={(event) => setRoleIds(event.target.value)} placeholder={t("viewShareDialog.roleIdsPlaceholder")} />
           </div>
           <div className="space-y-2">
-            <Label>Member IDs</Label>
-            <Input value={memberIds} onChange={(event) => setMemberIds(event.target.value)} placeholder="member-1, member-2" />
+            <Label>{t("viewShareDialog.memberIdsLabel")}</Label>
+            <Input value={memberIds} onChange={(event) => setMemberIds(event.target.value)} placeholder={t("viewShareDialog.memberIdsPlaceholder")} />
           </div>
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tCommon("action.cancel")}
           </Button>
           <Button
             type="button"
@@ -57,7 +60,7 @@ export function ViewShareDialog({
               onOpenChange(false);
             }}
           >
-            Save sharing
+            {t("viewShareDialog.saveSharing")}
           </Button>
         </DialogFooter>
       </DialogContent>

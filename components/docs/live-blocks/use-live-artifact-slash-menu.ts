@@ -8,6 +8,7 @@ import {
   useState,
   type ReactElement,
 } from "react";
+import { useTranslations } from "next-intl";
 import type { KnowledgeAssetKind } from "@/lib/stores/knowledge-store";
 import {
   AgentRunPickerDialog,
@@ -55,8 +56,6 @@ export interface UseLiveArtifactSlashMenuOptions {
   onInsert: LiveArtifactOnInsert;
 }
 
-const SLASH_MENU_GROUP = "Live artifacts";
-
 /**
  * React hook that exposes slash-menu entries for inserting live-artifact
  * blocks plus the dialog elements the caller must render alongside the
@@ -72,6 +71,7 @@ export function useLiveArtifactSlashMenu(
 ): UseLiveArtifactSlashMenuResult {
   const { assetKind, projectId, onInsert } = options;
   const enabled = assetKind === "wiki_page";
+  const t = useTranslations("docs");
 
   const [openDialog, setOpenDialog] = useState<LiveArtifactKind | null>(null);
 
@@ -87,41 +87,42 @@ export function useLiveArtifactSlashMenu(
 
   const slashMenuItems = useMemo<LiveArtifactSlashMenuItem[]>(() => {
     if (!enabled) return [];
+    const group = t("liveArtifact.slashMenu.group");
     return [
       {
         key: "agent_run",
-        title: "Live agent run",
-        subtext: "Embed a live-updating agent run (status, steps, cost).",
+        title: t("liveArtifact.slashMenu.agentRun.title"),
+        subtext: t("liveArtifact.slashMenu.agentRun.subtext"),
         aliases: ["agent", "run", "live"],
-        group: SLASH_MENU_GROUP,
+        group,
         onItemClick: () => setOpenDialog("agent_run"),
       },
       {
         key: "cost_summary",
-        title: "Live cost summary",
-        subtext: "Aggregate spend across runtime, provider, or member.",
+        title: t("liveArtifact.slashMenu.costSummary.title"),
+        subtext: t("liveArtifact.slashMenu.costSummary.subtext"),
         aliases: ["cost", "spend", "usage", "live"],
-        group: SLASH_MENU_GROUP,
+        group,
         onItemClick: () => setOpenDialog("cost_summary"),
       },
       {
         key: "review",
-        title: "Live review",
-        subtext: "Embed a review with live status and findings preview.",
+        title: t("liveArtifact.slashMenu.review.title"),
+        subtext: t("liveArtifact.slashMenu.review.subtext"),
         aliases: ["review", "pr", "live"],
-        group: SLASH_MENU_GROUP,
+        group,
         onItemClick: () => setOpenDialog("review"),
       },
       {
         key: "task_group",
-        title: "Live task group",
-        subtext: "Embed a filtered or saved-view-backed task list.",
+        title: t("liveArtifact.slashMenu.taskGroup.title"),
+        subtext: t("liveArtifact.slashMenu.taskGroup.subtext"),
         aliases: ["tasks", "list", "live", "group"],
-        group: SLASH_MENU_GROUP,
+        group,
         onItemClick: () => setOpenDialog("task_group"),
       },
     ];
-  }, [enabled]);
+  }, [enabled, t]);
 
   const menuDialogs = useMemo<ReactElement | null>(() => {
     if (!enabled) return null;

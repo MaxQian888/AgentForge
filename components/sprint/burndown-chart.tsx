@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import type { SprintBurndownPoint } from "@/lib/stores/sprint-store";
 
 interface BurndownChartProps {
@@ -11,6 +12,7 @@ interface BurndownChartProps {
 const PADDING = { top: 16, right: 16, bottom: 32, left: 40 };
 
 export function BurndownChart({ burndown, plannedTasks }: BurndownChartProps) {
+  const t = useTranslations("sprints");
   const [hovered, setHovered] = useState<number | null>(null);
 
   const points = burndown;
@@ -36,7 +38,7 @@ export function BurndownChart({ burndown, plannedTasks }: BurndownChartProps) {
   if (count === 0) {
     return (
       <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-        No burndown data available yet.
+        {t("burndown.empty")}
       </div>
     );
   }
@@ -138,8 +140,8 @@ export function BurndownChart({ burndown, plannedTasks }: BurndownChartProps) {
           }}
         >
           <div className="font-medium">{hoveredPoint.date}</div>
-          <div>Remaining: {hoveredPoint.remainingTasks}</div>
-          <div>Completed: {hoveredPoint.completedTasks}</div>
+          <div>{t("burndown.remaining", { remainingTasks: hoveredPoint.remainingTasks })}</div>
+          <div>{t("burndown.completed", { completedTasks: hoveredPoint.completedTasks })}</div>
         </div>
       )}
     </div>

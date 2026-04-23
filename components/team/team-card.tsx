@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,8 @@ interface TeamCardProps {
 }
 
 export function TeamCard({ team, onDelete }: TeamCardProps) {
+  const t = useTranslations("teams");
+  const tc = useTranslations("common");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const costPct =
@@ -64,15 +67,15 @@ export function TeamCard({ team, onDelete }: TeamCardProps) {
     team.status === "failed" ||
     team.status === "cancelled";
 
+  const teamName = team.name || team.taskTitle || t("card.untitled");
+
   return (
     <>
       <Link href={`/teams/detail?id=${team.id}`} className="block">
         <Card className="transition-colors hover:bg-accent/50">
           <CardContent className="flex flex-col gap-3 py-4">
             <div className="flex items-center justify-between">
-              <h3 className="truncate font-medium">
-                {team.name || team.taskTitle || "Untitled Team"}
-              </h3>
+              <h3 className="truncate font-medium">{teamName}</h3>
               <div className="flex items-center gap-1.5">
                 <Badge
                   variant="secondary"
@@ -104,7 +107,7 @@ export function TeamCard({ team, onDelete }: TeamCardProps) {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Pipeline:</span>
+              <span className="text-xs text-muted-foreground">{t("card.pipeline")}:</span>
               {(["plan", "execute", "review"] as const).map((phase) => {
                 const dotStatus = getPhaseDotStatus(team.status, phase);
                 return (
@@ -136,9 +139,7 @@ export function TeamCard({ team, onDelete }: TeamCardProps) {
             </div>
 
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>
-                {completedCoders} coder{completedCoders !== 1 ? "s" : ""}
-              </span>
+              <span>{t("card.coders", { count: completedCoders })}</span>
               <span>{new Date(team.createdAt).toLocaleString()}</span>
             </div>
           </CardContent>
@@ -147,9 +148,9 @@ export function TeamCard({ team, onDelete }: TeamCardProps) {
 
       <ConfirmDialog
         open={confirmDelete}
-        title="Delete Team"
-        description={`Permanently delete "${team.name || team.taskTitle || "this team"}"? This cannot be undone.`}
-        confirmLabel="Delete"
+        title={t("card.deleteTitle")}
+        description={t("card.deleteDescription", { name: teamName })}
+        confirmLabel={tc("action.delete")}
         variant="destructive"
         onConfirm={() => {
           setConfirmDelete(false);

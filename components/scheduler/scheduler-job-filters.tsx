@@ -31,8 +31,8 @@ export function SchedulerJobFilters({
   const scopeOptions = useMemo(() => {
     const scopes = Array.from(new Set(jobs.map((job) => job.scope).filter(Boolean)));
     scopes.sort();
-    return scopes.map((scope) => ({ value: scope, label: scope }));
-  }, [jobs]);
+    return scopes.map((scope) => ({ value: scope, label: t(`scopeLabels.${scope}`) }));
+  }, [jobs, t]);
 
   return (
     <FilterBar

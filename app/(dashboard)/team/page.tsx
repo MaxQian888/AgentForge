@@ -11,7 +11,8 @@ function TeamPageFallback() {
 }
 
 export default function TeamPage() {
-  useBreadcrumbs([{ label: "Project", href: "/" }, { label: "Team" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.project"), href: "/" }, { label: tc("nav.team") }]);
   return (
     <Suspense fallback={<TeamPageFallback />}>
       <TeamPageClient />

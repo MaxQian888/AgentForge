@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import { usePluginStore, type MarketplacePluginEntry } from "@/lib/stores/plugin-store";
 import { Search } from "lucide-react";
 
@@ -12,6 +13,7 @@ interface PluginCatalogSearchProps {
 }
 
 export function PluginCatalogSearch({ onSelect }: PluginCatalogSearchProps) {
+  const t = useTranslations("plugins");
   const searchCatalog = usePluginStore((s) => s.searchCatalog);
   const catalogResults = usePluginStore((s) => s.catalogResults);
   const catalogQuery = usePluginStore((s) => s.catalogQuery);
@@ -43,7 +45,7 @@ export function PluginCatalogSearch({ onSelect }: PluginCatalogSearchProps) {
       <div className="relative">
         <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
         <Input
-          placeholder="Search the plugin catalog..."
+          placeholder={t("catalogSearch.placeholder")}
           value={localQuery}
           onChange={(e) => setLocalQuery(e.target.value)}
           className="pl-9"
@@ -53,11 +55,11 @@ export function PluginCatalogSearch({ onSelect }: PluginCatalogSearchProps) {
       <div className="max-h-56 overflow-y-auto rounded-md border">
         {!catalogQuery.trim() ? (
           <p className="p-4 text-center text-sm text-muted-foreground">
-            Search the plugin catalog
+            {t("catalogSearch.emptyPrompt")}
           </p>
         ) : catalogResults.length === 0 ? (
           <p className="p-4 text-center text-sm text-muted-foreground">
-            No results
+            {t("catalogSearch.noResults")}
           </p>
         ) : (
           <div className="grid gap-1 p-1">

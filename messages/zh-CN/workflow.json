@@ -50,6 +50,398 @@
     "undo": "撤销",
     "redo": "重做",
     "hidePalette": "隐藏调色板",
-    "showPalette": "显示调色板"
+    "showPalette": "显示调色板",
+    "workflowPluginId": "工作流插件 ID",
+    "triggerProfile": "触发器配置",
+    "exportFallbackName": "workflow"
+  },
+  "toolbar": {
+    "workflowNamePlaceholder": "工作流名称",
+    "descriptionPlaceholder": "描述",
+    "undoTooltip": "撤销 (Ctrl+Z)",
+    "redoTooltip": "重做 (Ctrl+Shift+Z)",
+    "importAria": "导入工作流 JSON",
+    "importWorkflowAria": "导入工作流",
+    "importTooltip": "导入 JSON",
+    "exportAria": "导出工作流",
+    "exportTooltip": "导出 JSON",
+    "saving": "正在保存…"
+  },
+  "nodePalette": {
+    "searchPlaceholder": "搜索节点…",
+    "noNodes": "未找到节点。",
+    "categories": {
+      "entry": "入口",
+      "logic": "逻辑",
+      "agent": "智能体",
+      "flow": "流程控制",
+      "human": "人工",
+      "action": "动作"
+    }
+  },
+  "nodeConfig": {
+    "nodeLabel": "节点标签",
+    "configTitle": "{label} 配置",
+    "dataFlowTitle": "数据流",
+    "advancedRawJson": "高级（原始 JSON）",
+    "deleteNode": "删除节点",
+    "selectField": "选择 {label}…",
+    "edge": {
+      "title": "边",
+      "displayLabel": "显示标签",
+      "displayLabelPlaceholder": "可选标签…",
+      "condition": "条件",
+      "deleteEdge": "删除边"
+    },
+    "conditionBuilder": {
+      "visual": "可视化",
+      "expression": "表达式",
+      "selectUpstreamNode": "选择上游节点…",
+      "fieldPlaceholder": "字段路径（例如 output.ok）",
+      "valuePlaceholder": "值",
+      "expressionPlaceholder": "{{node.output.field}} == value",
+      "helperPrefix": "使用",
+      "helperSuffix": "引用上游数据",
+      "tooComplex": "表达式过于复杂，无法使用可视化模式"
+    },
+    "dataFlow": {
+      "noUpstream": "未连接上游节点。",
+      "directInputs": "直接输入",
+      "indirect": "间接",
+      "hintPrefix": "在任意配置中输入",
+      "hintSuffix": "以引用上游数据。",
+      "copyReference": "复制引用"
+    },
+    "llmAgent": {
+      "runtime": "运行时",
+      "runtimePlaceholder": "选择运行时…",
+      "provider": "提供商",
+      "providerPlaceholder": "选择提供商…",
+      "model": "模型",
+      "modelPlaceholder": "选择模型…",
+      "budgetUsd": "预算（美元）",
+      "budgetPlaceholder": "例如 1.00",
+      "prompt": "提示词",
+      "promptPlaceholder": "用户提示词模板…",
+      "systemPrompt": "系统提示词",
+      "systemPromptPlaceholder": "系统提示词模板…"
+    },
+    "httpCall": {
+      "secretsHelp": "模板语法：{{secrets.NAME}} 仅允许用于 URL、headers、url_query 和 body。其他字段在保存时会被拒绝。",
+      "method": "方法",
+      "url": "URL",
+      "urlPlaceholder": "https://api.example.com/v1/things",
+      "headers": "请求头",
+      "headerKeyPlaceholder": "请求头名称",
+      "headerValuePlaceholder": "请求头值（例如 Bearer {{secrets.X}}）",
+      "urlQuery": "URL 查询参数",
+      "queryKeyPlaceholder": "参数名",
+      "queryValuePlaceholder": "值",
+      "body": "请求体",
+      "bodyPlaceholder": "{\"hello\":\"world\"} -- 支持 {{secrets.X}} 和 {{$dataStore.X.Y}}",
+      "timeout": "超时（秒，最大 300）",
+      "treatAsSuccess": "视为成功（逗号分隔的状态码）",
+      "treatAsSuccessPlaceholder": "例如 401,404",
+      "addRow": "添加 {label}"
+    },
+    "imSend": {
+      "datastoreHelp": "模板语法：{{$dataStore.<nodeId>.<field>}} 在执行时解析。",
+      "target": "目标",
+      "replyToTrigger": "回复触发消息",
+      "explicitChat": "指定聊天 / 话题",
+      "provider": "提供商",
+      "providerPlaceholder": "feishu",
+      "chatId": "聊天 ID",
+      "chatIdPlaceholder": "oc_xxx",
+      "threadId": "话题 ID（可选）",
+      "card": "卡片",
+      "title": "标题",
+      "status": "状态",
+      "summary": "摘要",
+      "fields": "字段",
+      "fieldLabelPlaceholder": "标签",
+      "fieldValuePlaceholder": "值",
+      "addField": "添加字段",
+      "actions": "操作（按钮）",
+      "actionIdPlaceholder": "操作 ID（例如 approve）",
+      "actionLabelPlaceholder": "标签",
+      "callback": "回调",
+      "url": "URL",
+      "urlPlaceholder": "https://...",
+      "payloadPlaceholder": "载荷 JSON: {\"k\":\"v\"}",
+      "addAction": "添加操作",
+      "footer": "页脚（可选）"
+    },
+    "subWorkflow": {
+      "targetKind": "目标类型",
+      "targetKindPlaceholder": "选择目标类型",
+      "dagWorkflow": "DAG 工作流",
+      "workflowPlugin": "工作流插件",
+      "targetWorkflow": "目标工作流",
+      "targetPlugin": "目标插件",
+      "pickDagWorkflow": "选择一个 DAG 工作流",
+      "pickWorkflowPlugin": "选择一个工作流插件",
+      "enterDagUuid": "输入 DAG 工作流 UUID",
+      "enterPluginId": "输入插件 ID",
+      "inputMapping": "输入映射（JSON）",
+      "inputMappingPlaceholder": "{\n  \"inputKey\": \"{{$parent.dataStore.previousNode.output.value}}\"\n}"
+    },
+    "groups": {
+      "Agent Config": "智能体配置",
+      "Condition": "条件",
+      "Gate": "网关",
+      "Function": "函数",
+      "Loop Config": "循环配置",
+      "Sub-Workflow": "子工作流",
+      "Review": "审核",
+      "Event": "事件",
+      "Notification": "通知",
+      "Status": "状态"
+    },
+    "fields": {
+      "expression": { "label": "表达式", "placeholder": "例如 node.output.status === 'done'" },
+      "maxIterations": { "label": "最大迭代次数", "placeholder": "10" },
+      "exitCondition": { "label": "退出条件", "placeholder": "例如 node.output.done === true" },
+      "workflowId": { "label": "工作流 ID", "placeholder": "工作流定义 ID" },
+      "inputMapping": { "label": "输入映射", "placeholder": "{\"key\": \"{{node.output.value}}\"}" },
+      "prompt": { "label": "审核提示词", "placeholder": "审核人应检查什么？" },
+      "reviewerHint": { "label": "审核人提示", "placeholder": "给审核人的可选提示" },
+      "eventType": { "label": "事件类型", "placeholder": "例如 webhook_received" },
+      "timeout": { "label": "超时（秒）", "placeholder": "超时秒数" },
+      "message": { "label": "消息", "placeholder": "支持 {{node.output.field}} 变量" },
+      "channel": { "label": "频道", "placeholder": "例如 #general 或 email" },
+      "targetStatus": { "label": "目标状态" }
+    }
+  },
+  "execution": {
+    "title": "执行",
+    "unableToLoad": "无法加载执行记录",
+    "notFound": "未找到执行记录",
+    "started": "开始于",
+    "pending": "待处理",
+    "cancel": "取消",
+    "nodeExecution": "节点执行",
+    "executionLog": "执行日志",
+    "subWorkflow": {
+      "invokedByParent": "由父工作流调用",
+      "subInvocations": "子调用"
+    },
+    "deliveryFailed": {
+      "im": "回帖失败",
+      "imTitle": "后端尝试 3 次仍未把结果回帖到 IM 线程",
+      "vcs": "PR comment 发送失败",
+      "vcsTitle": "PR comment 发送失败，已重试 3 次"
+    }
+  },
+  "node": {
+    "status": {
+      "pending": "待处理",
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "已失败",
+      "skipped": "已跳过",
+      "waiting": "等待中"
+    },
+    "type": {
+      "trigger": "触发器",
+      "condition": "条件",
+      "agent_dispatch": "智能体调度",
+      "notification": "通知",
+      "status_transition": "状态转换",
+      "gate": "网关",
+      "parallel_split": "并行拆分",
+      "parallel_join": "并行合并",
+      "human_review": "人工审核",
+      "wait_event": "等待事件",
+      "llm_agent": "LLM 智能体",
+      "function": "函数",
+      "loop": "循环",
+      "sub_workflow": "子工作流",
+      "http_call": "HTTP 调用",
+      "im_send": "IM 发送"
+    },
+    "typeDescription": {
+      "trigger": "工作流的起始点",
+      "condition": "基于布尔表达式分支",
+      "gate": "阻塞执行直到条件满足",
+      "function": "执行自定义表达式或脚本",
+      "agent_dispatch": "向 AI 智能体派发任务",
+      "llm_agent": "运行可配置模型和系统提示词的 LLM 提示",
+      "parallel_split": "将执行分叉到并行分支",
+      "parallel_join": "将并行分支合并回一起",
+      "loop": "重复一组节点直到条件满足",
+      "sub_workflow": "嵌入并执行另一个工作流定义",
+      "human_review": "暂停以等待人工批准或审核",
+      "wait_event": "暂停直到收到外部事件",
+      "notification": "向频道发送通知消息",
+      "status_transition": "将工作项转换到新状态",
+      "http_call": "调用外部 HTTP API；支持在 url、headers、query、body 中使用 {{secrets.X}}",
+      "im_send": "发送可恢复 wait_event 节点的富卡片操作按钮"
+    },
+    "awaitingReview": "等待审核",
+    "waitingForEvent": "等待事件",
+    "reviewButton": "审核",
+    "sendEventButton": "发送事件",
+    "optionalComment": "可选评论...",
+    "eventPayloadPlaceholder": "{\"event\": \"value\"}"
+  },
+  "review": {
+    "approve": "批准",
+    "reject": "拒绝",
+    "approvedToast": "审核已通过",
+    "rejectedToast": "审核已拒绝",
+    "failedToast": "提交审核失败"
+  },
+  "event": {
+    "sendEvent": "发送事件",
+    "sentToast": "事件发送成功",
+    "failedToast": "发送事件失败",
+    "invalidJson": "无效的 JSON"
+  },
+  "pluginRun": {
+    "unavailable": "插件运行主体不可用",
+    "title": "插件运行",
+    "status": "状态",
+    "stepsTitle": "步骤",
+    "noSteps": "无步骤记录",
+    "role": "角色",
+    "retries": "重试",
+    "attempts": "{count} 次尝试"
+  },
+  "reviewsTab": {
+    "noPending": "无待处理审核",
+    "allResolved": "所有工作流审核均已解决。",
+    "hideContext": "隐藏上下文",
+    "showContext": "显示上下文",
+    "commentPlaceholder": "可选评论...",
+    "approve": "批准",
+    "reject": "拒绝",
+    "toastApproved": "审核已通过",
+    "toastRejected": "审核已拒绝"
+  },
+  "runs": {
+    "filter": {
+      "all": "全部",
+      "dag": "DAG",
+      "plugin": "插件"
+    },
+    "summary": {
+      "running": "运行中 {count}",
+      "paused": "已暂停 {count}",
+      "failed": "已失败 {count}"
+    },
+    "loading": "正在加载运行记录...",
+    "noRuns": "无运行记录",
+    "noRunsDesc": "此项目尚无工作流运行记录。",
+    "triggeredBy": {
+      "trigger": "触发器",
+      "manual": "手动",
+      "sub_workflow": "子工作流",
+      "task": "任务"
+    },
+    "employee": "员工",
+    "time": {
+      "justNow": "刚刚",
+      "minutesAgo": "{count} 分钟前",
+      "hoursAgo": "{count} 小时前",
+      "daysAgo": "{count} 天前"
+    },
+    "loadMore": "加载更多",
+    "loadingMore": "加载中...",
+    "backToRuns": "返回运行列表",
+    "detail": {
+      "loading": "正在加载运行详情...",
+      "started": "开始于 {time}",
+      "parent": "父工作流 {id}"
+    }
+  },
+  "templateDialog": {
+    "cloneTitle": "创建工作流副本：{name}",
+    "executeTitle": "开始模板执行：{name}",
+    "cloneDesc": "这将创建一个项目拥有的工作流定义，您可以安全地继续编辑。",
+    "executeDesc": "这将通过把模板克隆到您的项目并开始执行，使用下方的变量。",
+    "taskIdLabel": "任务 ID（可选）",
+    "taskIdPlaceholder": "任务 ID（可选）",
+    "cancel": "取消",
+    "createCopy": "创建工作流副本",
+    "startExecution": "开始执行"
+  },
+  "templates": {
+    "source": {
+      "all": "全部",
+      "system": "系统",
+      "user": "自定义",
+      "marketplace": "应用市场"
+    },
+    "searchPlaceholder": "搜索工作流模板",
+    "noTemplates": "未找到模板",
+    "noTemplatesDesc": "没有符合所选筛选条件的工作流模板。",
+    "nodes": "{count} 个节点",
+    "edges": "{count} 条边",
+    "noVariables": "无变量",
+    "preview": "预览",
+    "variables": "变量",
+    "actions": {
+      "duplicate": "复制",
+      "edit": "编辑",
+      "delete": "删除",
+      "clone": "克隆",
+      "execute": "执行"
+    },
+    "toast": {
+      "cloned": "模板已克隆",
+      "started": "执行已开始",
+      "duplicated": "模板已复制",
+      "deleted": "模板已删除"
+    },
+    "selectTitle": "选择一个模板",
+    "selectDesc": "选择模板以查看其来源、变量和可用操作。",
+    "copySuffix": "副本"
+  },
+  "store": {
+    "error": {
+      "createRule": "创建自动化规则失败",
+      "updateRule": "更新自动化规则失败",
+      "deleteRule": "删除自动化规则失败",
+      "unknown": "未知错误"
+    }
+  },
+  "triggers": {
+    "title": "触发器",
+    "selectWorkflow": "请选择工作流以查看触发器。",
+    "description": "这里展示工作流 DAG 中定义的触发器节点的运行时状态。保存工作流时会自动同步。可以临时停用单个触发器而无需编辑 DAG。",
+    "loading": "加载中...",
+    "noTriggers": "未注册触发器",
+    "noTriggersDesc": "此工作流没有注册任何触发器。在 DAG 编辑器里给 trigger 节点配置 source=im 或 schedule 后保存即可。",
+    "table": {
+      "source": "来源",
+      "engine": "引擎",
+      "configSummary": "配置摘要",
+      "actingEmployee": "扮演员工",
+      "dedupeWindow": "幂等窗口",
+      "enabled": "启用",
+      "createdAt": "创建时间"
+    },
+    "disabledReason": {
+      "dag_workflow_not_found": "DAG 工作流未找到",
+      "dag_workflow_inactive": "DAG 工作流非激活",
+      "plugin_not_found": "插件未找到",
+      "plugin_disabled": "插件已禁用",
+      "plugin_not_workflow_kind": "插件不是工作流类型",
+      "plugin_process_not_executable": "插件流程不可执行",
+      "plugin_target_missing_plugin_id": "插件目标缺少 plugin_id",
+      "acting_employee_not_found": "数字员工未找到",
+      "acting_employee_cross_project": "数字员工跨项目引用",
+      "acting_employee_archived": "数字员工已归档"
+    },
+    "badge": {
+      "pluginTitle": "触发旧版工作流插件运行",
+      "dagTitle": "触发 DAG 工作流执行"
+    },
+    "disabledPrefix": "触发器被禁用：",
+    "config": {
+      "unknown": "?",
+      "utc": "UTC"
+    }
   }
 }

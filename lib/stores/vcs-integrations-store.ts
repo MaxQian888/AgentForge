@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -94,7 +95,8 @@ export const useVCSIntegrationsStore = create<VCSIntegrationsStoreState>()(
           },
         }));
       } catch (err) {
-        toast.error(`加载 VCS 集成失败: ${(err as Error).message}`);
+        const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `加载 VCS 集成失败: ${(err as Error).message}` : `Failed to load VCS integrations: ${(err as Error).message}`);
       } finally {
         set((s) => ({
           loadingByProject: { ...s.loadingByProject, [projectId]: false },
@@ -117,10 +119,12 @@ export const useVCSIntegrationsStore = create<VCSIntegrationsStoreState>()(
             [projectId]: [data, ...(s.integrationsByProject[projectId] ?? [])],
           },
         }));
-        toast.success(`已连接 ${input.owner}/${input.repo}`);
+        const locale = getPreferredLocale();
+        toast.success(locale === "zh-CN" ? `已连接 ${input.owner}/${input.repo}` : `Connected ${input.owner}/${input.repo}`);
         return data;
       } catch (err) {
-        toast.error(`连接仓库失败: ${(err as Error).message}`);
+        const locale = getPreferredLocale();
+        toast.error(locale === "zh-CN" ? `连接仓库失败: ${(err as Error).message}` : `Failed to connect repository: ${(err as Error).message}`);
         return null;
       }
     },
@@ -145,7 +149,8 @@ export const useVCSIntegrationsStore = create<VCSIntegrationsStoreState>()(
         });
         return data;
       } catch (err) {
-        toast.error(`更新集成失败: ${(err as Error).message}`);
+        const locale = getPreferredLocale();
+        toast.error(locale === "zh-CN" ? `更新集成失败: ${(err as Error).message}` : `Failed to update integration: ${(err as Error).message}`);
         return null;
       }
     },
@@ -163,9 +168,11 @@ export const useVCSIntegrationsStore = create<VCSIntegrationsStoreState>()(
             ),
           },
         }));
-        toast.success("集成已删除");
+        const locale = getPreferredLocale();
+        toast.success(locale === "zh-CN" ? "集成已删除" : "Integration deleted");
       } catch (err) {
-        toast.error(`删除集成失败: ${(err as Error).message}`);
+        const locale = getPreferredLocale();
+        toast.error(locale === "zh-CN" ? `删除集成失败: ${(err as Error).message}` : `Failed to delete integration: ${(err as Error).message}`);
       }
     },
 
@@ -174,9 +181,11 @@ export const useVCSIntegrationsStore = create<VCSIntegrationsStoreState>()(
       if (!token) return;
       try {
         await getApi().post(`/api/v1/vcs-integrations/${id}/sync`, {}, { token });
-        toast.message?.("已排队后台同步");
+        const locale = getPreferredLocale();
+        toast.message?.(locale === "zh-CN" ? "已排队后台同步" : "Queued background sync");
       } catch (err) {
-        toast.error(`触发同步失败: ${(err as Error).message}`);
+        const locale = getPreferredLocale();
+        toast.error(locale === "zh-CN" ? `触发同步失败: ${(err as Error).message}` : `Failed to trigger sync: ${(err as Error).message}`);
       }
     },
   }),

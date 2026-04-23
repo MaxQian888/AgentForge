@@ -70,5 +70,14 @@
   "createTask.parentTaskLabel": "Parent Task (optional)",
   "createTask.noParent": "None (top-level task)",
   "createTask.submit": "Create",
-  "manageSprints": "Manage Sprints"
+  "manageSprints": "Manage Sprints",
+  "error.changeStatus": "Failed to change task status.",
+  "error.assignTask": "Failed to assign task.",
+  "error.deleteTask": "Failed to delete task.",
+  "error.create": "Failed to create project",
+  "error.update": "Failed to update project",
+  "error.delete": "Failed to delete project",
+  "error.archive": "Failed to archive project",
+  "error.unarchive": "Failed to unarchive project",
+  "error.unknown": "Unknown error"
 }

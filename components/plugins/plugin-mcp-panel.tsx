@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import {
   usePluginStore,
   type MCPToolCallResult,
@@ -31,6 +32,7 @@ type DiagResult =
   | null;
 
 export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
+  const t = useTranslations("plugins");
   const mcp = plugin.runtime_metadata?.mcp;
   const snapshot = usePluginStore((s) => s.mcpSnapshots[plugin.metadata.id]);
   const refreshMCP = usePluginStore((s) => s.refreshMCP);
@@ -68,9 +70,9 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
       const result = await callMCPTool(plugin.metadata.id, selectedTool, args);
       if (result) setDiagResult({ kind: "tool", data: result });
     } catch {
-      setDiagError("Invalid JSON arguments or call failed");
+      setDiagError(t("mcpPanel.invalidJson") ?? "Invalid JSON arguments or call failed");
     }
-  }, [plugin.metadata.id, selectedTool, toolArgs, callMCPTool]);
+  }, [plugin.metadata.id, selectedTool, toolArgs, callMCPTool, t]);
 
   const handleReadResource = useCallback(async () => {
     setDiagError(null);
@@ -91,14 +93,14 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
       );
       if (result) setDiagResult({ kind: "prompt", data: result });
     } catch {
-      setDiagError("Invalid JSON arguments or call failed");
+      setDiagError(t("mcpPanel.invalidJson") ?? "Invalid JSON arguments or call failed");
     }
-  }, [plugin.metadata.id, selectedPrompt, promptArgs, getMCPPrompt]);
+  }, [plugin.metadata.id, selectedPrompt, promptArgs, getMCPPrompt, t]);
 
   if (plugin.spec.runtime !== "mcp") {
     return (
       <p className="text-sm text-muted-foreground">
-        MCP diagnostics are only available for plugins using the MCP runtime.
+        {t("mcpPanel.onlyMcp")}
       </p>
     );
   }
@@ -112,7 +114,7 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
     <div className="flex flex-col gap-3">
       {/* Capability summary */}
       <PluginDetailSection
-        title="MCP Capabilities"
+        title={t("mcpPanel.capabilitiesTitle")}
         action={
           <Button
             variant="outline"
@@ -123,7 +125,7 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
             <RefreshCw
               className={cn("mr-1 size-3.5", refreshing && "animate-spin")}
             />
-            Refresh
+            {t("mcpPanel.refresh")}
           </Button>
         }
       >
@@ -132,36 +134,42 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
             <p className="font-medium text-foreground">
               {mcp?.tool_count ?? 0}
             </p>
-            <p>Tools</p>
+            <p>{t("mcpPanel.toolsLabel")}</p>
           </div>
           <div>
             <p className="font-medium text-foreground">
               {mcp?.resource_count ?? 0}
             </p>
-            <p>Resources</p>
+            <p>{t("mcpPanel.resourcesLabel")}</p>
           </div>
           <div>
             <p className="font-medium text-foreground">
               {mcp?.prompt_count ?? 0}
             </p>
-            <p>Prompts</p>
+            <p>{t("mcpPanel.promptsLabel")}</p>
           </div>
         </div>
-        <p className="mt-2">Transport: {mcp?.transport ?? "unknown"}</p>
+        <p className="mt-2">
+          {t("mcpPanel.transport", { transport: mcp?.transport ?? t("detailOverview.unknown") })}
+        </p>
         {mcp?.last_discovery_at ? (
-          <p>Last discovery: {new Date(mcp.last_discovery_at).toLocaleString()}</p>
+          <p>
+            {t("mcpPanel.lastDiscovery", {
+              date: new Date(mcp.last_discovery_at).toLocaleString(),
+            })}
+          </p>
         ) : null}
       </PluginDetailSection>
 
       {/* Latest interaction */}
       {interaction ? (
-        <PluginDetailSection title="Latest Interaction">
+        <PluginDetailSection title={t("mcpPanel.latestInteraction")}>
           <div className="grid gap-1">
             <p>
-              Operation: <span className="font-medium text-foreground">{interaction.operation}</span>
+              {t("mcpPanel.operation", { operation: interaction.operation })}
             </p>
             <p>
-              Status:{" "}
+              {t("mcpPanel.status")}{" "}
               <Badge
                 variant="secondary"
                 className={cn(
@@ -174,15 +182,22 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
                 {interaction.status}
               </Badge>
             </p>
-            {interaction.target ? <p>Target: {interaction.target}</p> : null}
+            {interaction.target ? (
+              <p>{t("mcpPanel.target", { target: interaction.target })}</p>
+            ) : null}
             {interaction.summary ? <p>{interaction.summary}</p> : null}
             {interaction.at ? (
-              <p>At: {new Date(interaction.at).toLocaleString()}</p>
+              <p>
+                {t("mcpPanel.at", { date: new Date(interaction.at).toLocaleString() })}
+              </p>
             ) : null}
             {interaction.error_message ? (
               <p className="text-destructive">
-                Error: {interaction.error_code ? `[${interaction.error_code}] ` : ""}
-                {interaction.error_message}
+                {t("mcpPanel.error", {
+                  message: interaction.error_code
+                    ? `[${interaction.error_code}] ${interaction.error_message}`
+                    : interaction.error_message,
+                })}
               </p>
             ) : null}
           </div>
@@ -191,15 +206,17 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
 
       {/* Discovered tools */}
       {tools.length > 0 ? (
-        <PluginDetailSection title={`Tools (${tools.length})`}>
+        <PluginDetailSection
+          title={t("mcpPanel.toolsTitle", { count: tools.length })}
+        >
           <ul className="grid gap-1">
-            {tools.map((t) => (
-              <li key={t.name} className="flex items-start gap-2">
+            {tools.map((tItem) => (
+              <li key={tItem.name} className="flex items-start gap-2">
                 <Terminal className="mt-0.5 size-3.5 shrink-0" />
                 <div>
-                  <span className="font-medium text-foreground">{t.name}</span>
-                  {t.description ? (
-                    <span className="ml-1">{t.description}</span>
+                  <span className="font-medium text-foreground">{tItem.name}</span>
+                  {tItem.description ? (
+                    <span className="ml-1">{tItem.description}</span>
                   ) : null}
                 </div>
               </li>
@@ -210,7 +227,9 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
 
       {/* Discovered resources */}
       {resources.length > 0 ? (
-        <PluginDetailSection title={`Resources (${resources.length})`}>
+        <PluginDetailSection
+          title={t("mcpPanel.resourcesTitle", { count: resources.length })}
+        >
           <ul className="grid gap-1">
             {resources.map((r) => (
               <li key={r.uri} className="flex items-start gap-2">
@@ -231,7 +250,9 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
 
       {/* Discovered prompts */}
       {prompts.length > 0 ? (
-        <PluginDetailSection title={`Prompts (${prompts.length})`}>
+        <PluginDetailSection
+          title={t("mcpPanel.promptsTitle", { count: prompts.length })}
+        >
           <ul className="grid gap-1">
             {prompts.map((p) => (
               <li key={p.name} className="flex items-start gap-2">
@@ -260,29 +281,29 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
           ) : (
             <ChevronRight className="size-4" />
           )}
-          Diagnostic Actions
+          {t("mcpPanel.diagnosticActions")}
         </button>
 
         {diagOpen ? (
           <div className="mt-3 flex flex-col gap-4">
             {/* Tool call */}
             <div className="grid gap-2">
-              <Label className="text-xs font-medium">Call Tool</Label>
+              <Label className="text-xs font-medium">{t("mcpPanel.callTool")}</Label>
               <select
                 className="h-8 rounded-md border bg-background px-2 text-xs"
                 value={selectedTool}
                 onChange={(e) => setSelectedTool(e.target.value)}
               >
-                <option value="">Select a tool</option>
-                {tools.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name}
+                <option value="">{t("mcpPanel.selectTool")}</option>
+                {tools.map((tItem) => (
+                  <option key={tItem.name} value={tItem.name}>
+                    {tItem.name}
                   </option>
                 ))}
               </select>
               <Textarea
                 className="min-h-[60px] w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
-                placeholder='{"key": "value"}'
+                placeholder={t("mcpPanel.toolArgsPlaceholder")}
                 value={toolArgs}
                 onChange={(e) => setToolArgs(e.target.value)}
               />
@@ -292,16 +313,16 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
                 disabled={!selectedTool}
                 onClick={() => void handleCallTool()}
               >
-                Call
+                {t("mcpPanel.call")}
               </Button>
             </div>
 
             {/* Resource read */}
             <div className="grid gap-2">
-              <Label className="text-xs font-medium">Read Resource</Label>
+              <Label className="text-xs font-medium">{t("mcpPanel.readResource")}</Label>
               <Input
                 className="h-8 text-xs"
-                placeholder="resource://uri"
+                placeholder={t("mcpPanel.resourcePlaceholder")}
                 value={resourceUri}
                 onChange={(e) => setResourceUri(e.target.value)}
               />
@@ -311,19 +332,19 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
                 disabled={!resourceUri}
                 onClick={() => void handleReadResource()}
               >
-                Read
+                {t("mcpPanel.read")}
               </Button>
             </div>
 
             {/* Prompt get */}
             <div className="grid gap-2">
-              <Label className="text-xs font-medium">Get Prompt</Label>
+              <Label className="text-xs font-medium">{t("mcpPanel.getPrompt")}</Label>
               <select
                 className="h-8 rounded-md border bg-background px-2 text-xs"
                 value={selectedPrompt}
                 onChange={(e) => setSelectedPrompt(e.target.value)}
               >
-                <option value="">Select a prompt</option>
+                <option value="">{t("mcpPanel.selectPrompt")}</option>
                 {prompts.map((p) => (
                   <option key={p.name} value={p.name}>
                     {p.name}
@@ -332,7 +353,7 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
               </select>
               <Textarea
                 className="min-h-[60px] w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
-                placeholder='{"arg": "value"}'
+                placeholder={t("mcpPanel.promptArgsPlaceholder")}
                 value={promptArgs}
                 onChange={(e) => setPromptArgs(e.target.value)}
               />
@@ -342,7 +363,7 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
                 disabled={!selectedPrompt}
                 onClick={() => void handleGetPrompt()}
               >
-                Get
+                {t("mcpPanel.get")}
               </Button>
             </div>
 
@@ -356,7 +377,7 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
             {diagResult ? (
               <div className="rounded-md border border-border/60 bg-muted/30 p-3">
                 <p className="mb-1 text-xs font-medium">
-                  Result ({diagResult.kind})
+                  {t("mcpPanel.result", { kind: diagResult.kind })}
                 </p>
                 <pre className="max-h-[200px] overflow-auto text-xs">
                   {JSON.stringify(diagResult.data, null, 2)}

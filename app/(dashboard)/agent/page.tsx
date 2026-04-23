@@ -2,10 +2,12 @@
 
 import { Suspense, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 function AgentRedirect() {
-  useBreadcrumbs([{ label: "Agents", href: "/agents" }, { label: "Agent" }]);
+  const t = useTranslations();
+  useBreadcrumbs([{ label: t("common.nav.agents"), href: "/agents" }, { label: t("common.nav.agents") }]);
   const searchParams = useSearchParams();
   const router = useRouter();
   const agentId = searchParams.get("id");

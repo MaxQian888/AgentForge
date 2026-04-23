@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { EmployeeRunRow as Row } from "@/lib/stores/employee-runs-store";
@@ -19,28 +20,31 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
 };
 
-function fmtDuration(ms?: number): string {
-  if (ms === undefined || ms === null || !Number.isFinite(ms)) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+function fmtDuration(ms: number, tEmployees: ReturnType<typeof useTranslations>): string {
+  if (ms < 1000) return `${ms}${tEmployees("duration.ms")}`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}${tEmployees("duration.s")}`;
   const m = Math.floor(ms / 60_000);
   const s = Math.floor((ms % 60_000) / 1000);
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function fmtTime(iso?: string): string {
-  if (!iso) return "—";
+function fmtTime(iso: string | undefined, emptyValue: string): string {
+  if (!iso) return emptyValue;
   const t = new Date(iso);
-  if (Number.isNaN(t.getTime())) return "—";
+  if (Number.isNaN(t.getTime())) return emptyValue;
   return t.toLocaleString();
 }
 
 export function EmployeeRunRow({ row }: { row: Row }) {
+  const tEmployees = useTranslations("employees");
+  const tAgents = useTranslations("agents");
+  const emptyValue = tEmployees("emptyValue");
+
   return (
     <div className="grid grid-cols-12 items-center gap-3 px-4 py-3 border-b text-sm">
       <div className="col-span-2">
         <Badge className={cn("uppercase text-[10px]", KIND_COLOR[row.kind])}>
-          {row.kind}
+          {tEmployees(`kind.${row.kind}`)}
         </Badge>
       </div>
       <div className="col-span-4 truncate">
@@ -59,14 +63,16 @@ export function EmployeeRunRow({ row }: { row: Row }) {
             STATUS_COLOR[row.status] ?? STATUS_COLOR.pending,
           )}
         >
-          {row.status}
+          {tAgents(`status.${row.status}`)}
         </Badge>
       </div>
       <div className="col-span-2 text-muted-foreground text-xs">
-        {fmtTime(row.startedAt)}
+        {fmtTime(row.startedAt, emptyValue)}
       </div>
       <div className="col-span-2 text-right tabular-nums">
-        {fmtDuration(row.durationMs)}
+        {row.durationMs === undefined || row.durationMs === null || !Number.isFinite(row.durationMs)
+          ? emptyValue
+          : fmtDuration(row.durationMs, tEmployees)}
       </div>
     </div>
   );

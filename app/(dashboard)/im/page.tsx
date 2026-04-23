@@ -21,7 +21,8 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function IMBridgePage() {
-  useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "IM Bridge" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.configuration"), href: "/" }, { label: tc("nav.imBridge") }]);
   const t = useTranslations("im");
   const fetchChannels = useIMStore((s) => s.fetchChannels);
   const fetchBridgeStatus = useIMStore((s) => s.fetchBridgeStatus);

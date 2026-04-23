@@ -9,8 +9,9 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function DocumentsPage() {
-  useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Documents" }]);
+  const tc = useTranslations("common");
   const t = useTranslations("documents");
+  useBreadcrumbs([{ label: tc("nav.group.operations"), href: "/" }, { label: tc("nav.documents") }]);
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
 
   return (

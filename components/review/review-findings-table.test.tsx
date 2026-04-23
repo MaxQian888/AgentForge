@@ -8,6 +8,17 @@ jest.mock("next-intl", () => ({
       findingFileLine: "File:Line",
       findingMessage: "Message",
       findingSuggestion: "Suggestion",
+      findingDecision: "Decision",
+      findingActions: "Actions",
+      actionApprove: "Approve",
+      actionDismiss: "Dismiss",
+      actionDefer: "Defer",
+      actionShowPatch: "Show patch",
+      decisionPending: "Pending",
+      decisionApproved: "Approved",
+      decisionDismissed: "Dismissed",
+      decisionDeferred: "Deferred",
+      decisionNeedsManualFix: "Needs Manual Fix",
     };
     return messages[key] ?? key;
   },

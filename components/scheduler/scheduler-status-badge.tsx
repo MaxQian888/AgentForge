@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +24,7 @@ export function SchedulerStatusBadge({
   status: string | undefined;
   className?: string;
 }) {
+  const t = useTranslations("scheduler");
   const label = status ?? "never-run";
   return (
     <Badge
@@ -33,7 +35,7 @@ export function SchedulerStatusBadge({
         className,
       )}
     >
-      {label}
+      {t(`statusLabels.${label}`)}
     </Badge>
   );
 }

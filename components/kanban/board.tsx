@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +54,7 @@ export function Board({
   onQuickCreateTask,
   onUpdateBoardColumns,
 }: BoardProps) {
+  const t = useTranslations("tasks");
   const [error, setError] = useState<string | null>(null);
   const [optimisticStatuses, setOptimisticStatuses] = useState<Record<string, TaskStatus>>({});
   const [pendingTaskIds, setPendingTaskIds] = useState<string[]>([]);
@@ -179,7 +181,7 @@ export function Board({
       setError(
         dragError instanceof Error
           ? dragError.message
-          : "Failed to update task status."
+          : t("board.dragError")
       );
     } finally {
       setPendingTaskIds((current) => current.filter((id) => id !== taskId));
@@ -222,7 +224,7 @@ export function Board({
         <Popover>
           <PopoverTrigger asChild>
             <Button type="button" size="sm" variant="outline">
-              Configure Columns
+              {t("board.configureColumns")}
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-72">
@@ -243,7 +245,7 @@ export function Board({
                         disabled={index === 0}
                         onClick={() => moveColumn(status, -1)}
                       >
-                        {`Move ${status} left`}
+                        {t("board.moveLeft", { column: t(`status.${status}`) })}
                       </Button>
                       <Button
                         type="button"
@@ -252,7 +254,7 @@ export function Board({
                         disabled={index === columnOrder.length - 1}
                         onClick={() => moveColumn(status, 1)}
                       >
-                        {`Move ${status} right`}
+                        {t("board.moveRight", { column: t(`status.${status}`) })}
                       </Button>
                       <Button
                         type="button"
@@ -260,7 +262,9 @@ export function Board({
                         variant="ghost"
                         onClick={() => toggleColumnVisibility(status)}
                       >
-                        {hidden ? `Show ${status}` : `Hide ${status}`}
+                        {hidden
+                          ? t("board.showColumn", { column: t(`status.${status}`) })
+                          : t("board.hideColumn", { column: t(`status.${status}`) })}
                       </Button>
                     </div>
                   </div>

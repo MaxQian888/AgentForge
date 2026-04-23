@@ -212,7 +212,7 @@ describe("DashboardOverview", () => {
       />
     );
 
-    expect(screen.getByText("Project bootstrap")).toBeInTheDocument();
+    expect(screen.getByText("Project Bootstrap")).toBeInTheDocument();
     expect(
       screen.getByText("Repository or coding-agent defaults still need configuration."),
     ).toBeInTheDocument();

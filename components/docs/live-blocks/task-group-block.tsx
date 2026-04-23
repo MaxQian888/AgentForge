@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { LiveArtifactChrome } from "./live-artifact-chrome";
 import { SharedBody } from "./shared-body";
 import { useLiveArtifactActions } from "./use-live-artifact-actions";
@@ -26,6 +27,7 @@ export function TaskGroupBlock({
   projection,
   cachedOk,
 }: TaskGroupBlockProps) {
+  const t = useTranslations("docs");
   const router = useRouter();
   const actions = useLiveArtifactActions();
 
@@ -65,7 +67,7 @@ export function TaskGroupBlock({
   return (
     <LiveArtifactChrome
       kind="task_group"
-      title="Task group"
+      title={t("liveArtifact.blocks.taskGroup.title")}
       status={projection?.status}
       diagnostics={projection?.diagnostics}
       onOpenSource={handleOpenSource}
@@ -76,8 +78,8 @@ export function TaskGroupBlock({
         projection={projection}
         cachedOk={cachedOk}
         onRemove={handleRemove}
-        notFoundMessage="This live artifact is no longer available. The referenced saved view or filter may have been removed."
-        forbiddenMessage="You do not have access to the tasks matched by this filter."
+        notFoundMessage={t("liveArtifact.blocks.taskGroup.notFound")}
+        forbiddenMessage={t("liveArtifact.blocks.taskGroup.forbidden")}
       />
     </LiveArtifactChrome>
   );

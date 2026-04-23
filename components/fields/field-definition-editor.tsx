@@ -79,7 +79,7 @@ export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
           >
             {FIELD_TYPES.map((type) => (
               <option key={type} value={type}>
-                {type}
+                {t(`fields.types.${type}`)}
               </option>
             ))}
           </select>
@@ -110,7 +110,7 @@ export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
             <div>
               <div className="font-medium">{field.name}</div>
               <div className="text-muted-foreground">
-                {field.fieldType}
+                {t(`fields.types.${field.fieldType}`)}
                 {field.required ? t("fields.requiredSuffix") : ""}
               </div>
             </div>

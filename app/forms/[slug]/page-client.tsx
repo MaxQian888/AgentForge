@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { FormRenderer } from "@/components/forms/form-renderer";
 import {
   Card,
@@ -14,6 +15,7 @@ import { useAuthStore } from "@/lib/stores/auth-store";
 import { useFormStore } from "@/lib/stores/form-store";
 
 export function PublicFormPageClient({ slug }: { slug: string }) {
+  const t = useTranslations("forms");
   const router = useRouter();
   const form = useFormStore((state) => (slug ? state.formsBySlug[slug] ?? null : null));
   const fetchFormBySlug = useFormStore((state) => state.fetchFormBySlug);
@@ -59,7 +61,7 @@ export function PublicFormPageClient({ slug }: { slug: string }) {
           return;
         }
         setError(
-          err instanceof Error && err.message ? err.message : "Unable to load form."
+          err instanceof Error && err.message ? err.message : t("formUnavailable")
         );
         setRequestState("error");
       });
@@ -78,8 +80,8 @@ export function PublicFormPageClient({ slug }: { slug: string }) {
     return (
       <Card className="mx-auto max-w-2xl">
         <CardHeader>
-          <CardTitle>Loading form</CardTitle>
-          <CardDescription>Checking access and loading form details...</CardDescription>
+          <CardTitle>{t("loadingForm")}</CardTitle>
+          <CardDescription>{t("checkingAccess")}</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -89,8 +91,8 @@ export function PublicFormPageClient({ slug }: { slug: string }) {
     return (
       <Card className="mx-auto max-w-2xl">
         <CardHeader>
-          <CardTitle>Form not found</CardTitle>
-          <CardDescription>No form matched slug &quot;{slug}&quot;.</CardDescription>
+          <CardTitle>{t("formNotFound")}</CardTitle>
+          <CardDescription>{t("noFormMatched", { slug })}</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -100,7 +102,7 @@ export function PublicFormPageClient({ slug }: { slug: string }) {
     return (
       <Card className="mx-auto max-w-2xl">
         <CardHeader>
-          <CardTitle>Form unavailable</CardTitle>
+          <CardTitle>{t("formUnavailable")}</CardTitle>
           <CardDescription>{error}</CardDescription>
         </CardHeader>
       </Card>
@@ -112,7 +114,7 @@ export function PublicFormPageClient({ slug }: { slug: string }) {
       <CardHeader>
         <CardTitle>{form.name}</CardTitle>
         <CardDescription>
-          Submit this form to create a task in this project.
+          {t("submitDescription")}
         </CardDescription>
       </CardHeader>
       <CardContent>

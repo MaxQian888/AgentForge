@@ -1,0 +1,42 @@
+{
+  "ingestedFiles": {
+    "title": "上传文件",
+    "uploadFile": "上传文件",
+    "noFiles": "暂无上传文件。",
+    "reuploadTitle": "重新上传文件",
+    "openAsWiki": "以 Wiki 页面打开"
+  },
+  "ingestStatus": {
+    "pending": "待处理",
+    "processing": "处理中",
+    "ready": "就绪",
+    "failed": "失败"
+  },
+  "search": {
+    "placeholder": "搜索 Wiki 页面、文件、模板…",
+    "searching": "搜索中…",
+    "noResults": "未找到结果。"
+  },
+  "kind": {
+    "wiki_page": "Wiki",
+    "ingested_file": "文件",
+    "template": "模板"
+  },
+  "materializedFrom": "从文件导入",
+  "sourceUpdatedBanner": {
+    "text": "源文件已更新，本页面内容可能已过期。",
+    "dismiss": "关闭"
+  },
+  "liveArtifact": {
+    "freezeSuccess": "区块已冻结",
+    "freezeError": "冻结失败"
+  },
+  "store": {
+    "error": {
+      "resolveDoc": "解析文档页面失败",
+      "loadTree": "加载知识树失败",
+      "loadAsset": "加载资产失败",
+      "loadFiles": "加载文件失败"
+    }
+  }
+}

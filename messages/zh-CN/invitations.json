@@ -22,8 +22,10 @@
     "close": "关闭",
     "sendAnother": "再发一条",
     "createdHeading": "邀请已创建。如果自动投递未送达，可把下面的链接发给受邀者：",
+    "acceptUrlAriaLabel": "接受邀请 URL",
     "errorEmailRequired": "邮箱为必填项",
-    "errorIMRequired": "请同时填写 IM 平台和用户 ID"
+    "errorIMRequired": "请同时填写 IM 平台和用户 ID",
+    "errorSendFailed": "发送邀请失败"
   },
   "roster": {
     "invitedIdentity": "受邀身份",

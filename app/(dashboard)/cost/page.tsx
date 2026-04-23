@@ -81,7 +81,8 @@ function formatCoverageLabel(
 }
 
 export default function CostPage() {
-  useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Cost" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.operations"), href: "/" }, { label: tc("nav.cost") }]);
   const t = useTranslations("cost");
   const projectCost = useCostStore((s) => s.projectCost);
   const costLoading = useCostStore((s) => s.loading);

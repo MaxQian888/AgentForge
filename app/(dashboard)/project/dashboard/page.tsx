@@ -17,7 +17,8 @@ import { FolderOpen, LayoutDashboard } from "lucide-react";
 const EMPTY_DASHBOARDS: DashboardConfig[] = [];
 
 function ProjectDashboardView() {
-  useBreadcrumbs([{ label: "Projects", href: "/projects" }, { label: "Dashboard" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.projects"), href: "/projects" }, { label: tc("nav.projectDashboard") }]);
   const t = useTranslations("dashboard");
   const router = useRouter();
   const pathname = usePathname();

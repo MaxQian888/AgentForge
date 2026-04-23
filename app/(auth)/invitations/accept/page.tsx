@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,11 +23,14 @@ import {
 function AcceptInvitationInner() {
   const router = useRouter();
   const params = useSearchParams();
+  const t = useTranslations("invitations");
   const token = (params.get("token") ?? "").trim();
   const authStatus = useAuthStore((s) => s.status);
   const [preview, setPreview] = useState<InvitationPublicPreview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(() => !!token);
+  const [error, setError] = useState<string | null>(() =>
+    token ? null : t("decline.missingToken"),
+  );
   const [actionBusy, setActionBusy] = useState<
     "accept" | "decline" | null
   >(null);
@@ -35,14 +39,12 @@ function AcceptInvitationInner() {
   >(null);
 
   useEffect(() => {
-    if (!token) {
-      setError("Missing invitation token");
-      setLoading(false);
-      return;
-    }
+    if (!token) return;
     let cancelled = false;
+    /* eslint-disable react-hooks/set-state-in-effect -- data-fetching effect resets loading/error before async call */
     setLoading(true);
     setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
     fetchInvitationPreview(token)
       .then((data) => {
         if (!cancelled) setPreview(data);
@@ -50,7 +52,7 @@ function AcceptInvitationInner() {
       .catch((err) => {
         if (!cancelled) {
           setError(
-            err instanceof Error ? err.message : "Invitation not found",
+            err instanceof Error ? err.message : t("accept.loading"),
           );
         }
       })
@@ -60,7 +62,7 @@ function AcceptInvitationInner() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, t]);
 
   const handleAccept = async () => {
     if (!token) return;
@@ -79,7 +81,7 @@ function AcceptInvitationInner() {
       setOutcome("accepted");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to accept invitation",
+        err instanceof Error ? err.message : t("dialog.errorSendFailed"),
       );
     } finally {
       setActionBusy(null);
@@ -95,7 +97,7 @@ function AcceptInvitationInner() {
       setOutcome("declined");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to decline invitation",
+        err instanceof Error ? err.message : t("dialog.errorSendFailed"),
       );
     } finally {
       setActionBusy(null);
@@ -106,16 +108,13 @@ function AcceptInvitationInner() {
     <div className="flex min-h-screen items-center justify-center p-6">
       <Card className="w-full max-w-xl">
         <CardHeader>
-          <CardTitle>Project Invitation</CardTitle>
-          <CardDescription>
-            Review the invitation details below and choose whether to accept
-            or decline.
-          </CardDescription>
+          <CardTitle>{t("accept.title")}</CardTitle>
+          <CardDescription>{t("accept.description")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {loading ? (
             <p className="text-sm text-muted-foreground">
-              Loading invitation...
+              {t("accept.loading")}
             </p>
           ) : null}
 
@@ -124,24 +123,24 @@ function AcceptInvitationInner() {
           {preview && !outcome ? (
             <div className="flex flex-col gap-2 text-sm">
               <div>
-                <span className="font-medium">Project:</span>{" "}
+                <span className="font-medium">{t("accept.project")}:</span>{" "}
                 {preview.projectName}
               </div>
               <div>
-                <span className="font-medium">Role:</span>{" "}
+                <span className="font-medium">{t("accept.role")}:</span>{" "}
                 {preview.projectRole}
               </div>
               <div>
-                <span className="font-medium">Invited by:</span>{" "}
+                <span className="font-medium">{t("accept.invitedBy")}:</span>{" "}
                 {preview.inviterName || preview.inviterEmail || "Admin"}
               </div>
               <div>
-                <span className="font-medium">Expires:</span>{" "}
+                <span className="font-medium">{t("accept.expires")}:</span>{" "}
                 {preview.expiresAt.slice(0, 16).replace("T", " ")} UTC
               </div>
               {preview.identityHint ? (
                 <div className="text-muted-foreground">
-                  For identity: {preview.identityHint}
+                  {t("accept.forIdentity")}: {preview.identityHint}
                 </div>
               ) : null}
               {preview.message ? (
@@ -151,7 +150,7 @@ function AcceptInvitationInner() {
               ) : null}
               {preview.status !== "pending" ? (
                 <p className="text-sm text-destructive">
-                  This invitation is {preview.status} and cannot be actioned.
+                  {t("accept.notPending", { status: preview.status })}
                 </p>
               ) : null}
             </div>
@@ -160,19 +159,19 @@ function AcceptInvitationInner() {
           {outcome === "accepted" ? (
             <div className="flex flex-col gap-3">
               <p className="text-sm">
-                Invitation accepted. You are now a member of the project.
+                {t("accept.accepted")}
               </p>
               <Button asChild>
-                <Link href="/">Go to dashboard</Link>
+                <Link href="/">{t("accept.goToDashboard")}</Link>
               </Button>
             </div>
           ) : null}
 
           {outcome === "declined" ? (
             <div className="flex flex-col gap-3">
-              <p className="text-sm">Invitation declined.</p>
+              <p className="text-sm">{t("accept.declined")}</p>
               <Button asChild variant="outline">
-                <Link href="/">Close</Link>
+                <Link href="/">{t("accept.close")}</Link>
               </Button>
             </div>
           ) : null}
@@ -190,7 +189,7 @@ function AcceptInvitationInner() {
                     )
                   }
                 >
-                  Sign in to accept
+                  {t("accept.signInToAccept")}
                 </Button>
               ) : (
                 <Button
@@ -198,7 +197,7 @@ function AcceptInvitationInner() {
                   disabled={actionBusy !== null}
                   onClick={() => void handleAccept()}
                 >
-                  {actionBusy === "accept" ? "Accepting..." : "Accept"}
+                  {actionBusy === "accept" ? t("accept.accepting") : t("accept.accept")}
                 </Button>
               )}
               <Button
@@ -207,7 +206,7 @@ function AcceptInvitationInner() {
                 disabled={actionBusy !== null}
                 onClick={() => void handleDecline()}
               >
-                {actionBusy === "decline" ? "Declining..." : "Decline"}
+                {actionBusy === "decline" ? t("accept.declining") : t("accept.decline")}
               </Button>
             </div>
           ) : null}

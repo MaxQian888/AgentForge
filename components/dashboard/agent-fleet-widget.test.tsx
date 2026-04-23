@@ -8,6 +8,7 @@ jest.mock("next-intl", () => ({
       "agentFleet.task": "Task",
       "agentFleet.status": "Status",
       "agentFleet.cost": "Cost",
+      "status.running": "running",
     };
     return map[key] ?? key;
   },

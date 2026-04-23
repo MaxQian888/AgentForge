@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Plus, Users, Trash2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -106,11 +107,6 @@ function hasAgentProfileInput(draft: AgentProfileDraft): boolean {
   return Object.values(draft).some((value) => value.trim().length > 0);
 }
 
-function formatActivityTimestamp(value: string | null): string {
-  if (!value) return "No recent activity";
-  return `Last activity ${value.slice(0, 16).replace("T", " ")} UTC`;
-}
-
 function buildInitialCreateForm(): MemberFormState {
   return {
     name: "",
@@ -160,6 +156,7 @@ function StatusSelect({
   value: MemberStatus;
   onChange: (value: MemberStatus) => void;
 }) {
+  const tc = useTranslations("common");
   return (
     <div className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
@@ -168,9 +165,9 @@ function StatusSelect({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="active">Active</SelectItem>
-          <SelectItem value="inactive">Inactive</SelectItem>
-          <SelectItem value="suspended">Suspended</SelectItem>
+          <SelectItem value="active">{tc("status.active")}</SelectItem>
+          <SelectItem value="inactive">{tc("status.inactive")}</SelectItem>
+          <SelectItem value="suspended">{tc("status.suspended")}</SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -185,6 +182,7 @@ function RoleBindingSelect({
   onChange,
   className,
   ariaInvalid,
+  placeholder,
 }: {
   id: string;
   label: string;
@@ -193,6 +191,7 @@ function RoleBindingSelect({
   onChange: (value: string) => void;
   className?: string;
   ariaInvalid?: boolean;
+  placeholder?: string;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -203,10 +202,10 @@ function RoleBindingSelect({
           className={className}
           aria-invalid={ariaInvalid}
         >
-          <SelectValue placeholder="Unbound role" />
+          <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__unbound__">Unbound role</SelectItem>
+          <SelectItem value="__unbound__">{placeholder}</SelectItem>
           {availableRoles.map((role) => (
             <SelectItem key={role.metadata.id} value={role.metadata.id}>
               {role.metadata.name}
@@ -224,14 +223,15 @@ function AgentProfileFields({
   value,
   onChange,
   highlightedFields = [],
+  t,
 }: {
   mode: "create" | "edit";
   availableRoles: RoleManifest[];
   value: AgentProfileDraft;
   onChange: (nextValue: AgentProfileDraft) => void;
   highlightedFields?: string[];
+  t: ReturnType<typeof useTranslations>;
 }) {
-  const prefix = mode === "edit" ? "Edit " : "";
   const highlightedSet = new Set(highlightedFields);
   const highlightClass = (field: string) =>
     highlightedSet.has(field)
@@ -242,18 +242,19 @@ function AgentProfileFields({
     <div className="grid gap-4 md:grid-cols-2">
       <RoleBindingSelect
         id={mode === "edit" ? "edit-bound-role" : "bound-role"}
-        label={`${prefix}Bound Role`}
+        label={mode === "edit" ? t("management.boundRole") : t("management.boundRole")}
         value={value.roleId || "__unbound__"}
         availableRoles={availableRoles}
         className={highlightClass("roleId")}
         ariaInvalid={highlightedSet.has("roleId")}
+        placeholder={t("management.unboundRole")}
         onChange={(roleId) =>
           onChange({ ...value, roleId: roleId === "__unbound__" ? "" : roleId })
         }
       />
       <div className="flex flex-col gap-2">
         <Label htmlFor={mode === "edit" ? "edit-agent-budget" : "agent-budget"}>
-          {prefix}Agent Budget USD
+          {t("management.agentBudgetUsd")}
         </Label>
         <Input
           id={mode === "edit" ? "edit-agent-budget" : "agent-budget"}
@@ -267,7 +268,7 @@ function AgentProfileFields({
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor={mode === "edit" ? "edit-runtime" : "runtime"}>
-          {prefix}Runtime
+          {t("management.runtime")}
         </Label>
         <Input
           id={mode === "edit" ? "edit-runtime" : "runtime"}
@@ -279,7 +280,7 @@ function AgentProfileFields({
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor={mode === "edit" ? "edit-provider" : "provider"}>
-          {prefix}Provider
+          {t("management.provider")}
         </Label>
         <Input
           id={mode === "edit" ? "edit-provider" : "provider"}
@@ -291,7 +292,7 @@ function AgentProfileFields({
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor={mode === "edit" ? "edit-model" : "model"}>
-          {prefix}Model
+          {t("management.model")}
         </Label>
         <Input
           id={mode === "edit" ? "edit-model" : "model"}
@@ -303,7 +304,7 @@ function AgentProfileFields({
       </div>
       <div className="flex flex-col gap-2 md:col-span-2">
         <Label htmlFor={mode === "edit" ? "edit-agent-notes" : "agent-notes"}>
-          {prefix}Agent Notes
+          {t("management.agentNotes")}
         </Label>
         <Textarea
           id={mode === "edit" ? "edit-agent-notes" : "agent-notes"}
@@ -335,6 +336,9 @@ export function TeamManagement({
   onBulkUpdateMembers,
   onClearBulkUpdateResult,
 }: TeamManagementProps) {
+  const t = useTranslations("teams");
+  const tc = useTranslations("common");
+
   // Server-issued permissions for the active project. The hook returns
   // `false` for any action while permissions load — buttons stay disabled
   // rather than rendering optimistically. When no project is selected the
@@ -373,8 +377,8 @@ export function TeamManagement({
 
   const selectedProjectName = useMemo(
     () =>
-      projects.find((project) => project.id === selectedProjectId)?.name ?? "Team",
-    [projects, selectedProjectId],
+      projects.find((project) => project.id === selectedProjectId)?.name ?? t("management.title"),
+    [projects, selectedProjectId, t],
   );
 
   const editingMember = useMemo(
@@ -556,7 +560,7 @@ export function TeamManagement({
       if (extractRoleFieldError(error) === "agentConfig.roleId") {
         setCreateHighlightedAgentFields(["roleId"]);
       }
-      setCreateError(extractErrorMessage(error, "Failed to create member"));
+      setCreateError(extractErrorMessage(error, t("management.failedToUpdate")));
     }
   };
 
@@ -587,7 +591,7 @@ export function TeamManagement({
       if (extractRoleFieldError(error) === "agentConfig.roleId") {
         setHighlightedAgentFields(["roleId"]);
       }
-      setEditError(extractErrorMessage(error, "Failed to update member"));
+      setEditError(extractErrorMessage(error, t("management.failedToUpdate")));
     }
   };
 
@@ -618,7 +622,7 @@ export function TeamManagement({
       await onUpdateMember(member.id, { status: nextStatus });
     } catch (error) {
       setQuickActionError(
-        error instanceof Error ? error.message : "Failed to update member"
+        error instanceof Error ? error.message : t("management.failedToUpdate")
       );
     } finally {
       setPendingMemberIds((current) =>
@@ -631,7 +635,7 @@ export function TeamManagement({
     return (
       <div className="flex flex-col gap-6">
         <div className="space-y-1">
-          <span className="sr-only">Loading team roster...</span>
+          <span className="sr-only">{t("management.loadingRoster")}</span>
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-4 w-72" />
         </div>
@@ -659,13 +663,13 @@ export function TeamManagement({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Team roster unavailable</CardTitle>
+          <CardTitle>{t("management.rosterUnavailable")}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">{error}</p>
           <div>
             <Button type="button" onClick={onRetry}>
-              Retry Team Load
+              {t("management.retryLoad")}
             </Button>
           </div>
         </CardContent>
@@ -677,19 +681,19 @@ export function TeamManagement({
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <PageHeader
-          title="Team Management"
-          description={`Keep human and agent collaborators aligned for ${selectedProjectName}.`}
+          title={t("management.title")}
+          description={t("management.description", { projectName: selectedProjectName })}
         />
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="team-project">Project</Label>
+            <Label htmlFor="team-project">{t("management.projectLabel")}</Label>
             <Select
               value={selectedProjectId ?? ""}
               onValueChange={onProjectChange}
             >
               <SelectTrigger id="team-project" className="w-[200px]">
-                <SelectValue placeholder="Select project" />
+                <SelectValue placeholder={t("management.selectProject")} />
               </SelectTrigger>
               <SelectContent>
                 {projects.map((project) => (
@@ -704,10 +708,10 @@ export function TeamManagement({
             type="button"
             disabled={!selectedProjectId || !canCreateMember}
             onClick={() => setShowCreateForm((value) => !value)}
-            title={!canCreateMember ? "Requires admin or owner role" : undefined}
+            title={!canCreateMember ? t("management.requiresAdmin") : undefined}
           >
             <Plus className="mr-1 size-4" />
-            Add Member
+            {t("management.addMember")}
           </Button>
         </div>
       </div>
@@ -715,12 +719,12 @@ export function TeamManagement({
       {showCreateForm ? (
         <Card>
           <CardHeader>
-            <CardTitle>Add Team Member</CardTitle>
+            <CardTitle>{t("management.addTeamMember")}</CardTitle>
           </CardHeader>
           <CardContent>
             <form className="grid gap-4 md:grid-cols-2" onSubmit={handleCreateMember}>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="member-name">Member Name</Label>
+                <Label htmlFor="member-name">{t("management.memberName")}</Label>
                 <Input
                   id="member-name"
                   value={createForm.name}
@@ -731,7 +735,7 @@ export function TeamManagement({
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="member-type">Member Type</Label>
+                <Label htmlFor="member-type">{t("management.memberType")}</Label>
                 <Select
                   value={createForm.type}
                   onValueChange={(value) =>
@@ -745,21 +749,21 @@ export function TeamManagement({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="human">Human</SelectItem>
-                    <SelectItem value="agent">Agent</SelectItem>
+                    <SelectItem value="human">{t("management.human")}</SelectItem>
+                    <SelectItem value="agent">{t("management.agent")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <StatusSelect
                 id="member-status"
-                label="Status"
+                label={t("management.status")}
                 value={createForm.status}
                 onChange={(status) =>
                   setCreateForm((state) => ({ ...state, status }))
                 }
               />
               <div className="flex flex-col gap-2">
-                <Label htmlFor="member-role">Role</Label>
+                <Label htmlFor="member-role">{t("management.role")}</Label>
                 <Input
                   id="member-role"
                   value={createForm.role}
@@ -769,7 +773,7 @@ export function TeamManagement({
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="member-email">Email</Label>
+                <Label htmlFor="member-email">{t("management.email")}</Label>
                 <Input
                   id="member-email"
                   type="email"
@@ -780,7 +784,7 @@ export function TeamManagement({
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="member-im-platform">IM Platform</Label>
+                <Label htmlFor="member-im-platform">{t("management.imPlatform")}</Label>
                 <Input
                   id="member-im-platform"
                   value={createForm.imPlatform}
@@ -790,7 +794,7 @@ export function TeamManagement({
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="member-im-user-id">IM User ID</Label>
+                <Label htmlFor="member-im-user-id">{t("management.imUserId")}</Label>
                 <Input
                   id="member-im-user-id"
                   value={createForm.imUserId}
@@ -802,7 +806,7 @@ export function TeamManagement({
               {createForm.type === "agent" ? (
                 <>
                   <div className="flex flex-col gap-2 md:col-span-2">
-                    <Label htmlFor="member-skills">Skills</Label>
+                    <Label htmlFor="member-skills">{t("management.skills")}</Label>
                     <Input
                       id="member-skills"
                       value={createForm.skillsInput}
@@ -815,7 +819,7 @@ export function TeamManagement({
                     />
                   </div>
                   <div className="rounded-lg border p-4 md:col-span-2">
-                    <h3 className="mb-4 text-sm font-semibold">Agent Profile</h3>
+                    <h3 className="mb-4 text-sm font-semibold">{t("management.agentProfile")}</h3>
                     <AgentProfileFields
                       mode="create"
                       availableRoles={availableRoles}
@@ -824,6 +828,7 @@ export function TeamManagement({
                       onChange={(agentProfile) =>
                         setCreateForm((state) => ({ ...state, agentProfile }))
                       }
+                      t={t}
                     />
                     {createError ? (
                       <p className="mt-3 text-sm text-destructive">{createError}</p>
@@ -833,7 +838,7 @@ export function TeamManagement({
               ) : null}
               <div className="md:col-span-2">
                 <Button type="submit" disabled={!createForm.name.trim()}>
-                  Create Member
+                  {t("management.createMember")}
                 </Button>
               </div>
             </form>
@@ -844,7 +849,7 @@ export function TeamManagement({
       {attentionGroups.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Needs Attention</CardTitle>
+            <CardTitle>{t("management.needsAttention")}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
             {attentionGroups.map((group) => (
@@ -863,7 +868,7 @@ export function TeamManagement({
                 variant="ghost"
                 onClick={handleClearAttentionFilter}
               >
-                Clear attention filter
+                {t("management.clearAttentionFilter")}
               </Button>
             ) : null}
           </CardContent>
@@ -874,9 +879,10 @@ export function TeamManagement({
         <Card>
           <CardContent className="flex flex-col gap-2 py-4">
             <p className="text-sm font-medium">
-              Bulk update complete:{" "}
-              {localBulkUpdateResult.results.filter((item) => item.success).length} updated,{" "}
-              {localBulkUpdateResult.results.filter((item) => !item.success).length} failed.
+              {t("management.bulkUpdateComplete", {
+                updated: localBulkUpdateResult.results.filter((item) => item.success).length,
+                failed: localBulkUpdateResult.results.filter((item) => !item.success).length,
+              })}
             </p>
             {localBulkUpdateResult.results.some((item) => !item.success) ? (
               <ul className="space-y-1 text-sm text-muted-foreground">
@@ -888,7 +894,7 @@ export function TeamManagement({
                       item.memberId;
                     return (
                       <li key={item.memberId}>
-                        {memberName}: {item.error ?? "Failed to update"}
+                        {memberName}: {item.error ?? t("management.failedToUpdate")}
                       </li>
                     );
                   })}
@@ -913,20 +919,20 @@ export function TeamManagement({
             {selectedProjectId ? (
               <>
                 <div className="space-y-1">
-                  <p className="font-medium">No team members yet.</p>
+                  <p className="font-medium">{t("management.noTeamMembers")}</p>
                   <p className="text-sm text-muted-foreground">
-                    Add the first human or agent collaborator for this project.
+                    {t("management.addFirstCollaborator")}
                   </p>
                 </div>
                 <Button type="button" onClick={() => setShowCreateForm(true)}>
-                  Add the first member
+                  {t("management.addFirstMember")}
                 </Button>
               </>
             ) : (
               <div className="space-y-1">
-                <p className="font-medium">No project selected.</p>
+                <p className="font-medium">{t("management.noProjectSelected")}</p>
                 <p className="text-sm text-muted-foreground">
-                  Select a project above to view and manage its team members.
+                  {t("management.selectProjectToView")}
                 </p>
               </div>
             )}
@@ -936,10 +942,10 @@ export function TeamManagement({
         <Card>
           <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-2">
-              <CardTitle>Unified Roster</CardTitle>
+              <CardTitle>{t("management.unifiedRoster")}</CardTitle>
               {selectedMemberIds.length > 0 && onBulkUpdateMembers && canBulkUpdate ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline">{selectedMemberIds.length} selected</Badge>
+                  <Badge variant="outline">{t("management.selectedCount", { count: selectedMemberIds.length })}</Badge>
                   <Button
                     type="button"
                     size="sm"
@@ -947,7 +953,7 @@ export function TeamManagement({
                     disabled={bulkUpdatePending}
                     onClick={() => void handleBulkStatusUpdate("active")}
                   >
-                    Mark selected active
+                    {t("management.markActive")}
                   </Button>
                   <Button
                     type="button"
@@ -956,7 +962,7 @@ export function TeamManagement({
                     disabled={bulkUpdatePending}
                     onClick={() => void handleBulkStatusUpdate("inactive")}
                   >
-                    Mark selected inactive
+                    {t("management.markInactive")}
                   </Button>
                   <Button
                     type="button"
@@ -965,7 +971,7 @@ export function TeamManagement({
                     disabled={bulkUpdatePending}
                     onClick={() => void handleBulkStatusUpdate("suspended")}
                   >
-                    Mark selected suspended
+                    {t("management.markSuspended")}
                   </Button>
                 </div>
               ) : null}
@@ -974,7 +980,7 @@ export function TeamManagement({
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search members..."
+                  placeholder={t("management.searchMembers")}
                   className="w-[180px] pl-8"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -985,9 +991,9 @@ export function TeamManagement({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="human">Human</SelectItem>
-                  <SelectItem value="agent">Agent</SelectItem>
+                  <SelectItem value="all">{t("management.allTypes")}</SelectItem>
+                  <SelectItem value="human">{t("management.human")}</SelectItem>
+                  <SelectItem value="agent">{t("management.agent")}</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -995,10 +1001,10 @@ export function TeamManagement({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                  <SelectItem value="suspended">Suspended</SelectItem>
+                  <SelectItem value="all">{t("management.allStatus")}</SelectItem>
+                  <SelectItem value="active">{tc("status.active")}</SelectItem>
+                  <SelectItem value="inactive">{tc("status.inactive")}</SelectItem>
+                  <SelectItem value="suspended">{tc("status.suspended")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1010,7 +1016,7 @@ export function TeamManagement({
                   <TableHead>
                     <input
                       type="checkbox"
-                      aria-label="Select all visible members"
+                      aria-label={t("management.selectAllVisible")}
                       checked={
                         filteredMembers.length > 0 &&
                         filteredMembers.every((member) =>
@@ -1020,14 +1026,14 @@ export function TeamManagement({
                       onChange={toggleAllVisibleMembers}
                     />
                   </TableHead>
-                  <TableHead>Member</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Agent Configuration</TableHead>
-                  <TableHead>Skills</TableHead>
-                  <TableHead>Workload</TableHead>
-                  <TableHead>Links</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>{t("management.member")}</TableHead>
+                  <TableHead>{t("management.type")}</TableHead>
+                  <TableHead>{t("management.role")}</TableHead>
+                  <TableHead>{t("management.agentConfig")}</TableHead>
+                  <TableHead>{t("management.skills")}</TableHead>
+                  <TableHead>{t("management.workload")}</TableHead>
+                  <TableHead>{t("management.links")}</TableHead>
+                  <TableHead className="text-right">{t("management.actions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1036,7 +1042,7 @@ export function TeamManagement({
                     <TableCell>
                       <input
                         type="checkbox"
-                        aria-label={`Select ${member.name}`}
+                        aria-label={t("management.selectMember", { name: member.name })}
                         checked={selectedMemberIds.includes(member.id)}
                         onChange={() => toggleMemberSelection(member.id)}
                       />
@@ -1050,7 +1056,7 @@ export function TeamManagement({
                           {member.name}
                         </Link>
                         <span className="text-xs text-muted-foreground">
-                          {member.email || "No direct email"}
+                          {member.email || t("management.noDirectEmail")}
                         </span>
                         {member.imPlatform && member.imUserId ? (
                           <span className="text-xs text-muted-foreground">
@@ -1058,7 +1064,11 @@ export function TeamManagement({
                           </span>
                         ) : null}
                         <span className="text-xs text-muted-foreground">
-                          {formatActivityTimestamp(member.lastActivityAt)}
+                          {member.lastActivityAt
+                            ? t("management.lastActivity", {
+                                time: member.lastActivityAt.slice(0, 16).replace("T", " "),
+                              })
+                            : t("management.noRecentActivity")}
                         </span>
                       </div>
                     </TableCell>
@@ -1093,7 +1103,7 @@ export function TeamManagement({
                                 })
                               }
                             >
-                              {member.readinessLabel ?? "Needs attention"}
+                              {member.readinessLabel ?? t("management.needsAttention")}
                             </Button>
                           ) : (
                             <Badge
@@ -1104,11 +1114,11 @@ export function TeamManagement({
                               }
                               className="w-fit"
                             >
-                              {member.readinessLabel ?? "Needs attention"}
+                              {member.readinessLabel ?? t("management.needsAttention")}
                             </Badge>
                           )}
                           <span className="text-muted-foreground">
-                            Bound role: {member.roleBindingLabel ?? "Unbound role"}
+                            {member.roleBindingLabel ?? t("management.unboundRole")}
                           </span>
                           {member.agentSummary?.length ? (
                             <span className="text-muted-foreground">
@@ -1118,44 +1128,44 @@ export function TeamManagement({
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">
-                          Human-managed profile
+                          {t("management.humanManagedProfile")}
                         </span>
                       )}
                     </TableCell>
-                    <TableCell>{member.skills.join(", ") || "No skills tagged"}</TableCell>
+                    <TableCell>{member.skills.join(", ") || t("management.noSkillsTagged")}</TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                         <Link
                           href={`/project?id=${member.projectId}&member=${member.id}`}
-                          aria-label={`View ${member.name} tasks`}
+                          aria-label={t("management.viewTasks", { name: member.name })}
                           className="hover:text-foreground hover:underline"
                         >
-                          Assigned: {member.workload.assignedTasks}
+                          {t("management.assigned", { count: member.workload.assignedTasks })}
                         </Link>
                         <Link
                           href={`/project?id=${member.projectId}&member=${member.id}`}
-                          aria-label={`View ${member.name} in-progress tasks`}
+                          aria-label={t("management.viewInProgress", { name: member.name })}
                           className="hover:text-foreground hover:underline"
                         >
-                          In progress: {member.workload.inProgressTasks}
+                          {t("management.inProgress", { count: member.workload.inProgressTasks })}
                         </Link>
                         <Link
                           href={`/project?id=${member.projectId}&member=${member.id}`}
-                          aria-label={`View ${member.name} review tasks`}
+                          aria-label={t("management.viewInReview", { name: member.name })}
                           className="hover:text-foreground hover:underline"
                         >
-                          In review: {member.workload.inReviewTasks}
+                          {t("management.inReview", { count: member.workload.inReviewTasks })}
                         </Link>
                         <Link
                           href={`/agents?member=${member.id}`}
-                          aria-label={`View ${member.name} agent activity`}
+                          aria-label={t("management.viewAgentActivity", { name: member.name })}
                           className={cn(
                             "hover:text-foreground hover:underline",
                             member.type !== "agent" &&
                               "pointer-events-none text-muted-foreground/60 no-underline"
                           )}
                         >
-                          Agent runs: {member.workload.activeAgentRuns}
+                          {t("management.agentRuns", { count: member.workload.activeAgentRuns })}
                         </Link>
                       </div>
                     </TableCell>
@@ -1165,13 +1175,13 @@ export function TeamManagement({
                           href={`/project?id=${member.projectId}&member=${member.id}`}
                           className="text-primary hover:underline"
                         >
-                          Project tasks
+                          {t("management.projectTasks")}
                         </Link>
                         <Link
                           href={`/agents?member=${member.id}`}
                           className="text-primary hover:underline"
                         >
-                          Agent activity
+                          {t("management.agentActivity")}
                         </Link>
                       </div>
                     </TableCell>
@@ -1185,13 +1195,13 @@ export function TeamManagement({
                             disabled={pendingMemberIds.includes(member.id)}
                             aria-label={
                               pendingMemberIds.includes(member.id)
-                                ? `Updating ${member.name}...`
+                                ? t("management.updatingAria", { name: member.name })
                                 : `${getQuickLifecycleLabel(member)} ${member.name}`
                             }
                             onClick={() => void handleQuickLifecycleAction(member)}
                           >
                             {pendingMemberIds.includes(member.id)
-                              ? "Updating..."
+                              ? t("management.updating")
                               : getQuickLifecycleLabel(member)}
                           </Button>
                         ) : null}
@@ -1199,14 +1209,14 @@ export function TeamManagement({
                           type="button"
                           size="sm"
                           variant="outline"
-                          aria-label={`Edit ${member.name}`}
+                          aria-label={t("management.editAria", { name: member.name })}
                           disabled={!canUpdateMember}
-                          title={!canUpdateMember ? "Requires admin or owner role" : undefined}
+                          title={!canUpdateMember ? t("management.requiresAdmin") : undefined}
                           onClick={() => {
                             openMemberEditor(member);
                           }}
                         >
-                          Edit
+                          {t("management.edit")}
                         </Button>
                         {onDeleteMember && canDeleteMember && (
                           <Button
@@ -1226,7 +1236,7 @@ export function TeamManagement({
                 {filteredMembers.length === 0 && members.length > 0 && (
                   <TableRow>
                     <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                      No members match the current filters.
+                      {t("management.noMembersMatchFilters")}
                     </TableCell>
                   </TableRow>
                 )}
@@ -1239,12 +1249,12 @@ export function TeamManagement({
       {editingMember && editForm ? (
         <Card>
           <CardHeader>
-            <CardTitle>Edit Member</CardTitle>
+            <CardTitle>{t("management.editMember")}</CardTitle>
           </CardHeader>
           <CardContent>
             <form className="grid gap-4 md:grid-cols-2" onSubmit={handleEditMember}>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="edit-name">Edit Name</Label>
+                <Label htmlFor="edit-name">{t("management.editName")}</Label>
                 <Input
                   id="edit-name"
                   value={editForm.name}
@@ -1256,7 +1266,7 @@ export function TeamManagement({
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="edit-role">Edit Role</Label>
+                <Label htmlFor="edit-role">{t("management.editRole")}</Label>
                 <Input
                   id="edit-role"
                   value={editForm.role}
@@ -1268,7 +1278,7 @@ export function TeamManagement({
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="edit-email">Edit Email</Label>
+                <Label htmlFor="edit-email">{t("management.editEmail")}</Label>
                 <Input
                   id="edit-email"
                   type="email"
@@ -1282,7 +1292,7 @@ export function TeamManagement({
               </div>
               <StatusSelect
                 id="edit-status"
-                label="Edit Status"
+                label={t("management.editStatus")}
                 value={editForm.status}
                 onChange={(status) =>
                   setEditForm((state) =>
@@ -1291,7 +1301,7 @@ export function TeamManagement({
                 }
               />
               <div className="flex flex-col gap-2">
-                <Label htmlFor="edit-im-platform">Edit IM Platform</Label>
+                <Label htmlFor="edit-im-platform">{t("management.editIMPlatform")}</Label>
                 <Input
                   id="edit-im-platform"
                   value={editForm.imPlatform}
@@ -1303,7 +1313,7 @@ export function TeamManagement({
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="edit-im-user-id">Edit IM User ID</Label>
+                <Label htmlFor="edit-im-user-id">{t("management.editIMUserId")}</Label>
                 <Input
                   id="edit-im-user-id"
                   value={editForm.imUserId}
@@ -1317,7 +1327,7 @@ export function TeamManagement({
               {editForm.type === "agent" ? (
                 <>
                   <div className="flex flex-col gap-2 md:col-span-2">
-                    <Label htmlFor="edit-skills">Edit Skills</Label>
+                    <Label htmlFor="edit-skills">{t("management.editSkills")}</Label>
                     <Input
                       id="edit-skills"
                       value={editForm.skillsInput}
@@ -1332,7 +1342,7 @@ export function TeamManagement({
                   </div>
                   <div className="rounded-lg border p-4 md:col-span-2">
                     <h3 className="mb-4 text-sm font-semibold">
-                      Agent Profile Settings
+                      {t("management.agentProfileSettings")}
                     </h3>
                     <AgentProfileFields
                       mode="edit"
@@ -1344,6 +1354,7 @@ export function TeamManagement({
                           state ? { ...state, agentProfile } : state,
                         )
                       }
+                      t={t}
                     />
                     {editError ? (
                       <p className="mt-3 text-sm text-destructive">{editError}</p>
@@ -1352,7 +1363,7 @@ export function TeamManagement({
                 </>
               ) : (
                 <div className="flex flex-col gap-2 md:col-span-2">
-                  <Label htmlFor="edit-skills">Edit Skills</Label>
+                  <Label htmlFor="edit-skills">{t("management.editSkills")}</Label>
                   <Input
                     id="edit-skills"
                     value={editForm.skillsInput}
@@ -1365,13 +1376,13 @@ export function TeamManagement({
                 </div>
               )}
               <div className="flex gap-2 md:col-span-2">
-                <Button type="submit">Save Member</Button>
+                <Button type="submit">{t("management.saveMember")}</Button>
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={clearEditState}
                 >
-                  Cancel
+                  {tc("action.cancel")}
                 </Button>
               </div>
             </form>
@@ -1381,9 +1392,9 @@ export function TeamManagement({
 
       <ConfirmDialog
         open={deletingMemberId !== null}
-        title="Delete Member"
-        description={`Permanently remove "${deletingMember?.name ?? "this member"}" from the project? This cannot be undone.`}
-        confirmLabel="Delete"
+        title={t("management.deleteMemberTitle")}
+        description={t("management.deleteMemberDescription", { name: deletingMember?.name ?? tc("action.delete") })}
+        confirmLabel={tc("action.delete")}
         variant="destructive"
         onConfirm={() => void handleConfirmDelete()}
         onCancel={() => setDeletingMemberId(null)}

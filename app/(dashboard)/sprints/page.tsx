@@ -128,7 +128,8 @@ function formatCurrency(value: number): string {
 }
 
 function SprintsPageContent() {
-  useBreadcrumbs([{ label: "Project", href: "/" }, { label: "Sprints" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.project"), href: "/" }, { label: tc("nav.sprints") }]);
   const t = useTranslations("sprints");
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -224,6 +225,7 @@ function SprintsPageContent() {
 
   useEffect(() => {
     if (selectedSprintId && !sprints.some((sprint) => sprint.id === selectedSprintId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing derived selection state
       setSelectedSprintId(null);
     }
   }, [selectedSprintId, sprints]);
@@ -245,6 +247,7 @@ function SprintsPageContent() {
 
   useEffect(() => {
     if (requestedAction === "create-sprint" && projectId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- opening create dialog from deep link
       openCreate();
     }
   }, [openCreate, projectId, requestedAction]);

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { XCircle, RotateCw, Clock, DollarSign, Hash, Users, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,8 @@ interface TeamDetailViewProps {
 }
 
 export function TeamDetailView({ teamId }: TeamDetailViewProps) {
+  const t = useTranslations("teams");
+  const tc = useTranslations("common");
   const router = useRouter();
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId));
   const fetchTeam = useTeamStore((s) => s.fetchTeam);
@@ -124,7 +127,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
   if (!team) {
     return (
       <div className="flex items-center justify-center py-20">
-        <p className="text-muted-foreground">Team not found</p>
+        <p className="text-muted-foreground">{t("detail.notFound")}</p>
       </div>
     );
   }
@@ -164,7 +167,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={team.name || team.taskTitle || "Agent Team"}
+        title={team.name || team.taskTitle || t("detail.title")}
         description={team.taskTitle}
         actions={
           <>
@@ -183,7 +186,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
                 onClick={() => setConfirmCancel(true)}
               >
                 <XCircle className="mr-1 size-4" />
-                Cancel
+                {tc("action.cancel")}
               </Button>
             )}
             {(team.status === "failed" || team.status === "cancelled") && (
@@ -193,7 +196,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
                 onClick={() => setConfirmRetry(true)}
               >
                 <RotateCw className="mr-1 size-4" />
-                Retry
+                {t("detail.retryConfirm")}
               </Button>
             )}
             {isTerminal && (
@@ -203,7 +206,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
                 onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 className="mr-1 size-4" />
-                Delete
+                {tc("action.delete")}
               </Button>
             )}
           </>
@@ -212,9 +215,9 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
 
       <ConfirmDialog
         open={confirmCancel}
-        title="Cancel Team"
-        description="This will stop all active agents in the team. This action cannot be undone."
-        confirmLabel="Cancel Team"
+        title={t("detail.cancelTitle")}
+        description={t("detail.cancelDescription")}
+        confirmLabel={t("detail.cancelConfirm")}
         variant="destructive"
         onConfirm={() => {
           setConfirmCancel(false);
@@ -224,9 +227,9 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
       />
       <ConfirmDialog
         open={confirmRetry}
-        title="Retry Team"
-        description="This will restart the team from its last failed phase."
-        confirmLabel="Retry"
+        title={t("detail.retryTitle")}
+        description={t("detail.retryDescription")}
+        confirmLabel={t("detail.retryConfirm")}
         onConfirm={() => {
           setConfirmRetry(false);
           void retryTeam(team.id);
@@ -235,9 +238,9 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
       />
       <ConfirmDialog
         open={confirmDelete}
-        title="Delete Team"
-        description="This will permanently remove this team record. This action cannot be undone."
-        confirmLabel="Delete"
+        title={t("detail.deleteTitle")}
+        description={t("detail.deleteDescription")}
+        confirmLabel={tc("action.delete")}
         variant="destructive"
         onConfirm={() => {
           setConfirmDelete(false);
@@ -262,7 +265,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium">
-              Strategy
+              {t("detail.strategy")}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
@@ -272,7 +275,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium">
-              Resolved Runtime
+              {t("detail.resolvedRuntime")}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
@@ -286,7 +289,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
               <DollarSign className="size-3.5" />
-              Total Cost
+              {t("detail.totalCost")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -322,7 +325,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
               <Hash className="size-3.5" />
-              Total Turns
+              {t("detail.totalTurns")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -333,7 +336,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
               <Clock className="size-3.5" />
-              Duration
+              {t("detail.duration")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -344,7 +347,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
               <Users className="size-3.5" />
-              Coders
+              {t("detail.coders")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -357,11 +360,11 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
 
       <Tabs defaultValue="overview">
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
-          <TabsTrigger value="planner">Planner</TabsTrigger>
-          <TabsTrigger value="coders">Coders</TabsTrigger>
-          <TabsTrigger value="reviewer">Reviewer</TabsTrigger>
+          <TabsTrigger value="overview">{t("detail.tab.overview")}</TabsTrigger>
+          <TabsTrigger value="artifacts">{t("detail.tab.artifacts")}</TabsTrigger>
+          <TabsTrigger value="planner">{t("detail.tab.planner")}</TabsTrigger>
+          <TabsTrigger value="coders">{t("detail.tab.coders")}</TabsTrigger>
+          <TabsTrigger value="reviewer">{t("detail.tab.reviewer")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -369,18 +372,18 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm font-medium">
-                  Cost Breakdown
+                  {t("detail.costBreakdown")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col gap-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Planner</span>
+                    <span className="text-muted-foreground">{t("detail.planner")}</span>
                     <span>${(plannerAgent?.cost ?? 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">
-                      Coders ({coderAgents.length})
+                      {t("detail.codersCount", { count: coderAgents.length })}
                     </span>
                     <span>
                       $
@@ -390,12 +393,12 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Reviewer</span>
+                    <span className="text-muted-foreground">{t("detail.reviewer")}</span>
                     <span>${(reviewerAgent?.cost ?? 0).toFixed(2)}</span>
                   </div>
                   <Separator />
                   <div className="flex justify-between font-medium">
-                    <span>Total</span>
+                    <span>{t("detail.total")}</span>
                     <span>${team.totalSpent.toFixed(2)}</span>
                   </div>
                 </div>
@@ -404,7 +407,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm font-medium">Status</CardTitle>
+                <CardTitle className="text-sm font-medium">{t("detail.status")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex items-center gap-2">
@@ -447,7 +450,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
             </div>
           ) : (
             <p className="text-muted-foreground">
-              No planner agent assigned yet.
+              {t("detail.noPlanner")}
             </p>
           )}
         </TabsContent>
@@ -480,7 +483,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
             </div>
           ) : (
             <p className="text-muted-foreground">
-              No coder agents assigned yet.
+              {t("detail.noCoders")}
             </p>
           )}
         </TabsContent>
@@ -503,7 +506,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
             </div>
           ) : (
             <p className="text-muted-foreground">
-              No reviewer agent assigned yet.
+              {t("detail.noReviewer")}
             </p>
           )}
         </TabsContent>

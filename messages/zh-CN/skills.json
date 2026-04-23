@@ -1,0 +1,52 @@
+{
+  "title": "技能",
+  "description": "检查受管技能、验证健康状况、同步工作流镜像，并移交到正确的下游工作区。",
+  "actions": {
+    "verifyInternal": "验证内部技能",
+    "verifyBuiltIns": "验证内置技能",
+    "syncMirrors": "同步镜像"
+  },
+  "searchPlaceholder": "搜索技能...",
+  "filters": {
+    "family": {
+      "all": "全部族",
+      "builtInRuntime": "内置运行时",
+      "repoAssistant": "仓库助手",
+      "workflowMirror": "工作流镜像"
+    },
+    "status": {
+      "all": "全部状态",
+      "healthy": "健康",
+      "warning": "警告",
+      "drifted": "漂移",
+      "blocked": "阻塞"
+    }
+  },
+  "loading": "正在加载受管技能...",
+  "empty": "没有符合当前筛选条件的受管技能。",
+  "detailLoading": "正在加载技能详情...",
+  "selectPrompt": "选择一个受管技能以查看其包预览、治理诊断和下游操作。",
+  "list": {
+    "builtInBundle": "内置捆绑包",
+    "preview": "预览"
+  },
+  "detail": {
+    "bundle": "捆绑包",
+    "builtInMember": "官方内置成员",
+    "notBuiltIn": "不在内置捆绑包中",
+    "category": "类别：{category}",
+    "provenance": "来源",
+    "lockSource": "锁定来源：{source}",
+    "diagnostics": "诊断",
+    "blockedActions": "被阻塞的操作",
+    "downstreamHandoffs": "下游移交",
+    "mirrorTargets": "镜像目标"
+  },
+  "healthStatus": {
+    "healthy": "健康",
+    "warning": "警告",
+    "drifted": "漂移",
+    "blocked": "阻塞",
+    "unknown": "未知"
+  }
+}

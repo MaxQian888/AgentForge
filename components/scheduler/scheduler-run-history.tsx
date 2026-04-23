@@ -87,7 +87,9 @@ export function SchedulerRunHistory({ runs }: SchedulerRunHistoryProps) {
               <TableCell>
                 <SchedulerStatusBadge status={run.status} />
               </TableCell>
-              <TableCell className="text-xs capitalize">{run.triggerSource}</TableCell>
+              <TableCell className="text-xs capitalize">
+                {run.triggerSource ? t(`triggerSourceLabels.${run.triggerSource}`) : "-"}
+              </TableCell>
               <TableCell>
                 <Tooltip>
                   <TooltipTrigger asChild>

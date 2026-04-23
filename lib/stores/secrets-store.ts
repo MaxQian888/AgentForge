@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -71,7 +72,8 @@ export const useSecretsStore = create<SecretsStoreState>()((set, get) => ({
         secretsByProject: { ...s.secretsByProject, [projectId]: data ?? [] },
       }));
     } catch (err) {
-      toast.error(`加载密钥失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `加载密钥失败: ${(err as Error).message}` : `Failed to load secrets: ${(err as Error).message}`);
     } finally {
       set((s) => ({
         loadingByProject: { ...s.loadingByProject, [projectId]: false },
@@ -96,10 +98,12 @@ export const useSecretsStore = create<SecretsStoreState>()((set, get) => ({
         },
         lastRevealedValue: { projectId, name, value: revealed },
       }));
-      toast.success(`密钥 ${name} 已创建`);
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? `密钥 ${name} 已创建` : `Secret ${name} created`);
       return metadata;
     } catch (err) {
-      toast.error(`创建密钥失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `创建密钥失败: ${(err as Error).message}` : `Failed to create secret: ${(err as Error).message}`);
       return null;
     }
   },
@@ -114,11 +118,13 @@ export const useSecretsStore = create<SecretsStoreState>()((set, get) => ({
         { token },
       );
       set({ lastRevealedValue: { projectId, name, value: data.value } });
-      toast.success(`密钥 ${name} 已轮换`);
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? `密钥 ${name} 已轮换` : `Secret ${name} rotated`);
       // Refresh the metadata list so updatedAt advances.
       await get().fetchSecrets(projectId);
     } catch (err) {
-      toast.error(`轮换密钥失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `轮换密钥失败: ${(err as Error).message}` : `Failed to rotate secret: ${(err as Error).message}`);
     }
   },
 
@@ -138,9 +144,11 @@ export const useSecretsStore = create<SecretsStoreState>()((set, get) => ({
           ),
         },
       }));
-      toast.success("密钥已删除");
+      const locale = getPreferredLocale();
+      toast.success(locale === "zh-CN" ? "密钥已删除" : "Secret deleted");
     } catch (err) {
-      toast.error(`删除密钥失败: ${(err as Error).message}`);
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? `删除密钥失败: ${(err as Error).message}` : `Failed to delete secret: ${(err as Error).message}`);
     }
   },
 

@@ -10,7 +10,8 @@ import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 import { useFeatureFlag } from "@/lib/feature-flags";
 
 export default function MemoryPage() {
-  useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Memory" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.operations"), href: "/" }, { label: tc("nav.memory") }]);
   const t = useTranslations("memory");
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
   const memoryExplorerEnabled = useFeatureFlag("MEMORY_EXPLORER");
@@ -22,7 +23,7 @@ export default function MemoryPage() {
         <EmptyState
           icon={Lock}
           title={t("title")}
-          description="This feature is currently disabled for this deployment."
+          description={t("featureDisabled")}
         />
       </div>
     );

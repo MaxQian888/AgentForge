@@ -45,6 +45,14 @@ jest.mock("next-intl", () => ({
       "status.running": "running",
       "status.paused": "paused",
       "status.failed": "failed",
+      "overview.bridgeHealth": "Bridge Health",
+      "overview.bridgeStatus": "Status: {status}",
+      "overview.bridgeActive": "Active {count}",
+      "overview.bridgeAvailable": "Available {count}",
+      "overview.bridgeWarm": "Warm {count}",
+      "runtime.available": "Available",
+      "runtime.unavailable": "Unavailable",
+      "runtime.providers": "Providers: {providers}",
     };
     if (key === "diagnostics.warmActive") {
       return `${values?.warm ?? 0}/${values?.active ?? 0} warm`;
@@ -57,6 +65,21 @@ jest.mock("next-intl", () => ({
     }
     if (key === "workspace.cardBudgetValue") {
       return `$${values?.cost ?? 0} / $${values?.budget ?? 0}`;
+    }
+    if (key === "overview.bridgeStatus") {
+      return `Status: ${values?.status ?? ""}`;
+    }
+    if (key === "overview.bridgeActive") {
+      return `Active ${values?.count ?? 0}`;
+    }
+    if (key === "overview.bridgeAvailable") {
+      return `Available ${values?.count ?? 0}`;
+    }
+    if (key === "overview.bridgeWarm") {
+      return `Warm ${values?.count ?? 0}`;
+    }
+    if (key === "runtime.providers") {
+      return `Providers: ${values?.providers ?? "-"}`;
     }
     return map[key] ?? key;
   },

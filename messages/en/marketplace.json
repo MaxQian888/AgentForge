@@ -8,11 +8,14 @@
     "typePlugin": "Plugin",
     "typeSkill": "Skill",
     "typeRole": "Role",
+    "typeWorkflow": "Workflow",
     "category": "Category",
+    "categoryPlaceholder": "e.g. testing",
     "sort": "Sort by",
     "sortDownloads": "Most Downloaded",
     "sortRating": "Top Rated",
-    "sortNewest": "Newest"
+    "sortNewest": "Newest",
+    "tags": "Tags"
   },
   "item": {
     "install": "Install",
@@ -23,20 +26,55 @@
     "version": "Version",
     "license": "License",
     "repository": "Repository",
-    "noDescription": "No description provided."
+    "noDescription": "No description provided.",
+    "manage": "Manage",
+    "blocked": "Blocked",
+    "builtin": "Built-in",
+    "update": "Update",
+    "updateVersion": "Update: v{version}",
+    "byAuthor": "by {author}"
   },
   "publish": {
     "title": "Publish Item",
     "submitLabel": "Publish",
     "success": "Item published successfully",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "failed": "Failed to publish",
+    "typeLabel": "Type",
+    "licenseLabel": "License",
+    "nameLabel": "Name",
+    "slugLabel": "Slug",
+    "descriptionLabel": "Description",
+    "categoryLabel": "Category",
+    "repoLabel": "Repository URL",
+    "tagsLabel": "Tags (comma-separated)",
+    "tagsPlaceholder": "e.g. testing, automation, ci",
+    "publishing": "Publishing...",
+    "typePlugin": "Plugin",
+    "typeSkill": "Skill",
+    "typeRole": "Role",
+    "typeWorkflow": "Workflow Template",
+    "licenseMIT": "MIT",
+    "licenseApache": "Apache 2.0",
+    "licenseGPL": "GPL 3.0",
+    "licenseProprietary": "Proprietary"
   },
   "install": {
     "confirmTitle": "Install {name}",
     "confirm": "Install",
     "cancel": "Cancel",
     "installing": "Installing...",
-    "success": "Installed successfully"
+    "success": "Installed successfully",
+    "noVersion": "No version available",
+    "toastUpdated": "{name} updated to v{version}",
+    "toastInstalled": "{name} installed successfully",
+    "toastFailed": "Installation failed",
+    "updateTitle": "Update {name}?",
+    "installTitle": "Install {name}?",
+    "updateDesc": "This will update {name} from v{fromVersion} to v{toVersion}.",
+    "installDesc": "This will download and install version {version} of {name} ({type}) into AgentForge.",
+    "updating": "Updating...",
+    "updateTo": "Update to v{version}"
   },
   "uninstall": {
     "button": "Uninstall",
@@ -69,15 +107,119 @@
     "title": "Write a Review",
     "submit": "Submit Review",
     "delete": "Delete Review",
-    "noReviews": "No reviews yet. Be the first!"
+    "noReviews": "No reviews yet. Be the first!",
+    "toastSuccess": "Review submitted",
+    "toastFailed": "Failed to submit review",
+    "ratingLabel": "Rating",
+    "commentLabel": "Comment",
+    "commentPlaceholder": "Share your experience...",
+    "submitting": "Submitting..."
   },
   "versions": {
     "title": "Versions",
     "yanked": "yanked",
     "latest": "latest",
     "download": "Download",
+    "yank": "Yank",
     "noVersions": "No versions published yet."
   },
+  "pageTitle": "Marketplace",
+  "pageDescription": "Publish, moderate, install, and hand off marketplace assets into their downstream workspaces.",
+  "serviceUnavailable": "Marketplace service unavailable",
+  "serviceUnavailableDesc": "The configured marketplace service could not be reached.",
+  "remoteUnavailable": "Remote marketplace unavailable",
+  "remoteUnavailableDesc": "The standalone marketplace service could not be reached.",
+  "builtInItems": "Built-in items",
+  "builtInTypeWorkflows": "Built-in workflows",
+  "prev": "Prev",
+  "next": "Next",
+  "noItems": "No items found",
+  "noItemsDesc": "Adjust the filters or publish a new item to get started.",
+  "selectFilesTitle": "Select a local plugin directory",
+  "sideLoadSuccess": "Local plugin installed. Open the plugin console to continue managing it.",
+  "sideLoadFailed": "Failed to side-load local plugin",
+  "sideLoadDesktopOnly": "Local side-load in the marketplace workspace currently requires the desktop host.",
+  "sideLoadUnavailable": "Desktop file selection is unavailable in the current host. Enter the local path from the plugin console instead.",
+  "uninstallSuccess": "{type} uninstalled successfully.",
+  "uninstallFailed": "Uninstall failed",
   "empty": "No items found. Try adjusting your filters.",
-  "featured": "Featured"
+  "featured": "Featured",
+  "detail": {
+    "status": {
+      "notInstalled": "Not installed yet. Install it from the marketplace or use a supported local side-load flow.",
+      "manage": "Manage in workspace",
+      "available": "Available locally",
+      "installed": "Installed",
+      "needsAttention": "Needs attention",
+      "blocked": "Blocked",
+      "detailManaged": "Managed through {surface}.",
+      "detailAvailable": "Already available through {surface} in this checkout.",
+      "detailReady": "Installed successfully and ready for downstream handoff.",
+      "detailWarning": "{warning}",
+      "detailBlocked": "This item cannot be installed in the current checkout."
+    },
+    "downstream": {
+      "plugin": "Open plugin console",
+      "role": "Open roles workspace",
+      "workflow": "Open workflow editor",
+      "default": "Open role authoring"
+    },
+    "tab": {
+      "overview": "Overview",
+      "versions": "Versions",
+      "reviews": "Reviews"
+    },
+    "license": "License: {license}",
+    "sourceBuiltin": "Repo-owned built-in skill",
+    "latest": "Latest: {version}",
+    "noVersion": "No published version yet.",
+    "installedVersion": "Installed version: {version}",
+    "localPath": "Local path: {path}",
+    "docsRef": "Docs reference: {ref}",
+    "skillPreviewUnavailable": "Skill preview unavailable: {error}",
+    "sideload": {
+      "title": "Local side-load",
+      "pluginDesc": "Reuse the existing local plugin install seam from within the marketplace workspace.",
+      "pluginButton": "Side-load local plugin",
+      "uploadDesc": "Upload a zip package containing a valid {file} at its root.",
+      "uploadButton": "Side-load {type}",
+      "installing": "Installing..."
+    },
+    "moderation": {
+      "title": "Moderation",
+      "verify": "Verify",
+      "feature": "Feature",
+      "hint": "Admin-only actions fail with an explicit permission error when the current operator is not allowed to moderate this item."
+    },
+    "versionUpload": {
+      "title": "Upload a new version",
+      "versionLabel": "Version",
+      "versionPlaceholder": "1.2.0",
+      "changelogLabel": "Changelog",
+      "changelogPlaceholder": "What changed in this release?",
+      "artifactLabel": "Artifact",
+      "artifactHint": "Upload a zip package whose root matches the current marketplace artifact contract for this item type.",
+      "uploading": "Uploading...",
+      "uploadButton": "Upload version"
+    },
+    "noReviews": "No reviews yet.",
+    "deleteItem": "Delete item",
+    "toast": {
+      "uploaded": "Uploaded {version} for {name}.",
+      "verify": "{name} marked as verified.",
+      "feature": "{name} added to featured items.",
+      "delete": "{name} deleted.",
+      "sideload": "Side-loaded {type} from {filename}.",
+      "failedUpload": "Failed to upload version",
+      "failedVerify": "Failed to verify item",
+      "failedFeature": "Failed to feature item",
+      "failedDelete": "Failed to delete item",
+      "failedSideload": "Sideload failed"
+    }
+  },
+  "preview": {
+    "skillPackage": "Skill package",
+    "frontmatter": "Frontmatter YAML",
+    "agentYaml": "Agent YAML"
+  }
 }

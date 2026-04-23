@@ -165,11 +165,11 @@ export function IMMessageHistory() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__">All</SelectItem>
-                <SelectItem value="pending">pending</SelectItem>
-                <SelectItem value="delivered">delivered</SelectItem>
-                <SelectItem value="failed">failed</SelectItem>
-                <SelectItem value="timeout">timeout</SelectItem>
+                <SelectItem value="__none__">{t("history.filterAll")}</SelectItem>
+                <SelectItem value="pending">{t("statusLabels.pending")}</SelectItem>
+                <SelectItem value="delivered">{t("statusLabels.delivered")}</SelectItem>
+                <SelectItem value="failed">{t("statusLabels.failed")}</SelectItem>
+                <SelectItem value="timeout">{t("statusLabels.timeout")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -266,14 +266,16 @@ export function IMMessageHistory() {
                   <TableCell>
                     <PlatformBadge platform={delivery.platform} />
                   </TableCell>
-                  <TableCell className="text-sm">{delivery.eventType}</TableCell>
+                  <TableCell className="text-sm">
+                    {t(`eventLabels.${delivery.eventType}`, { defaultValue: delivery.eventType })}
+                  </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">
                       <Badge
                         variant="secondary"
                         className={cn("w-fit text-xs", statusColors[delivery.status])}
                       >
-                        {delivery.status}
+                        {t(`statusLabels.${delivery.status}`, { defaultValue: delivery.status })}
                       </Badge>
                       {delivery.status === "failed" && delivery.failureReason ? (
                         <span className="text-xs text-destructive">{delivery.failureReason}</span>
@@ -281,7 +283,11 @@ export function IMMessageHistory() {
                     </div>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {delivery.downgradeReason ?? "—"}
+                    {delivery.downgradeReason
+                      ? t(`downgradeReasons.${delivery.downgradeReason}`, {
+                          defaultValue: delivery.downgradeReason,
+                        })
+                      : "—"}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {new Date(delivery.createdAt).toLocaleString()}
@@ -338,7 +344,13 @@ export function IMMessageHistory() {
         <SheetContent>
           <SheetHeader>
             <SheetTitle>{t("history.deliveryPayload")}</SheetTitle>
-            <SheetDescription>{selectedDelivery?.eventType ?? ""}</SheetDescription>
+            <SheetDescription>
+              {selectedDelivery
+                ? t(`eventLabels.${selectedDelivery.eventType}`, {
+                    defaultValue: selectedDelivery.eventType,
+                  })
+                : ""}
+            </SheetDescription>
           </SheetHeader>
           {selectedDelivery ? (
             <div className="space-y-4 px-4 pb-4 text-sm">

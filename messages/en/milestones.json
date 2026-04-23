@@ -1,0 +1,16 @@
+{
+  "editor.title": "Create Milestone",
+  "editor.description": "Define a roadmap milestone and target date.",
+  "editor.name": "Name",
+  "editor.namePlaceholder": "v2.0 Release",
+  "editor.targetDate": "Target Date",
+  "editor.status": "Status",
+  "status.planned": "Planned",
+  "status.in_progress": "In Progress",
+  "status.completed": "Completed",
+  "status.missed": "Missed",
+  "roadmap.noTargetDate": "No target date",
+  "roadmap.complete": "{rate}% complete",
+  "roadmap.sprints": "Sprints",
+  "roadmap.tasks": "Tasks"
+}

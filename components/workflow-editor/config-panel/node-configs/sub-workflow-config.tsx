@@ -4,6 +4,7 @@ import React from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "next-intl";
 import {
   Select,
   SelectContent,
@@ -35,10 +36,6 @@ interface SubWorkflowConfigProps {
   parentWorkflowId?: string;
 }
 
-const INPUT_MAPPING_PLACEHOLDER = `{
-  "inputKey": "{{$parent.dataStore.previousNode.output.value}}"
-}`;
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function SubWorkflowConfig({
@@ -48,6 +45,7 @@ export function SubWorkflowConfig({
   plugins,
   parentWorkflowId,
 }: SubWorkflowConfigProps) {
+  const t = useTranslations("workflow");
   // Pull from stores only when callers did not override. Selector subscriptions
   // are deliberately narrow so this component does not re-render on unrelated
   // store mutations.
@@ -88,17 +86,17 @@ export function SubWorkflowConfig({
     <div className="flex flex-col gap-4">
       {/* Target Kind */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Target Kind</Label>
+        <Label className="text-xs">{t("nodeConfig.subWorkflow.targetKind")}</Label>
         <Select
           value={targetKind}
           onValueChange={(v) => handleKindChange(v as TargetKind)}
         >
           <SelectTrigger className="text-xs">
-            <SelectValue placeholder="Select target kind" />
+            <SelectValue placeholder={t("nodeConfig.subWorkflow.targetKindPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="dag">DAG Workflow</SelectItem>
-            <SelectItem value="plugin">Workflow Plugin</SelectItem>
+            <SelectItem value="dag">{t("nodeConfig.subWorkflow.dagWorkflow")}</SelectItem>
+            <SelectItem value="plugin">{t("nodeConfig.subWorkflow.workflowPlugin")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -106,7 +104,9 @@ export function SubWorkflowConfig({
       {/* Target Workflow / Plugin Selector */}
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs">
-          {targetKind === "dag" ? "Target Workflow" : "Target Plugin"}
+          {targetKind === "dag"
+            ? t("nodeConfig.subWorkflow.targetWorkflow")
+            : t("nodeConfig.subWorkflow.targetPlugin")}
         </Label>
         {targetKind === "dag" && dagCandidates.length > 0 ? (
           <Select
@@ -114,7 +114,7 @@ export function SubWorkflowConfig({
             onValueChange={(v) => update({ targetWorkflowId: v })}
           >
             <SelectTrigger className="text-xs">
-              <SelectValue placeholder="Pick a DAG workflow" />
+              <SelectValue placeholder={t("nodeConfig.subWorkflow.pickDagWorkflow")} />
             </SelectTrigger>
             <SelectContent>
               {dagCandidates.map((wf) => (
@@ -130,7 +130,7 @@ export function SubWorkflowConfig({
             onValueChange={(v) => update({ targetWorkflowId: v })}
           >
             <SelectTrigger className="text-xs">
-              <SelectValue placeholder="Pick a workflow plugin" />
+              <SelectValue placeholder={t("nodeConfig.subWorkflow.pickWorkflowPlugin")} />
             </SelectTrigger>
             <SelectContent>
               {pluginCandidates.map((p) => (
@@ -144,8 +144,8 @@ export function SubWorkflowConfig({
           <Input
             placeholder={
               targetKind === "dag"
-                ? "Enter DAG workflow UUID"
-                : "Enter plugin id"
+                ? t("nodeConfig.subWorkflow.enterDagUuid")
+                : t("nodeConfig.subWorkflow.enterPluginId")
             }
             value={targetWorkflowId}
             onChange={(e) => update({ targetWorkflowId: e.target.value })}
@@ -155,10 +155,10 @@ export function SubWorkflowConfig({
 
       {/* Input Mapping */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs">Input Mapping (JSON)</Label>
+        <Label className="text-xs">{t("nodeConfig.subWorkflow.inputMapping")}</Label>
         <Textarea
           rows={6}
-          placeholder={INPUT_MAPPING_PLACEHOLDER}
+          placeholder={t("nodeConfig.subWorkflow.inputMappingPlaceholder")}
           value={inputMapping}
           onChange={(e) => update({ inputMapping: e.target.value })}
           className="font-mono text-xs"

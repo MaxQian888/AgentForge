@@ -72,19 +72,19 @@ describe("WorkflowExecutionView", () => {
   it("renders without outbound delivery badge normally", async () => {
     render(<WorkflowExecutionView executionId="exec-1" nodes={defaultNodes} />);
     expect(await screen.findByText("Execution")).toBeInTheDocument();
-    expect(screen.queryByText("回帖失败")).not.toBeInTheDocument();
+    expect(screen.queryByText("Delivery failed")).not.toBeInTheDocument();
   });
 
   it("renders outbound delivery failed badge when execution is in failed set", async () => {
     outboundRef.set = new Set(["exec-1"]);
     render(<WorkflowExecutionView executionId="exec-1" nodes={defaultNodes} />);
-    expect(await screen.findByText("回帖失败")).toBeInTheDocument();
+    expect(await screen.findByText("Delivery failed")).toBeInTheDocument();
   });
 
   it("does not render badge for a different execution id", async () => {
     outboundRef.set = new Set(["exec-other"]);
     render(<WorkflowExecutionView executionId="exec-1" nodes={defaultNodes} />);
     expect(await screen.findByText("Execution")).toBeInTheDocument();
-    expect(screen.queryByText("回帖失败")).not.toBeInTheDocument();
+    expect(screen.queryByText("Delivery failed")).not.toBeInTheDocument();
   });
 });

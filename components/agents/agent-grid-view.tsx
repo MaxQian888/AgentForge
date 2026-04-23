@@ -392,15 +392,15 @@ export function AgentGridView({
         open={pendingKillAgentIds !== null}
         title={
           (pendingKillAgentIds?.length ?? 0) > 1
-            ? "Terminate selected agents?"
-            : "Terminate agent?"
+            ? t("workspace.confirmKillTitlePlural")
+            : t("workspace.confirmKillTitle")
         }
         description={
           (pendingKillAgentIds?.length ?? 0) > 1
-            ? "This will stop all selected agents immediately."
-            : "This will stop the selected agent immediately."
+            ? t("workspace.confirmKillDescriptionPlural")
+            : t("workspace.confirmKillDescription")
         }
-        confirmLabel="Terminate"
+        confirmLabel={t("workspace.confirmKillAction")}
         variant="destructive"
         onConfirm={() => {
           if (pendingKillAgentIds) {

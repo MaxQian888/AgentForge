@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Copy, Minus, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -22,6 +23,7 @@ export function DesktopWindowFrame({
 }: {
   children: React.ReactNode;
 }) {
+  const t = useTranslations("common");
   const {
     isDesktop,
     closeMainWindow,
@@ -87,7 +89,7 @@ export function DesktopWindowFrame({
           >
             <div className="truncate text-sm font-semibold">AgentForge</div>
             <div className="truncate text-xs text-muted-foreground">
-              Desktop Workspace
+              {t("desktop.workspace")}
             </div>
           </div>
           <div
@@ -96,8 +98,8 @@ export function DesktopWindowFrame({
           >
             <button
               type="button"
-              aria-label="Minimize window"
-              title="Minimize"
+              aria-label={t("desktop.minimizeWindow")}
+              title={t("desktop.minimizeWindow")}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
               onClick={() => {
                 void minimizeMainWindow();
@@ -109,10 +111,14 @@ export function DesktopWindowFrame({
               type="button"
               aria-label={
                 effectiveWindowState.maximized
-                  ? "Restore window"
-                  : "Maximize window"
+                  ? t("desktop.restoreWindow")
+                  : t("desktop.maximizeWindow")
               }
-              title={effectiveWindowState.maximized ? "Restore" : "Maximize"}
+              title={
+                effectiveWindowState.maximized
+                  ? t("desktop.restoreWindow")
+                  : t("desktop.maximizeWindow")
+              }
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
               onClick={() => {
                 void toggleMaximizeMainWindow();
@@ -126,8 +132,8 @@ export function DesktopWindowFrame({
             </button>
             <button
               type="button"
-              aria-label="Close window"
-              title="Close"
+              aria-label={t("desktop.closeWindow")}
+              title={t("desktop.closeWindow")}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-destructive/15 hover:text-destructive"
               onClick={() => {
                 void closeMainWindow();

@@ -36,6 +36,9 @@ jest.mock("next-intl", () => ({
       riskCritical: "Critical",
       unassigned: "Unassigned",
       noBranch: "No branch",
+      timeMinutesAgo: "{count}m ago",
+      timeHoursAgo: "{count}h ago",
+      timeDaysAgo: "{count}d ago",
     };
     const template = messages[key] ?? key;
     return template.replace(/\{(\w+)\}/g, (_, token) => String(values?.[token] ?? ""));

@@ -70,5 +70,14 @@
   "createTask.parentTaskLabel": "父任务（可选）",
   "createTask.noParent": "无（顶级任务）",
   "createTask.submit": "创建",
-  "manageSprints": "管理冲刺"
+  "manageSprints": "管理冲刺",
+  "error.changeStatus": "修改任务状态失败。",
+  "error.assignTask": "分配任务失败。",
+  "error.deleteTask": "删除任务失败。",
+  "error.create": "创建项目失败",
+  "error.update": "更新项目失败",
+  "error.delete": "删除项目失败",
+  "error.archive": "归档项目失败",
+  "error.unarchive": "取消归档项目失败",
+  "error.unknown": "未知错误"
 }

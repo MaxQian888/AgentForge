@@ -222,7 +222,7 @@ describe("TaskCard", () => {
       />
     );
 
-    expect(screen.getByText("urgent")).toBeInTheDocument();
+    expect(screen.getByText("Urgent")).toBeInTheDocument();
     expect(screen.getByText("timeline")).toBeInTheDocument();
     expect(screen.getByText("ux")).toBeInTheDocument();
     expect(screen.getByText("Due 2026-03-28")).toBeInTheDocument();

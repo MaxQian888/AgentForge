@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +51,7 @@ function AgentPhaseCard({
   agent: Agent | undefined;
   phaseStatus: string;
 }) {
+  const t = useTranslations("teams");
   return (
     <Card className="flex-1">
       <CardHeader className="pb-2">
@@ -83,7 +85,7 @@ function AgentPhaseCard({
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            {phaseStatus === "pending" ? "Waiting..." : "No agent assigned"}
+            {phaseStatus === "pending" ? t("pipeline.waiting") : t("pipeline.noAgentAssigned")}
           </p>
         )}
       </CardContent>
@@ -96,6 +98,7 @@ interface TeamPipelineProps {
 }
 
 export function TeamPipeline({ team }: TeamPipelineProps) {
+  const t = useTranslations("teams");
   const agents = useAgentStore((s) => s.agents);
 
   const plannerAgent = team.plannerRunId
@@ -116,7 +119,7 @@ export function TeamPipeline({ team }: TeamPipelineProps) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
         <AgentPhaseCard
-          title="Plan"
+          title={t("pipeline.plan")}
           agent={plannerAgent}
           phaseStatus={planStatus}
         />
@@ -125,7 +128,7 @@ export function TeamPipeline({ team }: TeamPipelineProps) {
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium">Execute</CardTitle>
+                <CardTitle className="text-sm font-medium">{t("pipeline.execute")}</CardTitle>
                 <div
                   className={cn(
                     "size-2.5 rounded-full",
@@ -167,8 +170,8 @@ export function TeamPipeline({ team }: TeamPipelineProps) {
               ) : (
                 <p className="text-sm text-muted-foreground">
                   {executeStatus === "pending"
-                    ? "Waiting for plan..."
-                    : "No coders assigned"}
+                    ? t("pipeline.waitingForPlan")
+                    : t("pipeline.noCodersAssigned")}
                 </p>
               )}
             </CardContent>
@@ -176,7 +179,7 @@ export function TeamPipeline({ team }: TeamPipelineProps) {
         </div>
         <ArrowRight className="size-5 shrink-0 text-muted-foreground" />
         <AgentPhaseCard
-          title="Review"
+          title={t("pipeline.review")}
           agent={reviewerAgent}
           phaseStatus={reviewStatus}
         />

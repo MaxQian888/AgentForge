@@ -279,7 +279,7 @@ function TriggerEditor({
               <Input
                 aria-label={`Trigger ${index + 1} workflow plugin`}
                 className="h-8 w-48 text-sm"
-                placeholder="Workflow plugin ID"
+                placeholder={t("editor.workflowPluginId")}
                 value={String((trigger.config as Record<string, unknown> | undefined)?.pluginId ?? "")}
                 onChange={(e) =>
                   updateTriggerConfig(index, { pluginId: e.target.value })
@@ -288,7 +288,7 @@ function TriggerEditor({
               <Input
                 aria-label={`Trigger ${index + 1} workflow profile`}
                 className="h-8 w-40 text-sm"
-                placeholder="Trigger profile"
+                placeholder={t("editor.triggerProfile")}
                 value={String((trigger.config as Record<string, unknown> | undefined)?.profile ?? "")}
                 onChange={(e) =>
                   updateTriggerConfig(index, { profile: e.target.value })

@@ -6,6 +6,40 @@ jest.mock("@/lib/stores/sprint-store", () => ({
     selector({ createSprint, updateSprint }),
 }));
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      "card.title": "Sprints",
+      "card.description": "Manage sprint cycles for this project.",
+      "dialog.createTitle": "Create Sprint",
+      "dialog.createDescription": "Define the sprint name, date range, and optional budget.",
+      "dialog.name": "Name",
+      "dialog.namePlaceholder": "Sprint 1",
+      "dialog.startDate": "Start Date",
+      "dialog.endDate": "End Date",
+      "dialog.budgetUsd": "Budget (USD)",
+      "dialog.cancel": "Cancel",
+      "dialog.create": "Create",
+      "dialog.saving": "Saving...",
+      "dialog.error.requiredFields": "Name, start date, and end date are required.",
+      "dialog.error.createFailed": "Failed to create sprint.",
+      "empty.createFirst": "No sprints yet. Create the first sprint to begin tracking cycles.",
+      "table.name": "Name",
+      "table.status": "Status",
+      "table.dateRange": "Date range",
+      "table.budget": "Budget",
+      "table.spent": "Spent",
+      "table.actions": "Actions",
+      "status.planning": "Planning",
+      "status.active": "Active",
+      "status.closed": "Closed",
+      "actions.activate": "Activate",
+      "actions.close": "Close",
+    };
+    return map[key] ?? key;
+  },
+}));
+
 import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor } from "@testing-library/react";
 import { SprintManagement } from "./sprint-management";
@@ -47,8 +81,8 @@ describe("SprintManagement", () => {
 
     await user.click(screen.getByRole("button", { name: "Create Sprint" }));
     await user.type(screen.getByLabelText("Name"), "Sprint 2");
-    await user.type(screen.getByLabelText("Start date"), "2026-04-01");
-    await user.type(screen.getByLabelText("End date"), "2026-04-07");
+    await user.type(screen.getByLabelText("Start Date"), "2026-04-01");
+    await user.type(screen.getByLabelText("End Date"), "2026-04-07");
     await user.type(screen.getByLabelText("Budget (USD)"), "12.5");
     await user.click(screen.getByRole("button", { name: "Create" }));
 

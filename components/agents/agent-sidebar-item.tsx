@@ -73,7 +73,7 @@ export function AgentSidebarItem({
           {agent.budget > 0 && (
             <Progress
               value={costPct}
-              aria-label="Budget usage"
+              aria-label={t("card.budgetUsage")}
               className="h-1 w-10"
               indicatorClassName={costPct > 80 ? "bg-destructive" : undefined}
             />

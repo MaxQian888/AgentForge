@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,8 @@ interface ProjectBootstrapPanelProps {
 export function ProjectBootstrapPanel({
   bootstrap,
 }: ProjectBootstrapPanelProps) {
+  const t = useTranslations("dashboard");
+
   if (!bootstrap || bootstrap.unresolvedCount === 0) {
     return null;
   }
@@ -21,7 +24,7 @@ export function ProjectBootstrapPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Project bootstrap</CardTitle>
+        <CardTitle>{t("bootstrap.title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {bootstrap.phases.map((phase) => (
@@ -41,7 +44,7 @@ export function ProjectBootstrapPanel({
                   variant={phase.state === "ready" ? "secondary" : "outline"}
                   className="text-[11px]"
                 >
-                  {phase.state}
+                  {t(`bootstrap.state.${phase.state}`)}
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">{phase.reason}</p>

@@ -6,6 +6,7 @@
  * workflow execution and never mutates the store.
  */
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +46,7 @@ const FALLBACK_SAMPLE = JSON.stringify(
 );
 
 export function TriggerTestModal({ open, triggerId, initialSample, onClose }: Props) {
+  const t = useTranslations("triggers.testModal");
   const testTrigger = useEmployeeTriggerStore((s) => s.testTrigger);
   const [sample, setSample] = useState(initialSample ?? FALLBACK_SAMPLE);
   const [parseErr, setParseErr] = useState<string | null>(null);
@@ -67,7 +69,7 @@ export function TriggerTestModal({ open, triggerId, initialSample, onClose }: Pr
     try {
       parsed = JSON.parse(sample);
     } catch (err) {
-      setParseErr(`Sample event JSON 不合法: ${(err as Error).message}`);
+      setParseErr(t("jsonError", { message: (err as Error).message }));
       return;
     }
     setParseErr(null);
@@ -85,16 +87,14 @@ export function TriggerTestModal({ open, triggerId, initialSample, onClose }: Pr
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>试运行触发器 (Dry-Run)</DialogTitle>
-          <DialogDescription>
-            该操作不会真的派发工作流，也不会消耗幂等键。仅用于验证 match + input mapping。
-          </DialogDescription>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
         <Tabs value={tab} onValueChange={(v) => setTab(v as "sample" | "result")}>
           <TabsList>
-            <TabsTrigger value="sample">Sample event</TabsTrigger>
+            <TabsTrigger value="sample">{t("tabSample")}</TabsTrigger>
             <TabsTrigger value="result" disabled={result === null}>
-              Result
+              {t("tabResult")}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="sample">
@@ -112,10 +112,10 @@ export function TriggerTestModal({ open, triggerId, initialSample, onClose }: Pr
         </Tabs>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            关闭
+            {t("close")}
           </Button>
           <Button onClick={onRun} disabled={!triggerId || running}>
-            {running ? "运行中…" : "Run dry-run"}
+            {running ? t("running") : t("runDryRun")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -124,30 +124,31 @@ export function TriggerTestModal({ open, triggerId, initialSample, onClose }: Pr
 }
 
 function ResultView({ result }: { result: DryRunResult }) {
+  const t = useTranslations("triggers.testModal");
   return (
     <div className="space-y-3 text-sm">
       <div className="flex items-center gap-2">
-        <span>匹配:</span>
+        <span>{t("matched")}</span>
         {result.matched ? (
-          <Badge variant="default">匹配</Badge>
+          <Badge variant="default">{t("matchedYes")}</Badge>
         ) : (
-          <Badge variant="secondary">未匹配</Badge>
+          <Badge variant="secondary">{t("matchedNo")}</Badge>
         )}
-        <span className="ml-3">是否会派发:</span>
+        <span className="ml-3">{t("wouldDispatch")}</span>
         {result.would_dispatch ? (
-          <Badge variant="default">YES</Badge>
+          <Badge variant="default">{t("wouldDispatchYes")}</Badge>
         ) : (
-          <Badge variant="outline">NO</Badge>
+          <Badge variant="outline">{t("wouldDispatchNo")}</Badge>
         )}
       </div>
       {result.skip_reason ? (
         <p className="text-xs text-amber-600 dark:text-amber-400">
-          跳过原因: <code>{result.skip_reason}</code>
+          {t("skipReason")} <code>{result.skip_reason}</code>
         </p>
       ) : null}
       {result.rendered_input ? (
         <div>
-          <p className="text-xs text-muted-foreground mb-1">渲染后的 engine input:</p>
+          <p className="text-xs text-muted-foreground mb-1">{t("renderedInput")}</p>
           <pre className="text-xs bg-muted p-2 rounded overflow-auto">
             {JSON.stringify(result.rendered_input, null, 2)}
           </pre>

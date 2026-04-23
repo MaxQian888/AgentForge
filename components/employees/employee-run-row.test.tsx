@@ -1,3 +1,18 @@
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      "kind.workflow": "workflow",
+      "kind.agent": "agent",
+      "duration.ms": "ms",
+      "duration.s": "s",
+      "emptyValue": "—",
+      "status.running": "running",
+      "status.completed": "completed",
+    };
+    return map[key] ?? key;
+  },
+}));
+
 import { render, screen } from "@testing-library/react";
 import { EmployeeRunRow } from "./employee-run-row";
 

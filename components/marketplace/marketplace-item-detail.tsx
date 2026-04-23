@@ -31,6 +31,7 @@ import { MarketplaceVersionList } from "./marketplace-version-list";
 import { MarketplaceReviewDialog } from "./marketplace-review-dialog";
 import { SkillPackagePreviewPane } from "./skill-package-preview";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 interface Props {
   item: MarketplaceItem;
@@ -43,44 +44,6 @@ interface Props {
   onTagClick?: (tag: string) => void;
 }
 
-function statusCopy(consumption: MarketplaceConsumptionRecord | null) {
-  if (!consumption) {
-    return {
-      badge: null,
-      detail: "Not installed yet. Install it from the marketplace or use a supported local side-load flow.",
-    };
-  }
-
-  if (consumption.status === "installed" && consumption.provenance?.sourceType === "builtin") {
-    return {
-      badge: consumption.used ? "Manage in workspace" : "Available locally",
-      detail: consumption.used
-        ? `Managed through ${consumption.consumerSurface}.`
-        : `Already available through ${consumption.consumerSurface} in this checkout.`,
-    };
-  }
-
-  switch (consumption.status) {
-    case "installed":
-      return {
-        badge: consumption.used ? "Manage in workspace" : "Installed",
-        detail: consumption.used
-          ? `Managed through ${consumption.consumerSurface}.`
-          : "Installed successfully and ready for downstream handoff.",
-      };
-    case "warning":
-      return {
-        badge: "Needs attention",
-        detail: consumption.warning ?? consumption.failureReason ?? "Installation completed with warnings.",
-      };
-    default:
-      return {
-        badge: "Blocked",
-        detail: consumption.failureReason ?? "This item cannot be installed in the current checkout.",
-      };
-  }
-}
-
 function downstreamHref(item: MarketplaceItem): string {
   switch (item.type) {
     case "plugin":
@@ -89,19 +52,6 @@ function downstreamHref(item: MarketplaceItem): string {
       return "/workflow";
     default:
       return "/roles";
-  }
-}
-
-function downstreamLabel(item: MarketplaceItem): string {
-  switch (item.type) {
-    case "plugin":
-      return "Open plugin console";
-    case "role":
-      return "Open roles workspace";
-    case "workflow_template":
-      return "Open workflow editor";
-    default:
-      return "Open role authoring";
   }
 }
 
@@ -116,6 +66,47 @@ function sideloadRootFile(type: string): string {
   }
 }
 
+function getStatusState(
+  consumption: MarketplaceConsumptionRecord | null,
+  t: (key: string, values?: Record<string, string | number>) => string,
+) {
+  if (!consumption) {
+    return {
+      badge: null,
+      detail: t("detail.status.notInstalled"),
+    };
+  }
+
+  if (consumption.status === "installed" && consumption.provenance?.sourceType === "builtin") {
+    return {
+      badge: consumption.used ? t("detail.status.manage") : t("detail.status.available"),
+      detail: consumption.used
+        ? t("detail.status.detailManaged", { surface: consumption.consumerSurface })
+        : t("detail.status.detailAvailable", { surface: consumption.consumerSurface }),
+    };
+  }
+
+  switch (consumption.status) {
+    case "installed":
+      return {
+        badge: consumption.used ? t("detail.status.manage") : t("detail.status.installed"),
+        detail: consumption.used
+          ? t("detail.status.detailManaged", { surface: consumption.consumerSurface })
+          : t("detail.status.detailReady"),
+      };
+    case "warning":
+      return {
+        badge: t("detail.status.needsAttention"),
+        detail: consumption.warning ?? consumption.failureReason ?? t("detail.status.detailWarning", { warning: "" }),
+      };
+    default:
+      return {
+        badge: t("detail.status.blocked"),
+        detail: consumption.failureReason ?? t("detail.status.detailBlocked"),
+      };
+  }
+}
+
 export function MarketplaceItemDetail({
   item,
   consumption = null,
@@ -126,6 +117,7 @@ export function MarketplaceItemDetail({
   onUninstall,
   onTagClick,
 }: Props) {
+  const t = useTranslations("marketplace");
   const reviews = useMarketplaceStore((s) => s.selectedItemReviews);
   const uploadVersion = useMarketplaceStore((s) => s.uploadVersion);
   const deleteItem = useMarketplaceStore((s) => s.deleteItem);
@@ -142,13 +134,26 @@ export function MarketplaceItemDetail({
   const [runningAction, setRunningAction] = useState<"verify" | "feature" | "delete" | null>(null);
   const [sideloadFile, setSideloadFile] = useState<File | null>(null);
 
-  const state = useMemo(() => statusCopy(consumption), [consumption]);
+  const state = useMemo(() => getStatusState(consumption, t), [consumption, t]);
   const isInstalled = consumption?.status === "installed" && consumption.installed;
   const canManageVersions = currentUserId === item.author_id;
 
+  const downstreamLabelText = useMemo(() => {
+    switch (item.type) {
+      case "plugin":
+        return t("detail.downstream.plugin");
+      case "role":
+        return t("detail.downstream.role");
+      case "workflow_template":
+        return t("detail.downstream.workflow");
+      default:
+        return t("detail.downstream.default");
+    }
+  }, [item.type, t]);
+
   const handleUploadVersion = async () => {
     if (!artifact || !version.trim()) {
-      toast.error("Version and artifact are required.");
+      toast.error(t("detail.toast.failedUpload"));
       return;
     }
     setSubmittingVersion(true);
@@ -158,12 +163,12 @@ export function MarketplaceItemDetail({
         changelog,
         artifact,
       });
-      toast.success(`Uploaded ${version.trim()} for ${item.name}.`);
+      toast.success(t("detail.toast.uploaded", { version: version.trim(), name: item.name }));
       setVersion("");
       setChangelog("");
       setArtifact(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to upload version");
+      toast.error(error instanceof Error ? error.message : t("detail.toast.failedUpload"));
     } finally {
       setSubmittingVersion(false);
     }
@@ -173,9 +178,9 @@ export function MarketplaceItemDetail({
     setRunningAction("verify");
     try {
       await verifyItem(item.id);
-      toast.success(`${item.name} marked as verified.`);
+      toast.success(t("detail.toast.verify", { name: item.name }));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to verify item");
+      toast.error(error instanceof Error ? error.message : t("detail.toast.failedVerify"));
     } finally {
       setRunningAction(null);
     }
@@ -185,9 +190,9 @@ export function MarketplaceItemDetail({
     setRunningAction("feature");
     try {
       await featureItem(item.id);
-      toast.success(`${item.name} added to featured items.`);
+      toast.success(t("detail.toast.feature", { name: item.name }));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to feature item");
+      toast.error(error instanceof Error ? error.message : t("detail.toast.failedFeature"));
     } finally {
       setRunningAction(null);
     }
@@ -197,9 +202,9 @@ export function MarketplaceItemDetail({
     setRunningAction("delete");
     try {
       await deleteItem(item.id);
-      toast.success(`${item.name} deleted.`);
+      toast.success(t("detail.toast.delete", { name: item.name }));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete item");
+      toast.error(error instanceof Error ? error.message : t("detail.toast.failedDelete"));
     } finally {
       setRunningAction(null);
     }
@@ -209,10 +214,13 @@ export function MarketplaceItemDetail({
     if (!sideloadFile) return;
     try {
       await sideloadItem(item.type, sideloadFile);
-      toast.success(`Side-loaded ${typeDisplayLabel(item.type).toLowerCase()} from ${sideloadFile.name}.`);
+      toast.success(t("detail.toast.sideload", {
+        type: typeDisplayLabel(item.type).toLowerCase(),
+        filename: sideloadFile.name,
+      }));
       setSideloadFile(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Sideload failed");
+      toast.error(error instanceof Error ? error.message : t("detail.toast.failedSideload"));
     }
   };
 
@@ -224,14 +232,14 @@ export function MarketplaceItemDetail({
         <div className="flex items-center gap-2 border-b bg-blue-50 px-4 py-2 dark:bg-blue-950">
           <ArrowUpCircle className="size-4 text-blue-500" />
           <span className="flex-1 text-xs text-blue-700 dark:text-blue-300">
-            Update available: v{updateInfo!.latestVersion} (installed: v{updateInfo!.installedVersion})
+            {t("update.banner", { latest: updateInfo!.latestVersion, installed: updateInfo!.installedVersion })}
           </span>
           <Button
             size="sm"
             variant="default"
             onClick={() => onInstall?.(item)}
           >
-            Update
+            {t("update.button")}
           </Button>
         </div>
       ) : null}
@@ -240,13 +248,15 @@ export function MarketplaceItemDetail({
         <div className="mb-2 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">{item.name}</h2>
-            <p className="text-xs text-muted-foreground">by {item.author_name}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("item.byAuthor", { author: item.author_name })}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             {isInstalled ? (
               <>
                 <Button asChild size="sm" variant="secondary">
-                  <a href={downstreamHref(item)}>{downstreamLabel(item)}</a>
+                  <a href={downstreamHref(item)}>{downstreamLabelText}</a>
                 </Button>
                 {consumption?.provenance?.sourceType !== "builtin" ? (
                   <AlertDialog>
@@ -257,20 +267,20 @@ export function MarketplaceItemDetail({
                         className="text-destructive"
                         disabled={uninstallLoading}
                       >
-                        {uninstallLoading ? "Removing..." : "Uninstall"}
+                        {uninstallLoading ? t("uninstall.removing") : t("uninstall.button")}
                       </Button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
-                        <AlertDialogTitle>Uninstall {item.name}?</AlertDialogTitle>
+                        <AlertDialogTitle>{t("uninstall.confirm", { name: item.name })}</AlertDialogTitle>
                         <AlertDialogDescription>
-                          This will remove the installed files and consumption state for this {typeDisplayLabel(item.type).toLowerCase()}. This action cannot be undone.
+                          {t("uninstall.confirmDesc")}
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogCancel>{t("install.cancel")}</AlertDialogCancel>
                         <AlertDialogAction onClick={() => onUninstall?.(item)}>
-                          Uninstall
+                          {t("uninstall.button")}
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
@@ -284,7 +294,7 @@ export function MarketplaceItemDetail({
                 disabled={consumption?.status === "blocked"}
                 onClick={() => onInstall?.(item)}
               >
-                {consumption?.status === "blocked" ? "Blocked" : "Install"}
+                {consumption?.status === "blocked" ? t("item.blocked") : t("item.install")}
               </Button>
             )}
           </div>
@@ -306,13 +316,13 @@ export function MarketplaceItemDetail({
           {item.is_verified ? (
             <Badge className="bg-blue-500 text-xs">
               <ShieldCheck className="mr-1 size-3" />
-              Verified
+              {t("item.verified")}
             </Badge>
           ) : null}
           {item.is_featured ? (
             <Badge className="bg-amber-500 text-xs">
               <Sparkles className="mr-1 size-3" />
-              Featured
+              {t("item.featured")}
             </Badge>
           ) : null}
           {state.badge ? <Badge variant="secondary" className="text-xs">{state.badge}</Badge> : null}
@@ -326,13 +336,13 @@ export function MarketplaceItemDetail({
       <Tabs defaultValue="overview" className="flex flex-1 flex-col">
         <TabsList className="mx-4 mt-2 w-auto">
           <TabsTrigger value="overview" className="text-xs">
-            Overview
+            {t("detail.tab.overview")}
           </TabsTrigger>
           <TabsTrigger value="versions" className="text-xs">
-            Versions
+            {t("detail.tab.versions")}
           </TabsTrigger>
           <TabsTrigger value="reviews" className="text-xs">
-            Reviews
+            {t("detail.tab.reviews")}
           </TabsTrigger>
         </TabsList>
         <ScrollArea className="flex-1">
@@ -344,7 +354,7 @@ export function MarketplaceItemDetail({
             {item.description ? (
               <p className="text-sm text-muted-foreground">{item.description}</p>
             ) : (
-              <p className="text-sm text-muted-foreground">No description provided.</p>
+              <p className="text-sm text-muted-foreground">{t("item.noDescription")}</p>
             )}
 
             {item.tags.length > 0 ? (
@@ -364,35 +374,29 @@ export function MarketplaceItemDetail({
 
             <div className="space-y-1 text-xs text-muted-foreground">
               <div>
-                License: <span className="text-foreground">{item.license}</span>
+                {t("detail.license", { license: item.license })}
               </div>
               {item.sourceType === "builtin" ? (
-                <div>Source: <span className="text-foreground">Repo-owned built-in skill</span></div>
+                <div>{t("detail.sourceBuiltin")}</div>
               ) : item.latest_version ? (
                 <div>
-                  Latest: <span className="text-foreground">{item.latest_version}</span>
+                  {t("detail.latest", { version: item.latest_version })}
                 </div>
               ) : (
-                <div>No published version yet.</div>
+                <div>{t("detail.noVersion")}</div>
               )}
               {consumption?.provenance?.selectedVersion ? (
                 <div>
-                  Installed version:{" "}
-                  <span className="text-foreground">
-                    {consumption.provenance.selectedVersion}
-                  </span>
+                  {t("detail.installedVersion", { version: consumption.provenance.selectedVersion })}
                 </div>
               ) : null}
               {consumption?.provenance?.localPath ? (
                 <div className="break-all">
-                  Local path:{" "}
-                  <span className="text-foreground">
-                    {consumption.provenance.localPath}
-                  </span>
+                  {t("detail.localPath", { path: consumption.provenance.localPath })}
                 </div>
               ) : item.localPath ? (
                 <div className="break-all">
-                  Local path: <span className="text-foreground">{item.localPath}</span>
+                  {t("detail.localPath", { path: item.localPath })}
                 </div>
               ) : null}
             </div>
@@ -405,15 +409,14 @@ export function MarketplaceItemDetail({
                 className="flex items-center gap-1 text-xs text-blue-500 hover:underline"
               >
                 <ExternalLink className="size-3" />
-                Repository
+                {t("item.repository")}
               </a>
             ) : null}
 
             {typeof item.extra_metadata.docsRef === "string" &&
             item.extra_metadata.docsRef.trim() ? (
               <div className="text-xs text-muted-foreground">
-                Docs reference:{" "}
-                <span className="text-foreground">{item.extra_metadata.docsRef}</span>
+                {t("detail.docsRef", { ref: item.extra_metadata.docsRef })}
               </div>
             ) : null}
 
@@ -423,16 +426,16 @@ export function MarketplaceItemDetail({
 
             {item.type === "skill" && item.previewError ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                Skill preview unavailable: {item.previewError}
+                {t("detail.skillPreviewUnavailable", { error: item.previewError })}
               </div>
             ) : null}
 
             <div className="space-y-2 rounded-lg border border-border/60 p-3">
-              <p className="text-xs font-medium">Local side-load</p>
+              <p className="text-xs font-medium">{t("detail.sideload.title")}</p>
               {item.type === "plugin" ? (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    Reuse the existing local plugin install seam from within the marketplace workspace.
+                    {t("detail.sideload.pluginDesc")}
                   </p>
                   <Button
                     type="button"
@@ -440,13 +443,13 @@ export function MarketplaceItemDetail({
                     size="sm"
                     onClick={() => onSideLoad?.(item)}
                   >
-                    Side-load local plugin
+                    {t("detail.sideload.pluginButton")}
                   </Button>
                 </>
               ) : (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    Upload a zip package containing a valid {sideloadRootFile(item.type)} at its root.
+                    {t("detail.sideload.uploadDesc", { file: sideloadRootFile(item.type) })}
                   </p>
                   <div className="flex items-center gap-2">
                     <Input
@@ -463,7 +466,9 @@ export function MarketplaceItemDetail({
                       onClick={() => void handleSideload()}
                     >
                       <Upload className="mr-1 size-3" />
-                      {sideloadLoading ? "Installing..." : `Side-load ${typeDisplayLabel(item.type).toLowerCase()}`}
+                      {sideloadLoading
+                        ? t("detail.sideload.installing")
+                        : t("detail.sideload.uploadButton", { type: typeDisplayLabel(item.type).toLowerCase() })}
                     </Button>
                   </div>
                 </>
@@ -471,7 +476,7 @@ export function MarketplaceItemDetail({
             </div>
 
             <div className="space-y-2 rounded-lg border border-border/60 p-3">
-              <p className="text-xs font-medium">Moderation</p>
+              <p className="text-xs font-medium">{t("detail.moderation.title")}</p>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -480,7 +485,7 @@ export function MarketplaceItemDetail({
                   disabled={item.is_verified || runningAction !== null}
                   onClick={() => void handleVerify()}
                 >
-                  Verify
+                  {t("detail.moderation.verify")}
                 </Button>
                 <Button
                   type="button"
@@ -489,11 +494,11 @@ export function MarketplaceItemDetail({
                   disabled={item.is_featured || runningAction !== null}
                   onClick={() => void handleFeature()}
                 >
-                  Feature
+                  {t("detail.moderation.feature")}
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Admin-only actions fail with an explicit permission error when the current operator is not allowed to moderate this item.
+                {t("detail.moderation.hint")}
               </p>
             </div>
           </TabsContent>
@@ -501,28 +506,28 @@ export function MarketplaceItemDetail({
           <TabsContent value="versions" className="space-y-4 p-4">
             {canManageVersions ? (
               <div className="space-y-3 rounded-lg border border-border/60 p-3">
-                <p className="text-xs font-medium">Upload a new version</p>
+                <p className="text-xs font-medium">{t("detail.versionUpload.title")}</p>
                 <div className="grid gap-2">
-                  <Label htmlFor="version-input">Version</Label>
+                  <Label htmlFor="version-input">{t("detail.versionUpload.versionLabel")}</Label>
                   <Input
                     id="version-input"
                     value={version}
                     onChange={(event) => setVersion(event.target.value)}
-                    placeholder="1.2.0"
+                    placeholder={t("detail.versionUpload.versionPlaceholder")}
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="changelog-input">Changelog</Label>
+                  <Label htmlFor="changelog-input">{t("detail.versionUpload.changelogLabel")}</Label>
                   <Textarea
                     id="changelog-input"
                     value={changelog}
                     onChange={(event) => setChangelog(event.target.value)}
                     rows={3}
-                    placeholder="What changed in this release?"
+                    placeholder={t("detail.versionUpload.changelogPlaceholder")}
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="artifact-input">Artifact</Label>
+                  <Label htmlFor="artifact-input">{t("detail.versionUpload.artifactLabel")}</Label>
                   <Input
                     id="artifact-input"
                     type="file"
@@ -531,7 +536,7 @@ export function MarketplaceItemDetail({
                     }
                   />
                   <p className="text-xs text-muted-foreground">
-                    Upload a zip package whose root matches the current marketplace artifact contract for this item type.
+                    {t("detail.versionUpload.artifactHint")}
                   </p>
                 </div>
                 <Button
@@ -541,7 +546,7 @@ export function MarketplaceItemDetail({
                   onClick={() => void handleUploadVersion()}
                 >
                   <Upload className="mr-1 size-3" />
-                  {submittingVersion ? "Uploading..." : "Upload version"}
+                  {submittingVersion ? t("detail.versionUpload.uploading") : t("detail.versionUpload.uploadButton")}
                 </Button>
               </div>
             ) : null}
@@ -555,7 +560,7 @@ export function MarketplaceItemDetail({
           <TabsContent value="reviews" className="space-y-3 p-4">
             <MarketplaceReviewDialog itemId={item.id} />
             {reviews.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No reviews yet.</p>
+              <p className="text-xs text-muted-foreground">{t("detail.noReviews")}</p>
             ) : (
               reviews.map((review) => (
                 <div key={review.id} className="space-y-1 rounded border p-3">
@@ -595,7 +600,7 @@ export function MarketplaceItemDetail({
             onClick={() => void handleDelete()}
           >
             <Trash2 className="mr-1 size-3" />
-            Delete item
+            {t("detail.deleteItem")}
           </Button>
         </div>
       ) : null}

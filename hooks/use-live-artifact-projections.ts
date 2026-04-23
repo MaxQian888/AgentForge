@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import type { WSClient, WSHandler } from "@/lib/ws-client";
 import {
@@ -229,6 +230,7 @@ export function useLiveArtifactProjections(
     onAssetReload,
   } = options;
 
+  const t = useTranslations("knowledge");
   const router = useRouter();
 
   const enabled =
@@ -520,17 +522,17 @@ export function useLiveArtifactProjections(
         });
         if (!res.ok) {
           const msg = await res.text().catch(() => "");
-          toast.error("Freeze failed", {
+          toast.error(t("liveArtifact.freezeError"), {
             description: msg || `HTTP ${res.status}`,
           });
           return null;
         }
         const data = await res.json().catch(() => null);
-        toast.success("Block frozen");
+        toast.success(t("liveArtifact.freezeSuccess"));
         onAssetReloadRef.current?.(data);
         return data;
       } catch (err) {
-        toast.error("Freeze failed", {
+        toast.error(t("liveArtifact.freezeError"), {
           description: err instanceof Error ? err.message : String(err),
         });
         return null;

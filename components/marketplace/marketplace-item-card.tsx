@@ -15,6 +15,7 @@ import {
   type MarketplaceItem,
   type MarketplaceUpdateInfo,
 } from "@/lib/stores/marketplace-store";
+import { useTranslations } from "next-intl";
 
 interface Props {
   item: MarketplaceItem;
@@ -46,18 +47,19 @@ export function MarketplaceItemCard({
   onInstall,
   onTagClick,
 }: Props) {
+  const t = useTranslations("marketplace");
   const isInstalled = consumption?.status === "installed" && consumption.installed;
   const isBlocked = consumption?.status === "blocked";
   const hasUpdate = updateInfo?.hasUpdate === true;
   const actionLabel = hasUpdate
-    ? "Update"
+    ? t("item.update")
     : isInstalled
       ? consumption?.used
-        ? "Manage"
-        : "Installed"
+        ? t("item.manage")
+        : t("item.installed")
       : isBlocked
-        ? "Blocked"
-        : "Install";
+        ? t("item.blocked")
+        : t("item.install");
 
   return (
     <Card
@@ -86,7 +88,7 @@ export function MarketplaceItemCard({
                 )}
               </div>
               <span className="text-xs text-muted-foreground truncate block">
-                by {item.author_name}
+                {t("item.byAuthor", { author: item.author_name })}
               </span>
             </div>
           </div>
@@ -101,19 +103,19 @@ export function MarketplaceItemCard({
         </div>
         {item.sourceType === "builtin" ? (
           <div className="mt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Built-in
+            {t("item.builtin")}
           </div>
         ) : null}
         {hasUpdate ? (
           <div className="mt-1 flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400">
             <ArrowUpCircle className="size-3" />
-            Update: v{updateInfo!.latestVersion}
+            {t("item.updateVersion", { version: updateInfo!.latestVersion })}
           </div>
         ) : null}
       </CardHeader>
       <CardContent className="pb-2">
         <p className="text-xs text-muted-foreground line-clamp-2">
-          {item.description || "No description provided."}
+          {item.description || t("item.noDescription")}
         </p>
         {item.tags.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1">
@@ -172,4 +174,3 @@ export function MarketplaceItemCard({
     </Card>
   );
 }
-

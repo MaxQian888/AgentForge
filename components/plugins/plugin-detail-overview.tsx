@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { useTranslations } from "next-intl";
 import { PluginDetailSection } from "@/components/plugins/plugin-detail-section";
 import { PluginTrustBadge } from "@/components/plugins/plugin-trust-badge";
 import type { PluginRecord } from "@/lib/stores/plugin-store";
@@ -9,12 +10,12 @@ interface PluginDetailOverviewProps {
   plugin: PluginRecord;
 }
 
-function renderPermissions(plugin: PluginRecord): string {
+function renderPermissions(plugin: PluginRecord, t: ReturnType<typeof useTranslations>): string {
   const permissions: string[] = [];
 
   if (plugin.permissions.network?.required) {
     permissions.push(
-      `Network${
+      `${t("detailOverview.network")}${
         plugin.permissions.network.domains?.length
           ? ` (${plugin.permissions.network.domains.join(", ")})`
           : ""
@@ -24,7 +25,7 @@ function renderPermissions(plugin: PluginRecord): string {
 
   if (plugin.permissions.filesystem?.required) {
     permissions.push(
-      `Filesystem${
+      `${t("detailOverview.filesystem")}${
         plugin.permissions.filesystem.allowed_paths?.length
           ? ` (${plugin.permissions.filesystem.allowed_paths.join(", ")})`
           : ""
@@ -32,10 +33,11 @@ function renderPermissions(plugin: PluginRecord): string {
     );
   }
 
-  return permissions.length > 0 ? permissions.join(" · ") : "No declared permissions";
+  return permissions.length > 0 ? permissions.join(" · ") : t("detailOverview.noPermissions");
 }
 
 export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
+  const t = useTranslations("plugins");
   const roleConsumers = plugin.roleConsumers ?? [];
   return (
     <div className="flex flex-col gap-4">
@@ -45,7 +47,7 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
             {plugin.metadata.name}
           </h3>
           <p className="text-sm text-muted-foreground">
-            {plugin.metadata.description || "No plugin description provided."}
+            {plugin.metadata.description || t("detailOverview.noDescription")}
           </p>
         </div>
         <Badge variant="secondary">
@@ -56,57 +58,57 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
       <PluginTrustBadge source={plugin.source} />
 
       <div className="grid gap-3 text-sm">
-        <PluginDetailSection title="Runtime host">
-          {plugin.runtime_host ?? "Not executable"}
+        <PluginDetailSection title={t("detailOverview.runtimeHost")}>
+          {plugin.runtime_host ?? t("detailOverview.notExecutable")}
         </PluginDetailSection>
 
-        <PluginDetailSection title="Runtime declaration">
+        <PluginDetailSection title={t("detailOverview.runtimeDeclaration")}>
           {plugin.spec.runtime}
         </PluginDetailSection>
 
-        <PluginDetailSection title="Permissions">
-          {renderPermissions(plugin)}
+        <PluginDetailSection title={t("detailOverview.permissions")}>
+          {renderPermissions(plugin, t)}
         </PluginDetailSection>
 
-        <PluginDetailSection title="Resolved source path">
+        <PluginDetailSection title={t("detailOverview.resolvedSourcePath")}>
           {plugin.resolved_source_path ??
             plugin.source.path ??
-            "No resolved source path"}
+            t("detailOverview.noResolvedPath")}
         </PluginDetailSection>
 
         {plugin.source.registry || plugin.source.entry || plugin.source.version ? (
-          <PluginDetailSection title="Remote source provenance">
+          <PluginDetailSection title={t("detailOverview.remoteProvenance")}>
             <div className="grid gap-1">
               {plugin.source.registry ? (
-                <p>Registry: {plugin.source.registry}</p>
+                <p>{t("detailOverview.registry", { registry: plugin.source.registry })}</p>
               ) : null}
               {plugin.source.entry ? (
-                <p>Entry: {plugin.source.entry}</p>
+                <p>{t("detailOverview.entry", { entry: plugin.source.entry })}</p>
               ) : null}
               {plugin.source.version ? (
-                <p>Requested version: {plugin.source.version}</p>
+                <p>{t("detailOverview.requestedVersion", { version: plugin.source.version })}</p>
               ) : null}
             </div>
           </PluginDetailSection>
         ) : null}
 
         {plugin.source.type === "marketplace" || plugin.source.catalog || plugin.source.ref ? (
-          <PluginDetailSection title="Marketplace provenance">
+          <PluginDetailSection title={t("detailOverview.marketplaceProvenance")}>
             <div className="grid gap-1">
               {plugin.source.catalog ? (
-                <p>Marketplace item: {plugin.source.catalog}</p>
+                <p>{t("detailOverview.marketplaceItem", { item: plugin.source.catalog })}</p>
               ) : null}
               {plugin.source.ref ? (
-                <p>Selected version: {plugin.source.ref}</p>
+                <p>{t("detailOverview.selectedVersion", { version: plugin.source.ref })}</p>
               ) : null}
-              <p>Source type: {plugin.source.type}</p>
+              <p>{t("detailOverview.sourceType", { type: plugin.source.type })}</p>
               {plugin.source.catalog ? (
                 <p>
                   <a
                     href={`/marketplace?item=${encodeURIComponent(plugin.source.catalog)}`}
                     className="underline"
                   >
-                    Open in marketplace
+                    {t("detailOverview.openInMarketplace")}
                   </a>
                 </p>
               ) : null}
@@ -114,78 +116,82 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
           </PluginDetailSection>
         ) : null}
 
-        <PluginDetailSection title="Runtime metadata">
-          ABI {plugin.runtime_metadata?.abi_version ?? "n/a"} · Compatible{" "}
-          {plugin.runtime_metadata?.compatible ? "yes" : "no"}
+        <PluginDetailSection title={t("detailOverview.runtimeMetadata")}>
+          {t("detailOverview.abi", {
+            version: plugin.runtime_metadata?.abi_version ?? "n/a",
+            compatible: plugin.runtime_metadata?.compatible
+              ? t("detailOverview.yes")
+              : t("detailOverview.no"),
+          })}
         </PluginDetailSection>
 
-        <PluginDetailSection title="Restart count">
+        <PluginDetailSection title={t("detailOverview.restartCount")}>
           {plugin.restart_count}
         </PluginDetailSection>
 
-        <PluginDetailSection title="Last health">
-          {plugin.last_health_at ?? "Not recorded yet"}
+        <PluginDetailSection title={t("detailOverview.lastHealth")}>
+          {plugin.last_health_at ?? t("detailOverview.notRecorded")}
         </PluginDetailSection>
 
-        <PluginDetailSection title="Last error">
-          {plugin.last_error || "No recent runtime errors"}
+        <PluginDetailSection title={t("detailOverview.lastError")}>
+          {plugin.last_error || t("detailOverview.noRecentErrors")}
         </PluginDetailSection>
 
         {plugin.builtIn ? (
-          <PluginDetailSection title="Built-in readiness">
+          <PluginDetailSection title={t("detailOverview.builtInReadiness")}>
             <div className="grid gap-1">
-              <p>{plugin.builtIn.readinessStatus ?? plugin.builtIn.availabilityStatus ?? "unknown"}</p>
+              <p>{plugin.builtIn.readinessStatus ?? plugin.builtIn.availabilityStatus ?? t("detailOverview.unknown")}</p>
               {plugin.builtIn.readinessMessage ?? plugin.builtIn.availabilityMessage ? (
                 <p>{plugin.builtIn.readinessMessage ?? plugin.builtIn.availabilityMessage}</p>
               ) : null}
               {plugin.builtIn.nextStep ? (
-                <p>Next step: {plugin.builtIn.nextStep}</p>
+                <p>{t("detailOverview.nextStep", { step: plugin.builtIn.nextStep })}</p>
               ) : null}
               {plugin.builtIn.starterFamily ? (
-                <p>Starter family: {plugin.builtIn.starterFamily}</p>
+                <p>{t("detailOverview.starterFamily", { family: plugin.builtIn.starterFamily })}</p>
               ) : null}
               {plugin.builtIn.coreFlows?.length ? (
-                <p>Core flows: {plugin.builtIn.coreFlows.join(", ")}</p>
+                <p>{t("detailOverview.coreFlows", { flows: plugin.builtIn.coreFlows.join(", ") })}</p>
               ) : null}
               {plugin.builtIn.dependencyRefs?.length ? (
-                <p>Dependencies: {plugin.builtIn.dependencyRefs.join(", ")}</p>
+                <p>{t("detailOverview.dependencies", { deps: plugin.builtIn.dependencyRefs.join(", ") })}</p>
               ) : null}
               {plugin.builtIn.workspaceRefs?.length ? (
-                <p>Workspaces: {plugin.builtIn.workspaceRefs.join(", ")}</p>
+                <p>{t("detailOverview.workspaces", { spaces: plugin.builtIn.workspaceRefs.join(", ") })}</p>
               ) : null}
               {plugin.builtIn.missingPrerequisites?.length ? (
                 <p>
-                  Missing prerequisites: {plugin.builtIn.missingPrerequisites.join(", ")}
+                  {t("detailOverview.missingPrerequisites", { items: plugin.builtIn.missingPrerequisites.join(", ") })}
                 </p>
               ) : null}
               {plugin.builtIn.missingConfiguration?.length ? (
                 <p>
-                  Missing configuration: {plugin.builtIn.missingConfiguration.join(", ")}
+                  {t("detailOverview.missingConfiguration", { items: plugin.builtIn.missingConfiguration.join(", ") })}
                 </p>
               ) : null}
               {plugin.builtIn.installable === false && plugin.builtIn.installBlockedReason ? (
-                <p>Install blocked: {plugin.builtIn.installBlockedReason}</p>
+                <p>{t("detailOverview.installBlocked", { reason: plugin.builtIn.installBlockedReason })}</p>
               ) : null}
-              {plugin.builtIn.docsRef ? <p>Docs: {plugin.builtIn.docsRef}</p> : null}
+              {plugin.builtIn.docsRef ? <p>{t("detailOverview.docs", { ref: plugin.builtIn.docsRef })}</p> : null}
             </div>
           </PluginDetailSection>
         ) : null}
 
         {plugin.source.release ? (
-          <PluginDetailSection title="Release info">
+          <PluginDetailSection title={t("detailOverview.releaseInfo")}>
             <div className="grid gap-1">
               {plugin.source.release.version ? (
-                <p>Version: {plugin.source.release.version}</p>
+                <p>{t("detailOverview.version", { version: plugin.source.release.version })}</p>
               ) : null}
               {plugin.source.release.channel ? (
-                <p>Channel: {plugin.source.release.channel}</p>
+                <p>{t("detailOverview.channel", { channel: plugin.source.release.channel })}</p>
               ) : null}
               {plugin.source.release.publishedAt ? (
-                <p>Published: {plugin.source.release.publishedAt}</p>
+                <p>{t("detailOverview.published", { date: plugin.source.release.publishedAt })}</p>
               ) : null}
               {plugin.source.release.notesUrl ? (
                 <p>
-                  Notes:{" "}
+                  {t("detailOverview.notes")}{" "}
                   <a
                     href={plugin.source.release.notesUrl}
                     target="_blank"
@@ -198,7 +204,9 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
               ) : null}
               {plugin.source.release.availableVersion ? (
                 <p className="font-medium text-foreground">
-                  Update available: v{plugin.source.release.availableVersion}
+                  {t("detailOverview.updateAvailable", {
+                    version: plugin.source.release.availableVersion,
+                  })}
                 </p>
               ) : null}
             </div>
@@ -206,7 +214,7 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
         ) : null}
 
         {roleConsumers.length > 0 ? (
-          <PluginDetailSection title="Role consumers">
+          <PluginDetailSection title={t("detailOverview.roleConsumers")}>
             <div className="grid gap-1">
               {roleConsumers.map((consumer) => (
                 <div key={`${consumer.roleId}:${consumer.referenceType}`} className="grid gap-0.5">
@@ -216,7 +224,7 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
               ))}
               <p>
                 <a href="/roles" className="underline">
-                  Open roles workspace
+                  {t("detailOverview.openRolesWorkspace")}
                 </a>
               </p>
             </div>

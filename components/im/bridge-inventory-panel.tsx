@@ -1,3 +1,4 @@
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -8,11 +9,13 @@ export interface BridgeInventoryPanelProps {
 }
 
 export function BridgeInventoryPanel({ bridges }: BridgeInventoryPanelProps) {
+  const t = useTranslations("im");
+
   if (bridges.length === 0) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          No IM bridges online. Start <code>src-im-bridge</code> to populate this panel.
+          {t("inventory.empty")}
         </CardContent>
       </Card>
     );
@@ -36,7 +39,7 @@ export function BridgeInventoryPanel({ bridges }: BridgeInventoryPanelProps) {
           </CardHeader>
           <CardContent className="space-y-4">
             <section>
-              <h3 className="mb-2 text-sm font-semibold">Providers</h3>
+              <h3 className="mb-2 text-sm font-semibold">{t("inventory.providers")}</h3>
               <ul className="space-y-2">
                 {(bridge.providers ?? []).map((p) => (
                   <li key={p.id} className="rounded-md border p-3 text-sm">
@@ -54,7 +57,7 @@ export function BridgeInventoryPanel({ bridges }: BridgeInventoryPanelProps) {
                     )}
                     {p.capabilityMatrix && (
                       <details className="mt-2 text-xs text-muted-foreground">
-                        <summary className="cursor-pointer">Capability matrix</summary>
+                        <summary className="cursor-pointer">{t("inventory.capabilityMatrix")}</summary>
                         <pre className="mt-1 overflow-auto">{JSON.stringify(p.capabilityMatrix, null, 2)}</pre>
                       </details>
                     )}
@@ -63,9 +66,9 @@ export function BridgeInventoryPanel({ bridges }: BridgeInventoryPanelProps) {
               </ul>
             </section>
             <section>
-              <h3 className="mb-2 text-sm font-semibold">Command Plugins</h3>
+              <h3 className="mb-2 text-sm font-semibold">{t("inventory.commandPlugins")}</h3>
               {(bridge.commandPlugins?.length ?? 0) === 0 ? (
-                <p className="text-xs text-muted-foreground">None loaded.</p>
+                <p className="text-xs text-muted-foreground">{t("inventory.noneLoaded")}</p>
               ) : (
                 <ul className="space-y-2">
                   {bridge.commandPlugins!.map((cp) => (

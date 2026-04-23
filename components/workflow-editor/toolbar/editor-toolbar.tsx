@@ -11,6 +11,7 @@ import {
   Download,
   Upload,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +51,7 @@ export function EditorToolbar({
   const { canUndo, canRedo, undo, redo } = useUndoRedo();
   const [showPalette, setShowPalette] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const t = useTranslations("workflow");
 
   function triggerImport() {
     fileInputRef.current?.click();
@@ -73,7 +75,7 @@ export function EditorToolbar({
           onChange={(e) =>
             dispatch({ type: "UPDATE_NAME", name: e.target.value })
           }
-          placeholder="Workflow name"
+          placeholder={t("toolbar.workflowNamePlaceholder")}
           className="max-w-xs font-medium"
         />
         <Input
@@ -84,7 +86,7 @@ export function EditorToolbar({
               description: e.target.value,
             })
           }
-          placeholder="Description"
+          placeholder={t("toolbar.descriptionPlaceholder")}
           className="max-w-sm text-sm"
         />
         <Badge variant={status === "active" ? "default" : "secondary"}>
@@ -101,12 +103,12 @@ export function EditorToolbar({
                 className="h-8 w-8"
                 onClick={undo}
                 disabled={!canUndo}
-                aria-label="Undo"
+                aria-label={t("editor.undo")}
               >
                 <Undo2 className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Undo (Ctrl+Z)</TooltipContent>
+            <TooltipContent>{t("toolbar.undoTooltip")}</TooltipContent>
           </Tooltip>
 
           {/* Redo */}
@@ -118,12 +120,12 @@ export function EditorToolbar({
                 className="h-8 w-8"
                 onClick={redo}
                 disabled={!canRedo}
-                aria-label="Redo"
+                aria-label={t("editor.redo")}
               >
                 <Redo2 className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Redo (Ctrl+Shift+Z)</TooltipContent>
+            <TooltipContent>{t("toolbar.redoTooltip")}</TooltipContent>
           </Tooltip>
 
           {/* Import (hidden file input + trigger button) */}
@@ -135,7 +137,7 @@ export function EditorToolbar({
                 accept="application/json,.json"
                 className="hidden"
                 onChange={handleFileChange}
-                aria-label="Import workflow JSON"
+                aria-label={t("toolbar.importAria")}
                 data-testid="import-workflow-file-input"
               />
               <Tooltip>
@@ -145,12 +147,12 @@ export function EditorToolbar({
                     size="icon"
                     className="h-8 w-8"
                     onClick={triggerImport}
-                    aria-label="Import workflow"
+                    aria-label={t("toolbar.importWorkflowAria")}
                   >
                     <Upload className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Import JSON</TooltipContent>
+                <TooltipContent>{t("toolbar.importTooltip")}</TooltipContent>
               </Tooltip>
             </>
           )}
@@ -164,12 +166,12 @@ export function EditorToolbar({
                   size="icon"
                   className="h-8 w-8"
                   onClick={onExport}
-                  aria-label="Export workflow"
+                  aria-label={t("toolbar.exportAria")}
                 >
                   <Download className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Export JSON</TooltipContent>
+              <TooltipContent>{t("toolbar.exportTooltip")}</TooltipContent>
             </Tooltip>
           )}
 
@@ -185,7 +187,7 @@ export function EditorToolbar({
             ) : (
               <Save className="h-4 w-4 mr-1" />
             )}
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("toolbar.saving") : t("editor.save")}
           </Button>
 
           {/* Execute */}
@@ -195,7 +197,7 @@ export function EditorToolbar({
             disabled={status !== "active"}
           >
             <PlayCircle className="h-4 w-4 mr-1" />
-            Execute
+            {t("editor.execute")}
           </Button>
         </div>
       </div>
@@ -209,7 +211,7 @@ export function EditorToolbar({
           className="text-xs text-muted-foreground shrink-0"
         >
           <GripVertical className="h-3 w-3 mr-1" />
-          {showPalette ? "Hide palette" : "Show palette"}
+          {showPalette ? t("editor.hidePalette") : t("editor.showPalette")}
         </Button>
 
         {showPalette && (

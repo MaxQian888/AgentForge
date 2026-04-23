@@ -410,7 +410,7 @@ export function AgentWorkspace({
                 onClick={() => setSpawnDialogOpen(true)}
               >
                 <Plus className="mr-1 size-3.5" />
-                Spawn Agent
+                {t("workspace.spawnAgent")}
               </Button>
             ) : null}
 

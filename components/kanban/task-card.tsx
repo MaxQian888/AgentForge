@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Draggable } from "@hello-pangea/dnd";
 import Link from "next/link";
 import { MoreHorizontal } from "lucide-react";
@@ -115,27 +116,33 @@ function formatDueDate(value: string | null): string | null {
   return new Date(value).toISOString().slice(0, 10);
 }
 
-function formatProgressHealth(label: NonNullable<Task["progress"]>["healthStatus"]) {
+function formatProgressHealth(
+  label: NonNullable<Task["progress"]>["healthStatus"],
+  t: ReturnType<typeof useTranslations>
+) {
   switch (label) {
     case "warning":
-      return "At risk";
+      return t("health.atRisk");
     case "stalled":
-      return "Stalled";
+      return t("health.stalled");
     default:
-      return "Healthy";
+      return t("health.healthy");
   }
 }
 
-function formatProgressReason(reason: string) {
+function formatProgressReason(
+  reason: string,
+  t: ReturnType<typeof useTranslations>
+) {
   switch (reason) {
     case "no_recent_update":
-      return "No recent update";
+      return t("risk.noRecentUpdate");
     case "no_assignee":
-      return "No assignee";
+      return t("risk.noAssignee");
     case "awaiting_review":
-      return "Awaiting review";
+      return t("risk.awaitingReview");
     default:
-      return reason || "Needs attention";
+      return reason || t("card.needsAttention");
   }
 }
 
@@ -172,6 +179,7 @@ export function TaskCard({
   onQuickStatusChange,
   onQuickPriorityChange,
 }: TaskCardProps) {
+  const t = useTranslations("tasks");
   const previewDoc = linkedDocs[0];
   const [docPreviewOpen, setDocPreviewOpen] = useState(false);
   const dueDate = formatDueDate(task.plannedEndAt);
@@ -258,7 +266,7 @@ export function TaskCard({
                 <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                   {onQuickPriorityChange ? (
                     <>
-                      <DropdownMenuLabel className="text-xs">Priority</DropdownMenuLabel>
+                      <DropdownMenuLabel className="text-xs">{t("card.changePriority")}</DropdownMenuLabel>
                       {(["urgent", "high", "medium", "low"] as TaskPriority[]).map((p) => (
                         <DropdownMenuItem
                           key={p}
@@ -266,7 +274,7 @@ export function TaskCard({
                           onClick={() => onQuickPriorityChange(task.id, p)}
                         >
                           <span className={cn("mr-2 inline-block size-2 rounded-full", priorityColors[p].split(" ")[0])} />
-                          {p}
+                          {t(`priority.${p}`)}
                         </DropdownMenuItem>
                       ))}
                       <DropdownMenuSeparator />
@@ -274,14 +282,14 @@ export function TaskCard({
                   ) : null}
                   {onQuickStatusChange ? (
                     <>
-                      <DropdownMenuLabel className="text-xs">Status</DropdownMenuLabel>
+                      <DropdownMenuLabel className="text-xs">{t("card.changeStatus")}</DropdownMenuLabel>
                       {(["inbox", "triaged", "assigned", "in_progress", "in_review", "done", "cancelled"] as TaskStatus[]).map((s) => (
                         <DropdownMenuItem
                           key={s}
                           disabled={s === task.status}
                           onClick={() => onQuickStatusChange(task.id, s)}
                         >
-                          {s.replace(/_/g, " ")}
+                          {t(`status.${s}`)}
                         </DropdownMenuItem>
                       ))}
                     </>
@@ -319,17 +327,17 @@ export function TaskCard({
                 variant="secondary"
                 className={cn("text-[11px]", progressColors[task.progress.healthStatus])}
               >
-                {formatProgressHealth(task.progress.healthStatus)}
+                {formatProgressHealth(task.progress.healthStatus, t)}
               </Badge>
               <span className="text-[11px] text-muted-foreground">
-                {formatProgressReason(task.progress.riskReason)}
+                {formatProgressReason(task.progress.riskReason, t)}
               </span>
             </div>
           )}
           {dueDate ? (
             <div className="mb-2">
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                {`Due ${dueDate}`}
+                {t("card.dueDate", { date: dueDate })}
               </Badge>
             </div>
           ) : null}
@@ -338,12 +346,12 @@ export function TaskCard({
               variant="secondary"
               className={cn("text-xs", priorityColors[task.priority])}
             >
-              {task.priority}
+              {t(`priority.${task.priority}`)}
             </Badge>
             <div className="flex items-center gap-2">
               {isPending ? (
                 <span className="text-[11px] font-medium text-muted-foreground">
-                  Saving...
+                  {t("card.saving")}
                 </span>
               ) : null}
               {previewDoc ? (
@@ -351,7 +359,7 @@ export function TaskCard({
                   <PopoverTrigger asChild>
                     <button
                       type="button"
-                      aria-label={`Show linked docs for ${task.title}`}
+                      aria-label={t("card.showLinkedDocs", { title: task.title })}
                       className="rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/40"
                       onClick={(event) => event.stopPropagation()}
                       onMouseEnter={() => setDocPreviewOpen(true)}
@@ -359,7 +367,7 @@ export function TaskCard({
                       onFocus={() => setDocPreviewOpen(true)}
                       onBlur={() => setDocPreviewOpen(false)}
                     >
-                      Docs {linkedDocs.length}
+                      {t("card.linkedDocsCount", { count: linkedDocs.length })}
                     </button>
                   </PopoverTrigger>
                   <PopoverContent
@@ -383,7 +391,7 @@ export function TaskCard({
                         className="text-xs font-medium text-primary hover:underline"
                         onClick={(event) => event.stopPropagation()}
                       >
-                        View
+                        {t("card.viewDoc")}
                       </Link>
                     </div>
                   </PopoverContent>
@@ -420,7 +428,7 @@ export function TaskCard({
                 </Avatar>
               ) : (
                 <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                  Unassigned
+                  {t("list.unassigned")}
                 </Badge>
               )}
             </div>

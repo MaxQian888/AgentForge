@@ -3,6 +3,30 @@ import userEvent from "@testing-library/user-event";
 import { MilestoneEditor } from "./milestone-editor";
 import { useMilestoneStore } from "@/lib/stores/milestone-store";
 
+jest.mock("next-intl", () => ({
+  useTranslations: (ns: string) => (key: string, values?: Record<string, string | number>) => {
+    const map: Record<string, string> = {
+      "milestones.editor.title": "Create Milestone",
+      "milestones.editor.description": "Define a roadmap milestone and target date.",
+      "milestones.editor.name": "Name",
+      "milestones.editor.namePlaceholder": "v2.0 Release",
+      "milestones.editor.targetDate": "Target Date",
+      "milestones.editor.status": "Status",
+      "milestones.status.planned": "Planned",
+      "milestones.status.in_progress": "In Progress",
+      "milestones.status.completed": "Completed",
+      "milestones.status.missed": "Missed",
+      "common.action.cancel": "Cancel",
+      "common.action.save": "Save",
+    };
+    const result = map[`${ns}.${key}`] ?? `${ns}.${key}`;
+    if (values) {
+      return result.replace(/{(\w+)}/g, (_m, k) => String(values[k] ?? ""));
+    }
+    return result;
+  },
+}));
+
 const createMilestoneMock = jest.fn();
 
 describe("MilestoneEditor", () => {

@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import {
   Select,
   SelectContent,
@@ -61,6 +62,7 @@ export function ConditionBuilder({
   onChange,
   upstreamNodes,
 }: ConditionBuilderProps) {
+  const t = useTranslations("workflow");
   const parsed = parseExpression(value);
 
   const [mode, setMode] = useState<"visual" | "expression">(
@@ -88,7 +90,7 @@ export function ConditionBuilder({
     // Switching visual → visual: try to parse current expression value
     const p = parseExpression(value);
     if (!p) {
-      toast.error("Expression too complex for visual mode");
+      toast.error(t("nodeConfig.conditionBuilder.tooComplex"));
       return;
     }
     setNodeId(p.nodeId);
@@ -144,13 +146,13 @@ export function ConditionBuilder({
         <div className="flex items-center gap-1.5">
           <RadioGroupItem value="visual" id="cb-mode-visual" />
           <Label htmlFor="cb-mode-visual" className="cursor-pointer">
-            Visual
+            {t("nodeConfig.conditionBuilder.visual")}
           </Label>
         </div>
         <div className="flex items-center gap-1.5">
           <RadioGroupItem value="expression" id="cb-mode-expression" />
           <Label htmlFor="cb-mode-expression" className="cursor-pointer">
-            Expression
+            {t("nodeConfig.conditionBuilder.expression")}
           </Label>
         </div>
       </RadioGroup>
@@ -160,7 +162,7 @@ export function ConditionBuilder({
           {/* Node selector */}
           <Select value={nodeId} onValueChange={handleNodeChange}>
             <SelectTrigger>
-              <SelectValue placeholder="Select upstream node…" />
+              <SelectValue placeholder={t("nodeConfig.conditionBuilder.selectUpstreamNode")} />
             </SelectTrigger>
             <SelectContent>
               {upstreamNodes.map((n) => (
@@ -173,7 +175,7 @@ export function ConditionBuilder({
 
           {/* Field input */}
           <Input
-            placeholder="Field path (e.g. output.ok)"
+            placeholder={t("nodeConfig.conditionBuilder.fieldPlaceholder")}
             value={field}
             onChange={(e) => handleFieldChange(e.target.value)}
           />
@@ -194,7 +196,7 @@ export function ConditionBuilder({
 
           {/* Value input */}
           <Input
-            placeholder="Value"
+            placeholder={t("nodeConfig.conditionBuilder.valuePlaceholder")}
             value={ruleValue}
             onChange={(e) => handleValueChange(e.target.value)}
           />
@@ -213,14 +215,14 @@ export function ConditionBuilder({
             onChange={(e) => onChange(e.target.value)}
             rows={3}
             className="font-mono text-sm"
-            placeholder="{{node.output.field}} == value"
+            placeholder={t("nodeConfig.conditionBuilder.expressionPlaceholder")}
           />
           <p className="text-xs text-muted-foreground">
-            Use{" "}
+            {t("nodeConfig.conditionBuilder.helperPrefix")}{" "}
             <code className="rounded bg-muted px-1 font-mono">
               {"{{node.output.field}}"}
             </code>{" "}
-            to reference upstream data
+            {t("nodeConfig.conditionBuilder.helperSuffix")}
           </p>
         </div>
       )}

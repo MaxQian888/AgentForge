@@ -17,6 +17,37 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }));
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      "publish.title": "Publish Item",
+      "publish.success": "Item published successfully",
+      "publish.cancel": "Cancel",
+      "publish.failed": "Failed to publish",
+      "publish.typeLabel": "Type",
+      "publish.licenseLabel": "License",
+      "publish.nameLabel": "Name",
+      "publish.slugLabel": "Slug",
+      "publish.descriptionLabel": "Description",
+      "publish.categoryLabel": "Category",
+      "publish.repoLabel": "Repository URL",
+      "publish.tagsLabel": "Tags (comma-separated)",
+      "publish.tagsPlaceholder": "e.g. testing, automation, ci",
+      "publish.publishing": "Publishing...",
+      "publish.submitLabel": "Publish",
+      "publish.typePlugin": "Plugin",
+      "publish.typeSkill": "Skill",
+      "publish.typeRole": "Role",
+      "publish.typeWorkflow": "Workflow Template",
+      "publish.licenseMIT": "MIT",
+      "publish.licenseApache": "Apache 2.0",
+      "publish.licenseGPL": "GPL 3.0",
+      "publish.licenseProprietary": "Proprietary",
+    };
+    return map[key] ?? key;
+  },
+}));
+
 import { MarketplacePublishDialog } from "./marketplace-publish-dialog";
 
 describe("MarketplacePublishDialog", () => {

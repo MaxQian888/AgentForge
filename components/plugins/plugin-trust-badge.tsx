@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Shield, Lock, ArrowUpCircle } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { PluginSource } from "@/lib/stores/plugin-store";
 
 interface PluginTrustBadgeProps {
@@ -23,6 +24,7 @@ const approvalColors: Record<string, string> = {
 };
 
 export function PluginTrustBadge({ source }: PluginTrustBadgeProps) {
+  const t = useTranslations("plugins");
   const trustStatus = source.trust?.status ?? "unknown";
   const approvalState = source.trust?.approvalState ?? "not-required";
 
@@ -53,7 +55,9 @@ export function PluginTrustBadge({ source }: PluginTrustBadgeProps) {
       {source.release?.availableVersion ? (
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
           <ArrowUpCircle className="size-3.5" />
-          Update available: v{source.release.availableVersion}
+          {t("trustBadge.updateAvailable", {
+            version: source.release.availableVersion,
+          })}
         </span>
       ) : null}
     </div>

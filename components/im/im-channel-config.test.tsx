@@ -5,13 +5,39 @@ import { IMChannelConfig } from "./im-channel-config";
 import type { IMChannel } from "@/lib/stores/im-store";
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) =>
-    key.split(".").reduce((value: unknown, part: string) => {
-      if (value && typeof value === "object" && part in (value as Record<string, unknown>)) {
-        return (value as Record<string, unknown>)[part];
+  useTranslations: () => (key: string, options?: Record<string, unknown>) => {
+    const parts = key.split(".");
+    let resolved: unknown = mockImMessages;
+    let i = 0;
+    while (i < parts.length && resolved && typeof resolved === "object") {
+      let found = false;
+      for (let j = parts.length; j > i; j--) {
+        const candidate = parts.slice(i, j).join(".");
+        if (candidate in (resolved as Record<string, unknown>)) {
+          resolved = (resolved as Record<string, unknown>)[candidate];
+          i = j;
+          found = true;
+          break;
+        }
       }
-      return key;
-    }, mockImMessages),
+      if (!found) {
+        resolved = key;
+        break;
+      }
+    }
+    if (typeof resolved !== "string" || resolved === key) {
+      return (options?.defaultValue as string) ?? key;
+    }
+    let result = resolved;
+    if (options) {
+      const { defaultValue: _, ...values } = options;
+      result = Object.entries(values).reduce(
+        (out, [name, value]) => out.replace(new RegExp(`\\{${name}\\}`, "g"), String(value)),
+        result,
+      );
+    }
+    return result;
+  },
 }));
 
 const saveChannel = jest.fn();
@@ -98,7 +124,7 @@ describe("IMChannelConfig", () => {
     setFieldValue("Webhook URL", "https://example.com/hook");
     setFieldValue("App ID", "qqbot-app-id");
     setFieldValue("App Secret", "qqbot-secret");
-    await user.click(screen.getByLabelText("sprint.completed"));
+    await user.click(screen.getByLabelText("Sprint completed"));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {

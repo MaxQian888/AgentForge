@@ -241,7 +241,8 @@ function SettingsPageNoProject({
 }
 
 function SettingsPageContent() {
-  useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Settings" }]);
+  const tc = useTranslations("common");
+  useBreadcrumbs([{ label: tc("nav.group.configuration"), href: "/" }, { label: tc("nav.settings") }]);
   const searchParams = useSearchParams();
   const requestedProjectId = searchParams.get("project");
   const requestedSection = searchParams.get("section");

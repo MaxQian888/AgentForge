@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,8 @@ export function EditTeamDialog({
   onSave,
   onClose,
 }: EditTeamDialogProps) {
+  const t = useTranslations("teams");
+  const tc = useTranslations("common");
   const [name, setName] = useState(team.name);
   const [budget, setBudget] = useState(String(team.totalBudget));
   const [saving, setSaving] = useState(false);
@@ -54,14 +57,12 @@ export function EditTeamDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Team</DialogTitle>
-          <DialogDescription>
-            Update the team name or budget allocation.
-          </DialogDescription>
+          <DialogTitle>{t("editDialog.title")}</DialogTitle>
+          <DialogDescription>{t("editDialog.description")}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4 py-4">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="edit-team-name">Team Name</Label>
+            <Label htmlFor="edit-team-name">{t("editDialog.nameLabel")}</Label>
             <Input
               id="edit-team-name"
               value={name}
@@ -69,7 +70,7 @@ export function EditTeamDialog({
             />
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="edit-team-budget">Budget (USD)</Label>
+            <Label htmlFor="edit-team-budget">{t("editDialog.budgetLabel")}</Label>
             <Input
               id="edit-team-budget"
               type="number"
@@ -80,21 +81,20 @@ export function EditTeamDialog({
             />
             {budgetTooLow && (
               <p className="text-xs text-destructive">
-                Budget cannot be less than already spent ($
-                {team.totalSpent.toFixed(2)}).
+                {t("editDialog.budgetTooLow", { amount: team.totalSpent.toFixed(2) })}
               </p>
             )}
           </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {tc("action.cancel")}
           </Button>
           <Button
             onClick={handleSave}
             disabled={saving || budgetTooLow || !name.trim()}
           >
-            {saving ? "Saving..." : "Save Changes"}
+            {saving ? t("editDialog.saving") : t("editDialog.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

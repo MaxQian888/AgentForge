@@ -1,3 +1,42 @@
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, values?: Record<string, unknown>) => {
+    const map: Record<string, string> = {
+      "searchPlaceholder": "Search memory entries...",
+      "scopeFilterLabel": "Scope",
+      "scopeOption.role": "Role scoped",
+      "limitLabel": "Result window",
+      "openEntry": "Open {key}",
+      "pagination.page": "Page {page} of {total}",
+      "pagination.next": "Next page",
+      "tag.remove": "Remove tag {tag}",
+      "noteTitleLabel": "Note title",
+      "noteContentLabel": "Note content",
+      "noteTagsLabel": "Note tags",
+      "createNote": "Create Note",
+      "tagFilterLabel": "Tag",
+      "editNote": "Edit Note",
+      "editNoteTagsLabel": "Edit note tags",
+      "saveNote": "Save Note",
+      "exportEntry": "Export Entry",
+      "tag.addLabel": "Add tag",
+      "tag.add": "Add",
+      "actionBulkDelete": "Delete Selected ({count})",
+      "confirmBulkDelete": "Confirm Bulk Delete",
+      "actionExport": "Export JSON",
+      "actionExportCsv": "Export CSV",
+      "actionBulkDeleteByCriteria": "Delete Filtered ({count})",
+      "confirmBulkDeleteByCriteria": "Confirm Filtered Delete",
+    };
+    let text = map[key] ?? key;
+    if (values) {
+      Object.entries(values).forEach(([k, v]) => {
+        text = text.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+      });
+    }
+    return text;
+  },
+}));
+
 import userEvent from "@testing-library/user-event";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryPanel } from "./memory-panel";

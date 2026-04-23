@@ -7,6 +7,7 @@
  * disabled for dag_node-owned rows since the backend will refuse them).
  */
 import { useState, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { MoreHorizontal, Pencil, Play, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +49,7 @@ interface Props {
 }
 
 export function TriggerListTable({ employeeId, triggers, onEdit, onTest }: Props) {
+  const t = useTranslations("triggers.listTable");
   const patchTrigger = useEmployeeTriggerStore((s) => s.patchTrigger);
   const deleteTrigger = useEmployeeTriggerStore((s) => s.deleteTrigger);
   const [confirmDel, setConfirmDel] = useState<WorkflowTrigger | null>(null);
@@ -55,9 +57,7 @@ export function TriggerListTable({ employeeId, triggers, onEdit, onTest }: Props
   if (triggers.length === 0) {
     return (
       <div className="text-center py-8">
-        <p className="text-sm text-muted-foreground">
-          这个员工还没有任何触发器。点击右上角“新建触发器”以从 IM 命令或定时任务派发工作流。
-        </p>
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
       </div>
     );
   }
@@ -67,36 +67,36 @@ export function TriggerListTable({ employeeId, triggers, onEdit, onTest }: Props
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>名称</TableHead>
-            <TableHead>来源</TableHead>
-            <TableHead>配置摘要</TableHead>
-            <TableHead>启用</TableHead>
+            <TableHead>{t("colName")}</TableHead>
+            <TableHead>{t("colSource")}</TableHead>
+            <TableHead>{t("colConfig")}</TableHead>
+            <TableHead>{t("colEnabled")}</TableHead>
             <TableHead className="w-[60px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {triggers.map((t) => (
-            <TableRow key={t.id} id={`trigger-${t.id}`}>
+          {triggers.map((trigger) => (
+            <TableRow key={trigger.id} id={`trigger-${trigger.id}`}>
               <TableCell className="font-medium">
-                {t.displayName?.trim() || <span className="text-muted-foreground">(unnamed)</span>}
-                {t.createdVia === "dag_node" ? (
-                  <Badge variant="outline" className="ml-2 text-[10px]">DAG</Badge>
+                {trigger.displayName?.trim() || <span className="text-muted-foreground">{t("unnamed")}</span>}
+                {trigger.createdVia === "dag_node" ? (
+                  <Badge variant="outline" className="ml-2 text-[10px]">{t("dagBadge")}</Badge>
                 ) : null}
               </TableCell>
               <TableCell>
-                <Badge variant={t.source === "im" ? "default" : "secondary"}>
-                  {t.source}
+                <Badge variant={trigger.source === "im" ? "default" : "secondary"}>
+                  {trigger.source}
                 </Badge>
               </TableCell>
               <TableCell className="max-w-sm">
                 <code className="text-xs bg-muted px-1 py-0.5 rounded block truncate">
-                  {configSummary(t)}
+                  {configSummary(trigger)}
                 </code>
               </TableCell>
               <TableCell>
                 <Switch
-                  checked={t.enabled}
-                  onCheckedChange={(enabled) => void patchTrigger(t.id, { enabled })}
+                  checked={trigger.enabled}
+                  onCheckedChange={(enabled) => void patchTrigger(trigger.id, { enabled })}
                 />
               </TableCell>
               <TableCell>
@@ -107,18 +107,18 @@ export function TriggerListTable({ employeeId, triggers, onEdit, onTest }: Props
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => onEdit(t)}>
-                      <Pencil className="h-4 w-4 mr-2" /> 编辑
+                    <DropdownMenuItem onClick={() => onEdit(trigger)}>
+                      <Pencil className="h-4 w-4 mr-2" /> {t("actionEdit")}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onTest(t)}>
-                      <Play className="h-4 w-4 mr-2" /> 试运行
+                    <DropdownMenuItem onClick={() => onTest(trigger)}>
+                      <Play className="h-4 w-4 mr-2" /> {t("actionTest")}
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => setConfirmDel(t)}
-                      disabled={t.createdVia === "dag_node"}
+                      onClick={() => setConfirmDel(trigger)}
+                      disabled={trigger.createdVia === "dag_node"}
                       className="text-destructive"
                     >
-                      <Trash2 className="h-4 w-4 mr-2" /> 删除
+                      <Trash2 className="h-4 w-4 mr-2" /> {t("actionDelete")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -131,13 +131,13 @@ export function TriggerListTable({ employeeId, triggers, onEdit, onTest }: Props
       <AlertDialog open={confirmDel !== null} onOpenChange={(open) => !open && setConfirmDel(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确认删除触发器？</AlertDialogTitle>
+            <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmDel?.displayName ?? "(unnamed)"} 将被永久删除。该操作不会影响已经派发的工作流执行记录。
+              {t("deleteDesc", { name: confirmDel?.displayName ?? t("unnamed") })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel>{t("deleteCancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={async () => {
                 if (confirmDel) {
@@ -146,7 +146,7 @@ export function TriggerListTable({ employeeId, triggers, onEdit, onTest }: Props
                 }
               }}
             >
-              删除
+              {t("deleteConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -65,7 +65,9 @@
     "edit": "编辑",
     "delete": "删除",
     "loadingChannels": "正在加载频道...",
-    "noChannels": "暂无 IM 频道配置。点击新建频道开始配置。"
+    "noChannels": "暂无 IM 频道配置。点击新建频道开始配置。",
+    "statusActive": "已启用",
+    "statusInactive": "已禁用"
   },
   "health": {
     "title": "桥接健康",
@@ -89,6 +91,7 @@
     "providerFailures": "失败",
     "providerDowngrades": "降级",
     "providerLastDelivery": "最近投递",
+    "tenantMounts": "租户挂载",
     "diagnosticsTitle": "诊断信息",
     "diagnosticsUnavailable": "暂无诊断信息",
     "configure": "配置"
@@ -122,6 +125,38 @@
     "structured_reply_unavailable": "结构化回复不可用",
     "structured_delivery_unavailable": "结构化投递不可用",
     "thread_reply_unavailable": "线程回复不可用"
+  },
+  "inventory": {
+    "empty": "暂无 IM 桥接在线。请启动 src-im-bridge 以填充此面板。",
+    "providers": "提供商",
+    "capabilityMatrix": "能力矩阵",
+    "commandPlugins": "命令插件",
+    "noneLoaded": "未加载任何插件。"
+  },
+  "healthStatusLabels": {
+    "healthy": "健康",
+    "degraded": "降级",
+    "disconnected": "已断开"
+  },
+  "statusLabels": {
+    "pending": "待处理",
+    "delivered": "已投递",
+    "suppressed": "已抑制",
+    "failed": "失败",
+    "timeout": "超时"
+  },
+  "store": {
+    "error": {
+      "loadChannels": "无法加载 IM 频道",
+      "loadDeliveries": "无法加载投递历史",
+      "loadEventTypes": "无法加载 IM 事件类型",
+      "saveChannel": "保存频道失败",
+      "deleteChannel": "删除频道失败",
+      "retryDelivery": "重试投递失败",
+      "retryDeliveries": "批量重试投递失败",
+      "clearRetryQueue": "清空重试队列失败",
+      "sendTest": "发送 IM 测试消息失败"
+    }
   },
   "history": {
     "title": "消息历史",

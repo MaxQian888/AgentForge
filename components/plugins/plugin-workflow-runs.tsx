@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import {
   usePluginStore,
   type PluginRecord,
@@ -22,6 +23,7 @@ const runStatusColors: Record<WorkflowRunStatus, string> = {
 };
 
 export function PluginWorkflowRuns({ plugin }: { plugin: PluginRecord }) {
+  const t = useTranslations("plugins");
   const runs = usePluginStore(
     (s) => s.workflowRuns[plugin.metadata.id] ?? [],
   );
@@ -47,16 +49,16 @@ export function PluginWorkflowRuns({ plugin }: { plugin: PluginRecord }) {
       setShowTriggerForm(false);
       setTriggerJson("{}");
     } catch {
-      setTriggerError("Invalid JSON trigger payload");
+      setTriggerError(t("workflowRuns.invalidJson") ?? "Invalid JSON trigger payload");
     } finally {
       setStarting(false);
     }
-  }, [plugin.metadata.id, triggerJson, startWorkflowRun]);
+  }, [plugin.metadata.id, triggerJson, startWorkflowRun, t]);
 
   if (plugin.kind !== "WorkflowPlugin") {
     return (
       <p className="text-sm text-muted-foreground">
-        Workflow runs are only available for WorkflowPlugin plugins.
+        {t("workflowRuns.onlyWorkflowPlugin")}
       </p>
     );
   }
@@ -65,21 +67,21 @@ export function PluginWorkflowRuns({ plugin }: { plugin: PluginRecord }) {
     <div className="flex flex-col gap-3">
       {/* Header with start button */}
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Workflow Runs</p>
+        <p className="text-sm font-medium">{t("workflowRuns.title")}</p>
         <Button
           variant="outline"
           size="sm"
           onClick={() => setShowTriggerForm(!showTriggerForm)}
         >
           <Play className="mr-1 size-3.5" />
-          Start Run
+          {t("workflowRuns.startRun")}
         </Button>
       </div>
 
       {/* Trigger form */}
       {showTriggerForm ? (
         <div className="rounded-lg border border-border/60 p-3">
-          <p className="mb-2 text-xs font-medium">Trigger Payload (JSON)</p>
+          <p className="mb-2 text-xs font-medium">{t("workflowRuns.triggerPayload")}</p>
           <Textarea
             className="min-h-[80px] w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
             value={triggerJson}
@@ -97,14 +99,14 @@ export function PluginWorkflowRuns({ plugin }: { plugin: PluginRecord }) {
               size="sm"
               onClick={() => setShowTriggerForm(false)}
             >
-              Cancel
+              {t("workflowRuns.cancel")}
             </Button>
             <Button
               size="sm"
               disabled={starting}
               onClick={() => void handleStartRun()}
             >
-              {starting ? "Starting..." : "Start"}
+              {starting ? t("workflowRuns.starting") : t("workflowRuns.start")}
             </Button>
           </div>
         </div>
@@ -113,7 +115,7 @@ export function PluginWorkflowRuns({ plugin }: { plugin: PluginRecord }) {
       {/* Runs list */}
       {runs.length === 0 ? (
         <div className="flex h-[80px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-          No workflow runs yet.
+          {t("workflowRuns.noRuns")}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -144,7 +146,7 @@ export function PluginWorkflowRuns({ plugin }: { plugin: PluginRecord }) {
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   {run.current_step_id ? (
-                    <span>Step: {run.current_step_id}</span>
+                    <span>{t("workflowRuns.step")}: {run.current_step_id}</span>
                   ) : null}
                   <span>{new Date(run.started_at).toLocaleString()}</span>
                 </div>

@@ -11,12 +11,7 @@ import {
 } from "@/lib/stores/knowledge-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
 import Link from "next/link";
-
-const KIND_LABELS: Record<KnowledgeAssetKind, string> = {
-  wiki_page: "Wiki",
-  ingested_file: "File",
-  template: "Template",
-};
+import { useTranslations } from "next-intl";
 
 function groupByKind(
   items: KnowledgeSearchResult[],
@@ -41,13 +36,14 @@ function useDebounce<T>(value: T, delay: number): T {
 
 export function KnowledgeSearch({
   projectId,
-  placeholder = "Search wiki pages, files, templates…",
+  placeholder,
   onNavigate,
 }: {
   projectId: string;
   placeholder?: string;
   onNavigate?: (id: string, kind: KnowledgeAssetKind) => void;
 }) {
+  const t = useTranslations("knowledge");
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounce(query, 300);
   const { searchResults, loading, searchKnowledge, clearSearch } = useKnowledgeStore();
@@ -70,6 +66,14 @@ export function KnowledgeSearch({
   const grouped = searchResults ? groupByKind(searchResults.items) : null;
   const kindOrder: KnowledgeAssetKind[] = ["wiki_page", "ingested_file", "template"];
 
+  const kindLabels: Record<KnowledgeAssetKind, string> = {
+    wiki_page: t("kind.wiki_page"),
+    ingested_file: t("kind.ingested_file"),
+    template: t("kind.template"),
+  };
+
+  const resolvedPlaceholder = placeholder ?? t("search.placeholder");
+
   return (
     <div className="relative flex flex-col gap-0">
       <div className="relative">
@@ -78,7 +82,7 @@ export function KnowledgeSearch({
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           className="pl-9 pr-8"
         />
         {query && (
@@ -95,10 +99,10 @@ export function KnowledgeSearch({
       {grouped && query.trim() && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-96 overflow-y-auto rounded-xl border border-border/70 bg-popover p-2 shadow-lg">
           {loading && (
-            <p className="px-2 py-1 text-xs text-muted-foreground">Searching…</p>
+            <p className="px-2 py-1 text-xs text-muted-foreground">{t("search.searching")}</p>
           )}
           {!loading && grouped.size === 0 && (
-            <p className="px-2 py-1 text-sm text-muted-foreground">No results found.</p>
+            <p className="px-2 py-1 text-sm text-muted-foreground">{t("search.noResults")}</p>
           )}
           {kindOrder.map((kind) => {
             const items = grouped.get(kind);
@@ -106,7 +110,7 @@ export function KnowledgeSearch({
             return (
               <div key={kind} className="mb-2">
                 <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  {KIND_LABELS[kind]}
+                  {kindLabels[kind]}
                 </p>
                 <ul>
                   {items.map((item) => (
@@ -129,7 +133,7 @@ export function KnowledgeSearch({
                             )}
                           </div>
                           <Badge variant="outline" className="shrink-0 text-xs">
-                            {KIND_LABELS[kind]}
+                            {kindLabels[kind]}
                           </Badge>
                         </Link>
                       ) : (
@@ -150,7 +154,7 @@ export function KnowledgeSearch({
                             )}
                           </div>
                           <Badge variant="outline" className="shrink-0 text-xs">
-                            {KIND_LABELS[kind]}
+                            {kindLabels[kind]}
                           </Badge>
                         </button>
                       )}

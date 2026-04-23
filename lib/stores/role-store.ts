@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { getPreferredLocale } from "./locale-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -349,8 +350,9 @@ export const useRoleStore = create<RoleState>()((set) => ({
 
       set({ roles: data });
     } catch (error) {
+      const locale = getPreferredLocale();
       const message =
-        error instanceof Error ? error.message : "Failed to load roles";
+        error instanceof Error ? error.message : (locale === "zh-CN" ? "加载角色失败" : "Failed to load roles");
       set({ error: message });
     } finally {
       set({ loading: false });
@@ -371,8 +373,9 @@ export const useRoleStore = create<RoleState>()((set) => ({
 
       set({ skillCatalog: data });
     } catch (error) {
+      const locale = getPreferredLocale();
       const message =
-        error instanceof Error ? error.message : "Failed to load role skill catalog";
+        error instanceof Error ? error.message : (locale === "zh-CN" ? "加载角色技能目录失败" : "Failed to load role skill catalog");
       set({ error: message });
     } finally {
       set({ skillCatalogLoading: false });
@@ -408,8 +411,9 @@ export const useRoleStore = create<RoleState>()((set) => ({
 
       return role;
     } catch (error) {
-      toast.error("Failed to create role", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "创建角色失败" : "Failed to create role", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }
@@ -435,8 +439,9 @@ export const useRoleStore = create<RoleState>()((set) => ({
 
       return role;
     } catch (error) {
-      toast.error("Failed to update role", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "更新角色失败" : "Failed to update role", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }
@@ -454,8 +459,9 @@ export const useRoleStore = create<RoleState>()((set) => ({
         roles: state.roles.filter((r) => r.metadata.id !== id),
       }));
     } catch (error) {
-      toast.error("Failed to delete role", {
-        description: error instanceof Error ? error.message : "Unknown error",
+      const locale = getPreferredLocale();
+      toast.error(locale === "zh-CN" ? "删除角色失败" : "Failed to delete role", {
+        description: error instanceof Error ? error.message : (locale === "zh-CN" ? "未知错误" : "Unknown error"),
       });
       throw error;
     }

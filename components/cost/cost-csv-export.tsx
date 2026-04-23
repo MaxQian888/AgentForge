@@ -20,9 +20,12 @@ function escapeCsvCell(value: string | number): string {
   return str;
 }
 
-export function buildCostCsv(rows: CostBreakdownEntry[]): string {
-  const header = ["Date", "Category", "Agent", "Amount (USD)"];
-  const lines = [header.join(",")];
+export function buildCostCsv(
+  rows: CostBreakdownEntry[],
+  header?: string[],
+): string {
+  const headerRow = header ?? ["Date", "Category", "Agent", "Amount (USD)"];
+  const lines = [headerRow.join(",")];
   for (const row of rows) {
     lines.push(
       [
@@ -39,8 +42,9 @@ export function buildCostCsv(rows: CostBreakdownEntry[]): string {
 export function downloadCostCsv(
   rows: CostBreakdownEntry[],
   fileName = "cost-breakdown.csv",
+  header?: string[],
 ): void {
-  const csv = buildCostCsv(rows);
+  const csv = buildCostCsv(rows, header);
   if (typeof window === "undefined") return;
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -60,6 +64,12 @@ export function CostCsvExport({
   disabled,
 }: CostCsvExportProps) {
   const t = useTranslations("cost");
+  const header = [
+    t("csvHeaderDate"),
+    t("csvHeaderCategory"),
+    t("csvHeaderAgent"),
+    t("csvHeaderAmount"),
+  ];
   return (
     <Button
       type="button"
@@ -67,7 +77,13 @@ export function CostCsvExport({
       size="sm"
       className={className}
       disabled={disabled || data.length === 0}
-      onClick={() => downloadCostCsv(data, fileName)}
+      onClick={() =>
+        downloadCostCsv(
+          data,
+          fileName ?? `${t("csvFileName")}.csv`,
+          header,
+        )
+      }
     >
       <Download className="size-3.5" aria-hidden />
       {t("exportCsv")}

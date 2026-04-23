@@ -188,7 +188,7 @@ export function SchedulerUpcomingCalendar({ jobs }: SchedulerUpcomingCalendarPro
               key={dateKey}
               type="button"
               role="gridcell"
-              aria-label={`${cell.date.toLocaleDateString()} ${cell.entries.length} jobs`}
+              aria-label={`${cell.date.toLocaleDateString()} ${t("calendar.jobsCount", { count: cell.entries.length })}`}
               onClick={() => setSelectedDate(cell.date)}
               className={cn(
                 "flex min-h-[76px] flex-col items-stretch gap-1 bg-background p-1 text-left transition-colors hover:bg-accent/50",

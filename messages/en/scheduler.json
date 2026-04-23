@@ -99,7 +99,49 @@
     "today": "Today",
     "gridLabel": "Upcoming job runs calendar",
     "moreItems": "+{count} more",
-    "dayDetail": "Runs on {date}"
+    "dayDetail": "Runs on {date}",
+    "jobsCount": "{count} jobs"
+  },
+  "statusLabels": {
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "running": "Running",
+    "cancel_requested": "Cancel Requested",
+    "cancelled": "Cancelled",
+    "pending": "Pending",
+    "skipped": "Skipped",
+    "paused": "Paused",
+    "disabled": "Disabled",
+    "never-run": "Never Run"
+  },
+  "controlStateLabels": {
+    "active": "Active",
+    "paused": "Paused"
+  },
+  "triggerSourceLabels": {
+    "manual": "Manual",
+    "cron": "Cron",
+    "system": "System",
+    "startup": "Startup",
+    "reconcile": "Reconcile"
+  },
+  "overlapPolicyLabels": {
+    "skip": "Skip",
+    "allow": "Allow"
+  },
+  "executionModeLabels": {
+    "in_process": "In Process",
+    "os_registered": "OS Registered"
+  },
+  "scopeLabels": {
+    "system": "System",
+    "project": "Project"
+  },
+  "runStatusOptions": {
+    "failed": "Failed",
+    "running": "Running",
+    "cancel_requested": "Cancel Requested",
+    "cancelled": "Cancelled"
   },
   "createDialog": {
     "title": "Create Scheduler Job",

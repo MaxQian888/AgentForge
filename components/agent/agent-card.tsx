@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -21,6 +22,7 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agent }: AgentCardProps) {
+  const t = useTranslations("agents");
   const costPct = agent.budget > 0 ? Math.min((agent.cost / agent.budget) * 100, 100) : 0;
 
   return (
@@ -29,24 +31,31 @@ export function AgentCard({ agent }: AgentCardProps) {
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">{agent.roleName}</CardTitle>
           <Badge variant="secondary" className={cn(statusColors[agent.status])}>
-            {agent.status}
+            {t(`status.${agent.status}`)}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">{agent.taskTitle}</p>
         <p className="text-xs text-muted-foreground">
-          Runtime: {agent.runtime || "-"} / {agent.provider || "-"} / {agent.model || "-"}
+          {t("card.runtime", {
+            runtime: agent.runtime || "-",
+            provider: agent.provider || "-",
+            model: agent.model || "-",
+          })}
         </p>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span>Turns: {agent.turns}</span>
+          <span>{t("card.turns", { turns: agent.turns })}</span>
           <span>
-            Cost: ${agent.cost.toFixed(2)} / ${agent.budget.toFixed(2)}
+            {t("card.cost", {
+              cost: agent.cost.toFixed(2),
+              budget: agent.budget.toFixed(2),
+            })}
           </span>
         </div>
         <Progress
           value={costPct}
-          aria-label="Budget usage"
+          aria-label={t("card.budgetUsage")}
           indicatorClassName={costPct > 80 ? "bg-destructive" : undefined}
         />
       </CardContent>

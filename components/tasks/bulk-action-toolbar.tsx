@@ -59,7 +59,7 @@ export function BulkActionToolbar({
         <SelectContent>
           {bulkStatuses.map((status) => (
             <SelectItem key={status} value={status}>
-              {status.replace(/_/g, " ")}
+              {t(`status.${status}`)}
             </SelectItem>
           ))}
         </SelectContent>

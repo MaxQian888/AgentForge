@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import type { PluginRecord } from "@/lib/stores/plugin-store";
 
 /* ── Schema types (subset of JSON Schema) ── */
@@ -72,6 +73,7 @@ function SchemaField({
   onChange,
   onReset,
 }: SchemaFieldProps) {
+  const t = useTranslations("plugins");
   const label = toTitleCase(fieldKey);
   const fieldId = `config-field-${fieldKey}`;
   const fieldType = schema.type ?? "string";
@@ -88,7 +90,7 @@ function SchemaField({
             className="h-6 px-2 text-xs text-muted-foreground"
             onClick={onReset}
           >
-            Reset to default
+            {t("configForm.resetToDefault")}
           </Button>
         ) : null}
       </div>
@@ -117,10 +119,10 @@ function SchemaField({
           onValueChange={(val) => onChange(val === "__none__" ? "" : val)}
         >
           <SelectTrigger id={fieldId} className="w-full">
-            <SelectValue placeholder="— Select —" />
+            <SelectValue placeholder={t("configForm.selectPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__none__">— Select —</SelectItem>
+            <SelectItem value="__none__">{t("configForm.selectPlaceholder")}</SelectItem>
             {schema.enum.map((opt) => (
               <SelectItem key={opt} value={opt}>
                 {opt}
@@ -165,7 +167,7 @@ function SchemaField({
       {/* Default value hint */}
       {schema.default !== undefined ? (
         <p className="text-xs text-muted-foreground/70">
-          Default: {JSON.stringify(schema.default)}
+          {t("configForm.defaultPrefix", { value: JSON.stringify(schema.default) })}
         </p>
       ) : null}
     </div>
@@ -191,20 +193,22 @@ function JsonFallback({
   onSave,
   onCancel,
 }: JsonFallbackProps) {
+  const t = useTranslations("plugins");
+
   const handleSave = () => {
     try {
       const parsed = JSON.parse(configText) as Record<string, unknown>;
       setParseError(null);
       onSave(parsed);
     } catch {
-      setParseError("Invalid JSON");
+      setParseError(t("configForm.invalidJson"));
     }
   };
 
   return (
     <>
       <div className="grid gap-3 py-4">
-        <Label htmlFor="config-json">Configuration (JSON)</Label>
+        <Label htmlFor="config-json">{t("configForm.configJsonLabel")}</Label>
         <Textarea
           id="config-json"
           className={cn(
@@ -225,9 +229,9 @@ function JsonFallback({
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {t("configForm.cancel")}
         </Button>
-        <Button onClick={handleSave}>Save</Button>
+        <Button onClick={handleSave}>{t("configForm.save")}</Button>
       </DialogFooter>
     </>
   );
@@ -240,6 +244,7 @@ export function PluginConfigForm({
   onSave,
   onCancel,
 }: PluginConfigFormProps) {
+  const t = useTranslations("plugins");
   const schema = plugin.spec.extra?.configSchema as ConfigSchema | undefined;
   const hasSchemaFields =
     schema?.properties && Object.keys(schema.properties).length > 0;
@@ -306,9 +311,9 @@ export function PluginConfigForm({
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {t("configForm.cancel")}
         </Button>
-        <Button onClick={handleSchemaSave}>Save</Button>
+        <Button onClick={handleSchemaSave}>{t("configForm.save")}</Button>
       </DialogFooter>
     </>
   );

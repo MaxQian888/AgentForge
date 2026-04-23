@@ -22,7 +22,22 @@
     "pathPolicy": "路径策略：{allow} 允许 / {deny} 拒绝",
     "extends": "继承自 {name}",
     "edit": "编辑",
-    "delete": "删除"
+    "delete": "删除",
+    "unresolvedCount": "{count} 未解析",
+    "blockingCount": "{count} 阻塞",
+    "warningCount": "{count} 警告",
+    "pluginConsumerCount": "{count} 插件消费者"
+  },
+  "provenance": {
+    "inherited": "继承",
+    "template": "模板",
+    "explicit": "显式"
+  },
+  "skillCompatibility": {
+    "blocking": "阻塞性兼容问题",
+    "warning": "仅警告兼容问题",
+    "compatible": "兼容性正常",
+    "unknown": "兼容性未知"
   },
   "formDialog": {
     "createTitle": "创建角色",
@@ -165,8 +180,70 @@
     "skillPartAgents": "Agents 元数据",
     "skillPartReferences": "References",
     "skillPartScripts": "Scripts",
-    "skillPartAssets": "Assets"
+    "skillPartAssets": "Assets",
+    "loading": "加载中...",
+    "dependencies": "依赖: {deps}",
+    "declaredTools": "声明工具: {tools}",
+    "missingTools": "缺失: {tools}"
   },
+  "sections": {
+    "setup": { "label": "设置", "description": "选择角色的起始方式，然后确认其可复用身份。" },
+    "identity": { "label": "身份", "description": "定义角色职责、人设、语言和回复风格。" },
+    "capabilities": { "label": "能力", "description": "描述包、工具、技能和执行限制。" },
+    "knowledge": { "label": "知识", "description": "绑定仓库、文档、模式和共享知识源。" },
+    "governance": { "label": "治理", "description": "设置安全、协作和触发器预期。" },
+    "review": { "label": "审查", "description": "保存前检查 YAML、摘要、预览和沙箱。" }
+  },
+  "guidance": {
+    "setup": {
+      "title": "从正确的基线开始",
+      "summary": "当大部分值应该保留时从模板开始。仅当新角色确实是子角色时才使用继承。",
+      "bullet0": "复用模板将当前草稿形态复制到新角色。",
+      "bullet1": "当角色应保持父子关系而非分叉配置时设置继承。",
+      "bullet2": "先确认元数据，以便后续预览和沙箱结果易于解读。"
+    },
+    "identity": {
+      "title": "统一角色、目标与提示词",
+      "summary": "身份字段应在角色做什么、如何表现以及如何回答上保持一致。",
+      "bullet0": "在调整人设细节前先填写角色标题、目标和系统提示词。",
+      "bullet1": "使用高级身份设置语言、语气和回复风格，而不是将这些规则埋在提示词中。",
+      "bullet2": "如果角色和提示词不一致，沙箱输出将更难信任。"
+    },
+    "capabilities": {
+      "title": "显式建模工具与技能",
+      "summary": "使用包来组织可复用的能力组合，使用技能来声明此角色可加载的显式知识引用。",
+      "bullet0": "保持允许的工具和外部工具足够可读，以便保存前审查。",
+      "bullet1": "使用技能声明属于此角色的可选知识或工作流。",
+      "bullet2": "执行限制如轮次或预算应描述护栏，而非隐藏意外。"
+    },
+    "knowledge": {
+      "title": "绑定正确的上下文",
+      "summary": "知识字段应让操作员和审查员一目了然地看到角色的可信来源。",
+      "bullet0": "列出与此角色相关的仓库、文档和模式。",
+      "bullet1": "使用共享知识行来存放角色可在多次运行中引用或复用的来源。",
+      "bullet2": "当知识来源已存在时，优先使用简洁引用而非冗长的提示词文本。"
+    },
+    "governance": {
+      "title": "保持治理可见",
+      "summary": "权限模式、路径规则、审查要求、委派和触发器应明确且可审查。",
+      "bullet0": "使用权限和路径约束，而不是在提示词中写冗长的否定指令。",
+      "bullet1": "添加其他操作员能够解释和维护的协作设置。",
+      "bullet2": "仅添加激活规则足够清晰、日后可审查的触发器。"
+    },
+    "review": {
+      "title": "保存前先预览",
+      "summary": "在持久化草稿前检查执行摘要、YAML 和权威预览或沙箱结果。",
+      "bullet0": "预览会在不调用模型的情况下解析生效清单和执行配置。",
+      "bullet1": "沙箱复用同一草稿，但增加就绪检查和一次有界的提示探测。",
+      "bullet2": "审查 YAML 映射，确保结构化输入与你期望的 canonical role 资产一致。"
+    }
+  },
+  "error.load": "加载角色失败",
+  "error.loadSkills": "加载角色技能目录失败",
+  "error.create": "创建角色失败",
+  "error.update": "更新角色失败",
+  "error.delete": "删除角色失败",
+  "error.unknown": "未知错误",
   "deleteDialog": {
     "title": "删除角色",
     "loading": "正在加载角色引用...",
@@ -218,6 +295,13 @@
     "previewDraft": "预览角色草稿",
     "running": "正在运行...",
     "runSandbox": "运行沙箱探测",
-    "sandboxInput": "沙箱输入"
+    "sandboxInput": "沙箱输入",
+    "pluginDependencies": "插件依赖",
+    "downstreamPluginConsumers": "下游插件消费者",
+    "fieldProvenance": "字段来源",
+    "loadedSkills": "已加载技能",
+    "onDemandSkills": "按需技能",
+    "skillDiagnostics": "技能诊断",
+    "effectiveRole": "生效角色: {name} ({id})"
   }
 }

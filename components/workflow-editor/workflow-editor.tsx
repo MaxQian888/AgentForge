@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   ReactFlowProvider,
   useReactFlow,
@@ -64,6 +65,7 @@ function WorkflowEditorInner({
   onExecute,
   onDirtyChange,
 }: WorkflowEditorProps) {
+  const t = useTranslations("workflow");
   const { state, dispatch } = useEditor();
   const reactFlow = useReactFlow();
   const [saving, setSaving] = useState(false);
@@ -118,20 +120,18 @@ function WorkflowEditorInner({
     async (file: File) => {
       if (
         state.dirty &&
-        !window.confirm(
-          "Importing will replace the current workflow. Discard unsaved changes?"
-        )
+        !window.confirm(t("editor.importConfirmDiscard"))
       ) {
         return;
       }
       const result = await handleImport(file);
       if (result.ok) {
-        toast.success("Workflow imported");
+        toast.success(t("editor.importSuccess"));
       } else {
         toast.error(result.error);
       }
     },
-    [handleImport, state.dirty]
+    [handleImport, state.dirty, t]
   );
 
   // Drop handler — converts screen coords to flow coords and adds a node

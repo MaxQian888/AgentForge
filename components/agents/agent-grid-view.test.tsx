@@ -24,6 +24,11 @@ jest.mock("next-intl", () => ({
       "status.running": "running",
       "status.paused": "paused",
       "status.failed": "failed",
+      "workspace.confirmKillTitle": "Terminate agent?",
+      "workspace.confirmKillTitlePlural": "Terminate selected agents?",
+      "workspace.confirmKillDescription": "This will stop the selected agent immediately.",
+      "workspace.confirmKillDescriptionPlural": "This will stop all selected agents immediately.",
+      "workspace.confirmKillAction": "Terminate",
     };
 
     if (key === "workspace.cardBudgetValue") {
