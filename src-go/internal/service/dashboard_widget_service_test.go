@@ -49,6 +49,10 @@ func (r *stubDashboardAgentRunRepo) AggregatePerformance(_ context.Context, _, _
 }
 
 type stubDashboardCache struct{ store map[string]string }
+type ttlCaptureDashboardCache struct {
+	lastTTL time.Duration
+	store   map[string]string
+}
 
 func (c *stubDashboardCache) GetWidgetData(_ context.Context, key string) (string, error) {
 	value, ok := c.store[key]
@@ -61,6 +65,23 @@ func (c *stubDashboardCache) SetWidgetData(_ context.Context, key, payload strin
 	if c.store == nil {
 		c.store = map[string]string{}
 	}
+	c.store[key] = payload
+	return nil
+}
+
+func (c *ttlCaptureDashboardCache) GetWidgetData(_ context.Context, key string) (string, error) {
+	value, ok := c.store[key]
+	if !ok {
+		return "", repository.ErrNotFound
+	}
+	return value, nil
+}
+
+func (c *ttlCaptureDashboardCache) SetWidgetData(_ context.Context, key, payload string, ttl time.Duration) error {
+	if c.store == nil {
+		c.store = map[string]string{}
+	}
+	c.lastTTL = ttl
 	c.store[key] = payload
 	return nil
 }
@@ -152,6 +173,25 @@ func TestDashboardWidgetServiceBurndownAndDerivedWidgets(t *testing.T) {
 	sla, _ := service.WidgetData(context.Background(), projectID, model.DashboardWidgetSLACompliance, "")
 	if sla["total"] != 2 {
 		t.Fatalf("sla payload = %#v", sla)
+	}
+}
+
+func TestDashboardWidgetService_UsesConfiguredCacheTTL(t *testing.T) {
+	projectID := uuid.New()
+	cache := &ttlCaptureDashboardCache{}
+	service := NewDashboardWidgetService(
+		&stubDashboardTaskRepo{completedCounts: []repository.TaskDateCount{{Date: time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC), Count: 1}}},
+		&stubDashboardSprintRepo{},
+		&stubDashboardAgentRunRepo{},
+		cache,
+	).WithCacheTTL(15 * time.Second)
+	service.now = func() time.Time { return time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC) }
+
+	if _, err := service.WidgetData(context.Background(), projectID, model.DashboardWidgetThroughputChart, `{"days":7}`); err != nil {
+		t.Fatalf("WidgetData() error = %v", err)
+	}
+	if cache.lastTTL != 15*time.Second {
+		t.Fatalf("cache ttl = %v, want 15s", cache.lastTTL)
 	}
 }
 

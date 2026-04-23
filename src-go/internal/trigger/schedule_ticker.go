@@ -110,7 +110,7 @@ func (t *ScheduleTicker) tick(ctx context.Context) error {
 	}
 	now := t.clock.Now().UTC().Truncate(time.Minute)
 	for _, tr := range triggers {
-		if t.shouldFire(tr, now) {
+		if t.shouldFire(tr, now) && t.reserveFire(tr.ID.String(), now) {
 			t.dispatchOne(ctx, tr, now)
 		}
 	}
@@ -118,8 +118,7 @@ func (t *ScheduleTicker) tick(ctx context.Context) error {
 }
 
 // shouldFire parses the trigger's cron expression and returns whether the
-// current minute boundary matches a scheduled fire. It also dedupes so the
-// same (trigger, minute) pair never fires twice within a process lifetime.
+// current minute boundary matches a scheduled fire.
 func (t *ScheduleTicker) shouldFire(tr *model.WorkflowTrigger, minute time.Time) bool {
 	cronExpr := extractCronExpr(tr.Config)
 	if cronExpr == "" {
@@ -136,12 +135,18 @@ func (t *ScheduleTicker) shouldFire(tr *model.WorkflowTrigger, minute time.Time)
 	if !candidate.Equal(minute) {
 		return false
 	}
+	return true
+}
 
+// reserveFire claims a (trigger, minute) firing slot before dispatch so
+// concurrent Tick callers cannot double-dispatch the same schedule edge.
+func (t *ScheduleTicker) reserveFire(triggerID string, minute time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if last, ok := t.lastFire[tr.ID.String()]; ok && !last.Before(minute) {
+	if last, ok := t.lastFire[triggerID]; ok && !last.Before(minute) {
 		return false
 	}
+	t.lastFire[triggerID] = minute
 	return true
 }
 
@@ -188,9 +193,6 @@ func (t *ScheduleTicker) dispatchOne(ctx context.Context, tr *model.WorkflowTrig
 		Source: model.TriggerSourceSchedule,
 		Data:   data,
 	})
-	t.mu.Lock()
-	t.lastFire[tr.ID.String()] = minute
-	t.mu.Unlock()
 }
 
 // extractBindingID reads binding_id from a trigger's config JSON if present.

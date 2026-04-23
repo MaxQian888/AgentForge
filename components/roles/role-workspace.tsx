@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { PanelLeftIcon, PanelRightIcon } from "lucide-react";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
@@ -107,8 +107,8 @@ export function RoleWorkspace({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Panel visibility
-  const [catalogOpen, setCatalogOpen] = useState(true);
-  const [contextOpen, setContextOpen] = useState(true);
+  const [catalogOpen, setCatalogOpen] = useState(() => isDesktop);
+  const [contextOpen, setContextOpen] = useState(() => isDesktop);
   const [catalogSheetOpen, setCatalogSheetOpen] = useState(false);
   const [contextSheetOpen, setContextSheetOpen] = useState(false);
 
@@ -120,23 +120,6 @@ export function RoleWorkspace({
     () => roles.find((role) => role.metadata.id === templateId),
     [roles, templateId],
   );
-
-  // Auto-collapse panels based on viewport width
-  useEffect(() => {
-    setCatalogOpen(isDesktop);
-    setContextOpen(isDesktop);
-  }, [isDesktop]);
-
-  useEffect(() => {
-    if (mode === "edit" && selectedRole) {
-      setDraft(buildRoleDraft(selectedRole));
-      return;
-    }
-    if (mode === "edit" && !selectedRole && roles.length > 0) {
-      setSelectedRoleId(roles[0]!.metadata.id);
-      setDraft(buildRoleDraft(roles[0]));
-    }
-  }, [mode, roles, selectedRole]);
 
   const serializedDraft = useMemo(
     () => serializeRoleDraft(draft, selectedRole),
@@ -374,6 +357,9 @@ export function RoleWorkspace({
     }
     try {
       await onDeleteRole(deletingRole);
+      if (mode === "edit" && deletingRole.metadata.id === selectedRoleId) {
+        handleNewRole();
+      }
       closeDeleteDialog();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : t("deleteDialog.deleteError"));
@@ -615,7 +601,7 @@ export function RoleWorkspace({
         <div
           className={cn(
             "shrink-0 overflow-hidden border-r bg-sidebar transition-[width] duration-200 ease-linear",
-            catalogOpen ? "w-[260px]" : "w-0",
+            isDesktop && catalogOpen ? "w-[260px]" : "w-0",
           )}
         >
           <div className="h-full w-[260px] overflow-y-auto">{catalog}</div>
@@ -673,7 +659,7 @@ export function RoleWorkspace({
         <div
           className={cn(
             "shrink-0 overflow-hidden border-l transition-[width] duration-200 ease-linear",
-            contextOpen ? "w-80" : "w-0",
+            isDesktop && contextOpen ? "w-80" : "w-0",
           )}
         >
           <div className="h-full w-80 overflow-y-auto">{contextRail}</div>

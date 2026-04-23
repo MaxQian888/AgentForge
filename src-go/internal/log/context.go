@@ -11,6 +11,13 @@ import (
 type ctxKey struct{}
 
 var traceIDKey = ctxKey{}
+var requestMetadataKey = ctxKey{}
+
+type RequestMetadata struct {
+	RequestID string
+	RemoteIP  string
+	UserAgent string
+}
 
 // TraceID returns the trace_id attached to ctx, or "" if none.
 func TraceID(ctx context.Context) string {
@@ -26,6 +33,20 @@ func TraceID(ctx context.Context) string {
 // WithTrace returns a copy of ctx carrying the given trace_id.
 func WithTrace(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, traceIDKey, id)
+}
+
+func WithRequestMetadata(ctx context.Context, meta RequestMetadata) context.Context {
+	return context.WithValue(ctx, requestMetadataKey, meta)
+}
+
+func GetRequestMetadata(ctx context.Context) RequestMetadata {
+	if ctx == nil {
+		return RequestMetadata{}
+	}
+	if v, ok := ctx.Value(requestMetadataKey).(RequestMetadata); ok {
+		return v
+	}
+	return RequestMetadata{}
 }
 
 // crockford is Douglas Crockford's base32 alphabet (no I, L, O, U).

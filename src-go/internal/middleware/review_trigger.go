@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/agentforge/server/internal/authutil"
 	appI18n "github.com/agentforge/server/internal/i18n"
 	"github.com/agentforge/server/internal/model"
 	"github.com/labstack/echo/v4"
@@ -21,8 +22,7 @@ func ReviewTriggerAuthMiddleware(secret string, blacklist TokenBlacklist, servic
 				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgMissingAuthHeader)})
 			}
 
-			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-			if serviceToken != "" && tokenStr == serviceToken {
+			if err := authutil.ValidateBearerSharedSecret(authHeader, serviceToken); err == nil {
 				return next(c)
 			}
 

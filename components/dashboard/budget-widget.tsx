@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { Progress } from "@/components/ui/progress";
 
 interface BudgetWidgetProps {
   totalBudget: number;
@@ -55,15 +55,11 @@ export function BudgetWidget({ totalBudget, spent, remaining }: BudgetWidgetProp
             <span>{t("budget.utilization")}</span>
             <span>{utilization.toFixed(0)}%</span>
           </div>
-          <div className="h-2 w-full rounded-full bg-muted">
-            <div
-              className={cn(
-                "h-2 rounded-full transition-all",
-                utilizationColor(utilization)
-              )}
-              style={{ width: `${Math.min(utilization, 100)}%` }}
-            />
-          </div>
+          <Progress
+            value={utilization}
+            className="h-2 bg-muted"
+            indicatorClassName={utilizationColor(utilization)}
+          />
         </div>
       </CardContent>
     </Card>

@@ -6,6 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
   useCustomFieldStore,
   type CustomFieldDefinition,
 } from "@/lib/stores/custom-field-store";
@@ -72,24 +80,31 @@ export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
         </div>
         <div className="space-y-2">
           <Label>{t("fields.type")}</Label>
-          <select
-            className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-            value={fieldType}
-            onChange={(event) => setFieldType(event.target.value)}
-          >
-            {FIELD_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {t(`fields.types.${type}`)}
-              </option>
-            ))}
-          </select>
+          <Select value={fieldType} onValueChange={(value) => setFieldType(value)}>
+            <SelectTrigger className="h-10 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FIELD_TYPES.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {t(`fields.types.${type}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-2">
           <Label>{t("fields.required")}</Label>
-          <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm">
-            <input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} />
-            {t("fields.required")}
-          </label>
+          <div className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm">
+            <Checkbox
+              id="field-required"
+              checked={required}
+              onCheckedChange={(checked) => setRequired(checked === true)}
+            />
+            <label htmlFor="field-required" className="cursor-pointer">
+              {t("fields.required")}
+            </label>
+          </div>
         </div>
       </div>
 

@@ -1,8 +1,11 @@
 package service_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/agentforge/server/internal/service"
 	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 )
 
 type mockDispatchTaskRepo struct {
@@ -477,9 +481,13 @@ func TestTaskDispatchService_AssignAgentQueuesWhenPoolIsFull(t *testing.T) {
 
 type mockDispatchAttemptRecorder struct {
 	attempts []*model.DispatchAttempt
+	err      error
 }
 
 func (m *mockDispatchAttemptRecorder) Create(_ context.Context, attempt *model.DispatchAttempt) error {
+	if m.err != nil {
+		return m.err
+	}
 	if attempt == nil {
 		return nil
 	}
@@ -494,6 +502,58 @@ func (m *mockDispatchAttemptRecorder) Create(_ context.Context, attempt *model.D
 	}
 	m.attempts = append(m.attempts, &cloned)
 	return nil
+}
+
+func TestTaskDispatchService_RecordDispatchAttemptLogsRecorderFailure(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:           taskID,
+			ProjectID:    projectID,
+			Title:        "Dispatch task",
+			Status:       model.TaskStatusAssigned,
+			AssigneeID:   &memberID,
+			AssigneeType: model.MemberTypeAgent,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:        memberID,
+			ProjectID: projectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		},
+	}
+	runtime := &mockDispatchRuntime{
+		run: &model.AgentRun{
+			ID:       uuid.New(),
+			TaskID:   taskID,
+			MemberID: memberID,
+			Status:   model.AgentRunStatusRunning,
+		},
+	}
+	recorder := &mockDispatchAttemptRecorder{err: errors.New("forced attempt write failure")}
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil).WithAttemptRecorder(recorder)
+
+	var buf bytes.Buffer
+	oldOut := log.StandardLogger().Out
+	log.SetOutput(&buf)
+	defer log.SetOutput(oldOut)
+
+	if _, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
+		TaskID:   taskID,
+		Runtime:  "codex",
+		Provider: "openai",
+		Model:    "gpt-5-codex",
+	}); err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "dispatch attempt recording failed") {
+		t.Fatalf("expected dispatch attempt failure log, got %s", buf.String())
+	}
 }
 
 func TestTaskDispatchService_SpawnPreservesDispatchTupleAndQueueVerdict(t *testing.T) {

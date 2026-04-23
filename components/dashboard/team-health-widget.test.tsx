@@ -33,10 +33,12 @@ describe("TeamHealthWidget", () => {
         ]}
       />,
     );
+    const indicator = container.querySelector('[data-slot="progress-indicator"]');
 
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("Lead")).toBeInTheDocument();
     expect(screen.getByText("overloaded")).toBeInTheDocument();
-    expect(container.querySelector('[style="width: 92%;"]')).toHaveClass("bg-red-500");
+    expect(indicator).toHaveClass("bg-red-500");
+    expect(indicator).toHaveStyle({ transform: "translateX(-8%)" });
   });
 });

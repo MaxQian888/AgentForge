@@ -3,6 +3,8 @@ package eventbus
 import (
 	"context"
 	"encoding/json"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // PublishLegacy is a thin adapter matching the pre-eventbus "type + projectID
@@ -42,9 +44,21 @@ func PublishLegacy(ctx context.Context, p Publisher, eventType, projectID string
 
 	if payload != nil {
 		data, err := json.Marshal(payload)
-		if err == nil {
+		if err != nil {
+			log.WithError(err).WithFields(log.Fields{
+				"eventType": eventType,
+				"projectID": projectID,
+			}).Warn("event publish failed: payload marshal")
+		} else {
 			e.Payload = data
 		}
 	}
-	return p.Publish(ctx, e)
+	if err := p.Publish(ctx, e); err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"eventType": eventType,
+			"projectID": projectID,
+		}).Warn("event publish failed")
+		return err
+	}
+	return nil
 }

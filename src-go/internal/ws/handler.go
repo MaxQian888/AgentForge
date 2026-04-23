@@ -1,12 +1,15 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/repository"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -14,29 +17,37 @@ import (
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 4096
+	writeWait             = 10 * time.Second
+	pongWait              = 60 * time.Second
+	pingPeriod            = (pongWait * 9) / 10
+	defaultMaxMessageSize = 4096
 )
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // CORS handled by Echo middleware
-	},
-}
 
 // Handler handles WebSocket upgrade requests.
 type Handler struct {
-	hub       *Hub
-	jwtSecret string
+	hub            *Hub
+	jwtSecret      string
+	blacklist      wsTokenBlacklist
+	upgrader       websocket.Upgrader
+	maxMessageSize int64
+}
+
+type wsTokenBlacklist interface {
+	IsBlacklisted(ctx context.Context, jti string) (bool, error)
 }
 
 // NewHandler creates a new WebSocket handler.
-func NewHandler(hub *Hub, jwtSecret string) *Handler {
-	return &Handler{hub: hub, jwtSecret: jwtSecret}
+func NewHandler(hub *Hub, jwtSecret string, blacklist wsTokenBlacklist, allowedOrigins []string, maxMessageSize int64) *Handler {
+	if maxMessageSize <= 0 {
+		maxMessageSize = defaultMaxMessageSize
+	}
+	return &Handler{
+		hub:            hub,
+		jwtSecret:      jwtSecret,
+		blacklist:      blacklist,
+		upgrader:       newUpgrader(allowedOrigins),
+		maxMessageSize: maxMessageSize,
+	}
 }
 
 // HandleWS upgrades the HTTP connection to a WebSocket and registers the client.
@@ -58,7 +69,7 @@ func (h *Handler) HandleWS(c echo.Context) error {
 	}
 
 	// Validate JWT.
-	claims := jwt.MapClaims{}
+	claims := &jwt.RegisteredClaims{}
 	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
@@ -70,21 +81,41 @@ func (h *Handler) HandleWS(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "invalid token"})
 	}
 
-	userID, _ := claims.GetSubject()
+	if h.blacklist == nil {
+		log.WithFields(log.Fields{"projectId": projectID, "remoteAddr": remoteAddr}).Warn("ws upgrade rejected: token blacklist unavailable")
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"message": "token revocation service unavailable"})
+	}
+	blacklisted, err := h.blacklist.IsBlacklisted(c.Request().Context(), claims.ID)
+	if err != nil {
+		entry := log.WithFields(log.Fields{"projectId": projectID, "remoteAddr": remoteAddr}).WithError(err)
+		if errors.Is(err, repository.ErrCacheUnavailable) {
+			entry.Warn("ws upgrade rejected: token blacklist unavailable")
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"message": "token revocation service unavailable"})
+		}
+		entry.Warn("ws upgrade rejected: blacklist check failed")
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "token validation failed"})
+	}
+	if blacklisted {
+		log.WithFields(log.Fields{"projectId": projectID, "remoteAddr": remoteAddr, "jti": claims.ID}).Warn("ws upgrade rejected: revoked token")
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "token revoked"})
+	}
 
-	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	userID := claims.Subject
+
+	conn, err := h.upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		log.WithFields(log.Fields{"projectId": projectID, "remoteAddr": remoteAddr}).WithError(err).Error("ws upgrade failed")
 		return err
 	}
 
 	client := &Client{
-		hub:        h.hub,
-		conn:       conn,
-		send:       make(chan []byte, 256),
-		projectID:  projectID,
-		userID:     userID,
-		remoteAddr: remoteAddr,
+		hub:            h.hub,
+		conn:           conn,
+		send:           make(chan []byte, 256),
+		projectID:      projectID,
+		userID:         userID,
+		remoteAddr:     remoteAddr,
+		maxMessageSize: h.maxMessageSize,
 	}
 	log.WithFields(client.logFields()).Info("ws client upgraded")
 	h.hub.register <- client
@@ -100,7 +131,7 @@ func (c *Client) readPump() {
 		c.hub.unregister <- c
 		c.conn.Close() //nolint:errcheck
 	}()
-	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadLimit(c.maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck

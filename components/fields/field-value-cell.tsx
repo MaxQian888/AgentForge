@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useCustomFieldStore, type CustomFieldDefinition, type CustomFieldValue } from "@/lib/stores/custom-field-store";
 
 export function FieldValueCell({
@@ -38,11 +39,10 @@ export function FieldValueCell({
 
   if (field.fieldType === "checkbox") {
     return (
-      <input
-        type="checkbox"
+      <Checkbox
         checked={draft === "true" || draft === "1"}
-        onChange={(event) => {
-          const next = event.target.checked;
+        onCheckedChange={(checked) => {
+          const next = checked === true;
           setDraft(String(next));
           void commit(next);
         }}

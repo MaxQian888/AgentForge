@@ -23,12 +23,15 @@ type parsedChunk struct {
 
 // IngestWorker handles asynchronous ingestion of uploaded files.
 type IngestWorker struct {
-	assets  KnowledgeAssetRepository
-	chunks  AssetIngestChunkRepository
-	blobs   BlobStorage
-	index   IndexPipeline
-	parsers map[string]ingestParser // mime → parser
+	assets      KnowledgeAssetRepository
+	chunks      AssetIngestChunkRepository
+	blobs       BlobStorage
+	index       IndexPipeline
+	parsers     map[string]ingestParser // mime → parser
+	maxFileSize int64
 }
+
+const defaultMaxIngestFileSizeBytes int64 = 100 << 20
 
 func NewIngestWorker(
 	assets KnowledgeAssetRepository,
@@ -40,12 +43,18 @@ func NewIngestWorker(
 		index = NoopIndexPipeline{}
 	}
 	return &IngestWorker{
-		assets:  assets,
-		chunks:  chunks,
-		blobs:   blobs,
-		index:   index,
-		parsers: map[string]ingestParser{},
+		assets:      assets,
+		chunks:      chunks,
+		blobs:       blobs,
+		index:       index,
+		parsers:     map[string]ingestParser{},
+		maxFileSize: defaultMaxIngestFileSizeBytes,
 	}
+}
+
+func (w *IngestWorker) WithMaxFileSize(maxBytes int64) *IngestWorker {
+	w.maxFileSize = maxBytes
+	return w
 }
 
 // RegisterParser associates a MIME type with a parser.
@@ -62,6 +71,9 @@ func (w *IngestWorker) Ingest(ctx context.Context, assetID uuid.UUID) error {
 	}
 	if a.Kind != model.KindIngestedFile {
 		return fmt.Errorf("ingest worker: asset %s is not an ingested_file", assetID)
+	}
+	if w.maxFileSize > 0 && a.FileSize > w.maxFileSize {
+		return w.failIngest(ctx, assetID, fmt.Sprintf("file too large: %d > %d bytes", a.FileSize, w.maxFileSize))
 	}
 
 	// Mark processing.
@@ -87,7 +99,7 @@ func (w *IngestWorker) Ingest(ctx context.Context, assetID uuid.UUID) error {
 		parser = &plainTextParser{}
 	}
 
-	chunks, err := parser.Parse(rc)
+	chunks, err := parser.Parse(io.LimitReader(rc, w.maxFileSize+1))
 	if err != nil {
 		return w.failIngest(ctx, assetID, fmt.Sprintf("parse: %v", err))
 	}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -62,29 +62,25 @@ export function ReviewWorkspace({
   const t = useTranslations("reviews");
   const [selectedId, setSelectedId] = useState<string | null>(selectedReviewId);
   const [showTriggerForm, setShowTriggerForm] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedIdState, setSelectedIdState] = useState<Set<string>>(new Set());
   const [transitionError, setTransitionError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setSelectedId(selectedReviewId);
-  }, [selectedReviewId]);
-
-  useEffect(() => {
+  const selectedIds = useMemo(() => {
+    if (selectedIdState.size === 0) {
+      return selectedIdState;
+    }
     const allIds = new Set(reviews.map((review) => review.id));
-    setSelectedIds((previous) => {
-      if (previous.size === 0) return previous;
-      let mutated = false;
-      const next = new Set<string>();
-      previous.forEach((id) => {
-        if (allIds.has(id)) {
-          next.add(id);
-        } else {
-          mutated = true;
-        }
-      });
-      return mutated ? next : previous;
+    let mutated = false;
+    const next = new Set<string>();
+    selectedIdState.forEach((id) => {
+      if (allIds.has(id)) {
+        next.add(id);
+      } else {
+        mutated = true;
+      }
     });
-  }, [reviews]);
+    return mutated ? next : selectedIdState;
+  }, [reviews, selectedIdState]);
 
   const reviewById = useMemo(
     () => new Map(reviews.map((review) => [review.id, review])),
@@ -97,7 +93,7 @@ export function ReviewWorkspace({
   );
 
   const toggleSelect = useCallback((reviewId: string) => {
-    setSelectedIds((previous) => {
+    setSelectedIdState((previous) => {
       const next = new Set(previous);
       if (next.has(reviewId)) {
         next.delete(reviewId);
@@ -109,7 +105,7 @@ export function ReviewWorkspace({
   }, []);
 
   const clearSelection = useCallback(() => {
-    setSelectedIds(new Set());
+    setSelectedIdState(new Set());
   }, []);
 
   const guardTransition = useCallback(

@@ -376,6 +376,24 @@ func (r *WorkflowExecutionRepository) ListExecutions(ctx context.Context, workfl
 	return result, nil
 }
 
+func (r *WorkflowExecutionRepository) ListActiveExecutions(ctx context.Context) ([]*model.WorkflowExecution, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	var records []workflowExecutionRecord
+	if err := r.db.WithContext(ctx).
+		Where("status IN ?", []string{model.WorkflowExecStatusRunning, model.WorkflowExecStatusPaused}).
+		Order("created_at ASC").
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list active workflow executions: %w", err)
+	}
+	result := make([]*model.WorkflowExecution, len(records))
+	for i := range records {
+		result[i] = records[i].toModel()
+	}
+	return result, nil
+}
+
 // ListExecutionsByActingEmployee returns every workflow execution whose
 // acting_employee_id matches the given employee, ordered by created_at DESC.
 // Used by the attribution read surface so "list runs acting as employee X"

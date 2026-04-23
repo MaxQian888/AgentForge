@@ -61,6 +61,17 @@ type fakeExecDataStore struct {
 	updatedStore json.RawMessage
 }
 
+type fakeResetNodesAtomicStore struct {
+	calls []resetNodesAtomicCall
+}
+
+type resetNodesAtomicCall struct {
+	execID       uuid.UUID
+	nodeIDs      []string
+	counterKey   string
+	counterValue float64
+}
+
 func (f *fakeExecDataStore) GetExecution(_ context.Context, id uuid.UUID) (*model.WorkflowExecution, error) {
 	if f.exec != nil && f.exec.ID == id {
 		return f.exec, nil
@@ -71,6 +82,16 @@ func (f *fakeExecDataStore) GetExecution(_ context.Context, id uuid.UUID) (*mode
 func (f *fakeExecDataStore) UpdateExecutionDataStore(_ context.Context, id uuid.UUID, dataStore json.RawMessage) error {
 	f.updatedID = id
 	f.updatedStore = dataStore
+	return nil
+}
+
+func (f *fakeResetNodesAtomicStore) ResetNodesAndUpdateCounter(_ context.Context, execID uuid.UUID, nodeIDs []string, counterKey string, counterValue float64) error {
+	f.calls = append(f.calls, resetNodesAtomicCall{
+		execID:       execID,
+		nodeIDs:      append([]string(nil), nodeIDs...),
+		counterKey:   counterKey,
+		counterValue: counterValue,
+	})
 	return nil
 }
 
@@ -287,6 +308,40 @@ func TestApplier_ResetNodes_WithCounter(t *testing.T) {
 	}
 	if ds["loop_iter"] != float64(3) {
 		t.Errorf("loop_iter = %v, want 3", ds["loop_iter"])
+	}
+}
+
+func TestApplier_ResetNodes_WithCounter_UsesAtomicStoreWhenAvailable(t *testing.T) {
+	exec := newExec()
+	store := &fakeResetNodesAtomicStore{}
+	applier := &EffectApplier{ResetNodesStore: store}
+
+	effects := []Effect{
+		{
+			Kind: EffectResetNodes,
+			Payload: mustJSON(ResetNodesPayload{
+				NodeIDs:      []string{"n1", "n2"},
+				CounterKey:   "loop_iter",
+				CounterValue: 4,
+			}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), nil, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parked {
+		t.Fatal("expected parked=false")
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("expected 1 atomic reset call, got %d", len(store.calls))
+	}
+	if store.calls[0].execID != exec.ID {
+		t.Fatalf("execID = %s, want %s", store.calls[0].execID, exec.ID)
+	}
+	if store.calls[0].counterKey != "loop_iter" || store.calls[0].counterValue != 4 {
+		t.Fatalf("counter = %s/%v", store.calls[0].counterKey, store.calls[0].counterValue)
 	}
 }
 

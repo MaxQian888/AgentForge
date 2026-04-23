@@ -3,10 +3,13 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/authutil"
 	"github.com/agentforge/server/internal/model"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -25,11 +28,17 @@ type IMBridgeListener interface {
 }
 
 type IMControlHandler struct {
-	control IMControlPlane
+	control      IMControlPlane
+	sharedSecret string
+	upgrader     websocket.Upgrader
 }
 
-func NewIMControlHandler(control IMControlPlane) *IMControlHandler {
-	return &IMControlHandler{control: control}
+func NewIMControlHandler(control IMControlPlane, sharedSecret string, allowedOrigins []string) *IMControlHandler {
+	return &IMControlHandler{
+		control:      control,
+		sharedSecret: strings.TrimSpace(sharedSecret),
+		upgrader:     newUpgrader(allowedOrigins),
+	}
 }
 
 func (h *IMControlHandler) HandleWS(c echo.Context) error {
@@ -54,7 +63,21 @@ func (h *IMControlHandler) HandleWS(c echo.Context) error {
 		afterCursor = parsed
 	}
 
-	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err := authutil.ValidateBearerSharedSecret(c.Request().Header.Get("Authorization"), h.sharedSecret); err != nil {
+		entry := log.WithFields(log.Fields{
+			"remoteAddr":  remoteAddr,
+			"bridgeId":    bridgeID,
+			"afterCursor": afterCursor,
+		}).WithError(err)
+		if errors.Is(err, authutil.ErrSharedSecretNotConfigured) {
+			entry.Warn("IM control ws rejected: auth misconfigured")
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"message": "IM control auth unavailable"})
+		}
+		entry.Warn("IM control ws rejected: unauthorized")
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
+	}
+
+	conn, err := h.upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"remoteAddr":  remoteAddr,
@@ -111,7 +134,7 @@ func (h *IMControlHandler) HandleWS(c echo.Context) error {
 		}).Info("IM control ws disconnected")
 	}()
 
-	conn.SetReadLimit(maxMessageSize * 4)
+	conn.SetReadLimit(defaultMaxMessageSize * 4)
 	conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck

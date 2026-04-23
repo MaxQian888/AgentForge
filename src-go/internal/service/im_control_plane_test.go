@@ -10,6 +10,7 @@ import (
 
 type fakeBridgeDeliveryListener struct {
 	deliveries []*IMControlDelivery
+	closed     int
 }
 
 func (l *fakeBridgeDeliveryListener) Send(_ context.Context, delivery *IMControlDelivery) error {
@@ -17,7 +18,77 @@ func (l *fakeBridgeDeliveryListener) Send(_ context.Context, delivery *IMControl
 	return nil
 }
 
-func (l *fakeBridgeDeliveryListener) Close() error { return nil }
+func (l *fakeBridgeDeliveryListener) Close() error {
+	l.closed++
+	return nil
+}
+
+func TestIMControlPlane_ShutdownClearsInMemoryState(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-1",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	listener := &fakeBridgeDeliveryListener{}
+	if _, err := control.AttachBridgeListener(context.Background(), "bridge-1", 0, listener); err != nil {
+		t.Fatalf("AttachBridgeListener error: %v", err)
+	}
+	if _, err := control.QueueDelivery(context.Background(), IMQueueDeliveryRequest{
+		TargetBridgeID: "bridge-1",
+		Platform:       "slack",
+		ProjectID:      "project-1",
+		Kind:           IMDeliveryKindProgress,
+		Content:        "hello",
+	}); err != nil {
+		t.Fatalf("QueueDelivery error: %v", err)
+	}
+	if err := control.BindAction(context.Background(), &IMActionBinding{
+		BridgeID:  "bridge-1",
+		Platform:  "slack",
+		ProjectID: "project-1",
+		TaskID:    "task-1",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "1700000000.1",
+		},
+	}); err != nil {
+		t.Fatalf("BindAction error: %v", err)
+	}
+
+	control.RecordDeliveryResult(model.IMDelivery{
+		ID:        "delivery-1",
+		BridgeID:  "bridge-1",
+		ProjectID: "project-1",
+		Platform:  "slack",
+		EventType: "message.send",
+		Status:    model.IMDeliveryStatusDelivered,
+		Content:   "hello",
+	})
+
+	if err := control.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown error: %v", err)
+	}
+	if listener.closed != 1 {
+		t.Fatalf("listener closed = %d, want 1", listener.closed)
+	}
+	if len(control.instances) != 0 || len(control.listeners) != 0 || len(control.pending) != 0 || len(control.history) != 0 {
+		t.Fatalf("control plane retained state after shutdown")
+	}
+	if len(control.actionByTask) != 0 || len(control.actionByRun) != 0 || len(control.actionByReview) != 0 {
+		t.Fatalf("control plane retained bound actions after shutdown")
+	}
+}
 
 func TestIMControlPlane_RegistrationHeartbeatAndExpiry(t *testing.T) {
 	now := time.Date(2026, 3, 24, 10, 0, 0, 0, time.UTC)

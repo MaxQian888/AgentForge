@@ -23,13 +23,14 @@ type SubscriptionRouter interface {
 
 // Client represents a connected WebSocket client.
 type Client struct {
-	hub        *Hub
-	conn       *websocket.Conn
-	send       chan []byte
-	projectID  string
-	userID     string
-	remoteAddr string
-	id         string
+	hub            *Hub
+	conn           *websocket.Conn
+	send           chan []byte
+	projectID      string
+	userID         string
+	remoteAddr     string
+	id             string
+	maxMessageSize int64
 
 	subMu         sync.Mutex
 	subscriptions map[string]struct{}

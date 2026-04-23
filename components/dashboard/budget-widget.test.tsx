@@ -19,11 +19,13 @@ describe("BudgetWidget", () => {
     const { container } = render(
       <BudgetWidget totalBudget={1000} spent={850} remaining={150} />,
     );
+    const indicator = container.querySelector('[data-slot="progress-indicator"]');
 
     expect(screen.getByText("$1,000.00")).toBeInTheDocument();
     expect(screen.getByText("$850.00")).toBeInTheDocument();
     expect(screen.getByText("$150.00")).toBeInTheDocument();
     expect(screen.getByText("85%")).toBeInTheDocument();
-    expect(container.querySelector('[style="width: 85%;"]')).toHaveClass("bg-amber-500");
+    expect(indicator).toHaveClass("bg-amber-500");
+    expect(indicator).toHaveStyle({ transform: "translateX(-15%)" });
   });
 });

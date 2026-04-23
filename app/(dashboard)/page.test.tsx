@@ -178,6 +178,9 @@ jest.mock("next-intl", () => ({
     if (namespace === "dashboard" && key === "cards.members") {
       return `${values?.count ?? 0} members`;
     }
+    if (namespace === "dashboard" && key === "bootstrap.title") {
+      return "Project Bootstrap";
+    }
     if (namespace === "dashboard" && key === "teamHealth.active") {
       return "Active";
     }
@@ -311,7 +314,7 @@ describe("DashboardPage", () => {
     render(<DashboardPage />);
 
     expect(screen.getByRole("heading", { name: "dashboard.pageTitle" })).toBeInTheDocument();
-    expect(screen.getByText("Project bootstrap")).toBeInTheDocument();
+    expect(screen.getByText("Project Bootstrap")).toBeInTheDocument();
     expect(
       screen.getByText("Repository or coding-agent defaults still need configuration."),
     ).toBeInTheDocument();

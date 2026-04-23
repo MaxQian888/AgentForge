@@ -276,8 +276,8 @@ describe("AgentsPage", () => {
     ).toBeInTheDocument();
 
     const degradedAlert = screen.getByRole("alert");
-    expect(degradedAlert).toHaveTextContent("Bridge Health");
-    expect(degradedAlert).toHaveTextContent("Status: degraded");
+    expect(degradedAlert).toHaveTextContent("overview.bridgeHealth");
+    expect(degradedAlert).toHaveTextContent("overview.bridgeStatus");
     expect(screen.getAllByText("Paused verification").length).toBeGreaterThan(0);
 
     const resumeButtons = screen.getAllByRole("button", {

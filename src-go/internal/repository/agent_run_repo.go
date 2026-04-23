@@ -9,6 +9,7 @@ import (
 	"github.com/agentforge/server/internal/model"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type AgentRunRepository struct {
@@ -27,6 +28,38 @@ func (r *AgentRunRepository) Create(ctx context.Context, run *model.AgentRun) er
 		return fmt.Errorf("create agent run: %w", err)
 	}
 	return nil
+}
+
+func (r *AgentRunRepository) CreateIfNoActiveByTask(ctx context.Context, run *model.AgentRun) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if run == nil {
+		return fmt.Errorf("create agent run if no active: run is nil")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var lockedTask taskRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", run.TaskID).
+			Take(&lockedTask).Error; err != nil {
+			return fmt.Errorf("lock task for agent run create: %w", normalizeRepositoryError(err))
+		}
+
+		var activeCount int64
+		if err := tx.Model(&agentRunRecord{}).
+			Where("task_id = ? AND status IN ?", run.TaskID, []string{model.AgentRunStatusStarting, model.AgentRunStatusRunning}).
+			Count(&activeCount).Error; err != nil {
+			return fmt.Errorf("check active agent runs: %w", err)
+		}
+		if activeCount > 0 {
+			return ErrAgentRunActiveConflict
+		}
+
+		if err := tx.Create(newAgentRunRecord(run)).Error; err != nil {
+			return fmt.Errorf("create agent run: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *AgentRunRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.AgentRun, error) {

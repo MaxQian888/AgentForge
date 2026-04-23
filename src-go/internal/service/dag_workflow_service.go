@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	eventbus "github.com/agentforge/server/internal/eventbus"
@@ -606,7 +607,22 @@ func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.Workfl
 		ProjectID:  exec.ProjectID,
 	}
 
-	result, err := entry.Handler.Execute(ctx, req)
+	retryCount, retryBackoff := nodeRetryPolicy(req.Config)
+	var result *nodetypes.NodeExecResult
+	result, err = entry.Handler.Execute(ctx, req)
+	for attempt := 0; err != nil && attempt < retryCount; attempt++ {
+		if retryBackoff > 0 {
+			backoff := time.Duration(math.Pow(2, float64(attempt))) * retryBackoff
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+		result, err = entry.Handler.Execute(ctx, req)
+	}
 	if err != nil {
 		_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecFailed, nil, err.Error())
 		return err
@@ -669,6 +685,21 @@ func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.Workfl
 		"status":      model.NodeExecCompleted,
 	})
 	return nil
+}
+
+func nodeRetryPolicy(config map[string]any) (int, time.Duration) {
+	if len(config) == 0 {
+		return 0, 0
+	}
+	retryCount := 0
+	if raw, ok := config["retry_count"].(float64); ok && raw > 0 {
+		retryCount = int(raw)
+	}
+	backoff := time.Duration(0)
+	if raw, ok := config["retry_backoff_seconds"].(float64); ok && raw > 0 {
+		backoff = time.Duration(raw * float64(time.Second))
+	}
+	return retryCount, backoff
 }
 
 // ---------------------------------------------------------------------------

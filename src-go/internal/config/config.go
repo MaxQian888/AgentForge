@@ -19,6 +19,9 @@ type Config struct {
 	Env                          string
 	BridgeURL                    string
 	AgentForgeToken              string
+	AgentDefaultMaxTurns         int
+	WSMaxMessageSizeBytes        int64
+	DashboardWidgetCacheTTL      time.Duration
 	WorktreeBasePath             string
 	RepoBasePath                 string
 	RolesDir                     string
@@ -81,6 +84,9 @@ func Load() *Config {
 	viper.SetDefault("REDIS_URL", "redis://localhost:6379")
 	viper.SetDefault("BRIDGE_URL", "http://localhost:7778")
 	viper.SetDefault("AGENTFORGE_TOKEN", "")
+	viper.SetDefault("AGENT_DEFAULT_MAX_TURNS", 50)
+	viper.SetDefault("WS_MAX_MESSAGE_SIZE_BYTES", 4096)
+	viper.SetDefault("DASHBOARD_WIDGET_CACHE_TTL", "60s")
 	viper.SetDefault("WORKTREE_BASE_PATH", "./data/worktrees")
 	viper.SetDefault("REPO_BASE_PATH", "./data/repos")
 	viper.SetDefault("ROLES_DIR", "./roles")
@@ -113,6 +119,7 @@ func Load() *Config {
 	taskProgressStalledAfter, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_STALLED_AFTER"))
 	taskProgressAlertCooldown, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_ALERT_COOLDOWN"))
 	taskProgressDetectorInterval, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_DETECTOR_INTERVAL"))
+	dashboardWidgetCacheTTL, _ := time.ParseDuration(viper.GetString("DASHBOARD_WIDGET_CACHE_TTL"))
 	imBridgeHeartbeatTTL, _ := time.ParseDuration(viper.GetString("IM_BRIDGE_HEARTBEAT_TTL"))
 	imBridgeProgressInterval, _ := time.ParseDuration(viper.GetString("IM_BRIDGE_PROGRESS_INTERVAL"))
 
@@ -140,6 +147,9 @@ func Load() *Config {
 		Env:                          viper.GetString("ENV"),
 		BridgeURL:                    viper.GetString("BRIDGE_URL"),
 		AgentForgeToken:              viper.GetString("AGENTFORGE_TOKEN"),
+		AgentDefaultMaxTurns:         viper.GetInt("AGENT_DEFAULT_MAX_TURNS"),
+		WSMaxMessageSizeBytes:        viper.GetInt64("WS_MAX_MESSAGE_SIZE_BYTES"),
+		DashboardWidgetCacheTTL:      dashboardWidgetCacheTTL,
 		WorktreeBasePath:             viper.GetString("WORKTREE_BASE_PATH"),
 		RepoBasePath:                 viper.GetString("REPO_BASE_PATH"),
 		RolesDir:                     viper.GetString("ROLES_DIR"),

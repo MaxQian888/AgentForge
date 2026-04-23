@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/agentforge/server/internal/model"
 	"github.com/agentforge/server/internal/plugin"
@@ -172,12 +173,16 @@ func TestToolChainExecutor_OnError_Retry(t *testing.T) {
 		OnError: "retry(3)",
 	}
 
+	start := time.Now()
 	_, err := exec.Execute(context.Background(), "test-plugin", spec, map[string]any{})
 	if err != nil {
 		t.Fatalf("expected success after retries, got %v", err)
 	}
 	if caller.attempts != 3 {
 		t.Errorf("expected 3 attempts (2 failures + 1 success), got %d", caller.attempts)
+	}
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Fatalf("retry backoff elapsed = %v, want >= 250ms", elapsed)
 	}
 }
 
@@ -192,12 +197,16 @@ func TestToolChainExecutor_OnError_RetryExhausted(t *testing.T) {
 		OnError: "retry(2)",
 	}
 
+	start := time.Now()
 	_, err := exec.Execute(context.Background(), "test-plugin", spec, map[string]any{})
 	if err == nil {
 		t.Error("expected exhausted-retry error")
 	}
 	if caller.attempts != 3 {
 		t.Errorf("expected 3 attempts (1 + 2 retries), got %d", caller.attempts)
+	}
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Fatalf("retry backoff elapsed = %v, want >= 250ms", elapsed)
 	}
 }
 

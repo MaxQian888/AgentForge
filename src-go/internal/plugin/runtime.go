@@ -19,8 +19,11 @@ import (
 )
 
 const (
-	abiVersionExportName = "agentforge_abi_version"
-	runExportName        = "agentforge_run"
+	abiVersionExportName         = "agentforge_abi_version"
+	runExportName                = "agentforge_run"
+	defaultWASMMemoryLimitPages  = 256
+	defaultWASMInvocationTimeout = 30 * time.Second
+	defaultWASMCacheCapacity     = 16
 )
 
 type WASMRuntimeManager struct {
@@ -32,6 +35,10 @@ type WASMRuntimeManager struct {
 	// invalidate when the underlying .wasm file's mtime changes, and
 	// are torn down explicitly by DeactivatePlugin.
 	cache map[string]*wasmCachedRuntime
+
+	memoryLimitPages uint32
+	invokeTimeout    time.Duration
+	cacheCapacity    int
 }
 
 type wasmPluginState struct {
@@ -45,6 +52,7 @@ type wasmCachedRuntime struct {
 	compiled    wazero.CompiledModule
 	modulePath  string
 	moduleMtime time.Time
+	lastUsedAt  time.Time
 }
 
 type wasmEnvelope struct {
@@ -60,9 +68,46 @@ type wasmEnvelope struct {
 
 func NewWASMRuntimeManager() *WASMRuntimeManager {
 	return &WASMRuntimeManager{
-		plugins: make(map[string]*wasmPluginState),
-		cache:   make(map[string]*wasmCachedRuntime),
+		plugins:          make(map[string]*wasmPluginState),
+		cache:            make(map[string]*wasmCachedRuntime),
+		memoryLimitPages: defaultWASMMemoryLimitPages,
+		invokeTimeout:    defaultWASMInvocationTimeout,
+		cacheCapacity:    defaultWASMCacheCapacity,
 	}
+}
+
+func (m *WASMRuntimeManager) WithMemoryLimitPages(pages uint32) *WASMRuntimeManager {
+	if pages > 0 {
+		m.memoryLimitPages = pages
+	}
+	return m
+}
+
+func (m *WASMRuntimeManager) WithInvocationTimeout(timeout time.Duration) *WASMRuntimeManager {
+	if timeout > 0 {
+		m.invokeTimeout = timeout
+	}
+	return m
+}
+
+func (m *WASMRuntimeManager) WithCacheCapacity(capacity int) *WASMRuntimeManager {
+	if capacity > 0 {
+		m.cacheCapacity = capacity
+	}
+	return m
+}
+
+func (m *WASMRuntimeManager) CacheSize() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.cache)
+}
+
+func (m *WASMRuntimeManager) IsCached(pluginID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.cache[pluginID]
+	return ok
 }
 
 func (m *WASMRuntimeManager) ActivatePlugin(ctx context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error) {
@@ -183,6 +228,7 @@ func (m *WASMRuntimeManager) obtainOrCompile(ctx context.Context, record model.P
 	m.mu.Lock()
 	if existing, ok := m.cache[record.Metadata.ID]; ok {
 		if existing.modulePath == modulePath && existing.moduleMtime.Equal(info.ModTime()) {
+			existing.lastUsedAt = time.Now().UTC()
 			m.mu.Unlock()
 			return existing, nil
 		}
@@ -197,7 +243,10 @@ func (m *WASMRuntimeManager) obtainOrCompile(ctx context.Context, record model.P
 		return nil, fmt.Errorf("read wasm module %s: %w", modulePath, err)
 	}
 
-	runtime := wazero.NewRuntime(ctx)
+	rConfig := wazero.NewRuntimeConfig().
+		WithMemoryLimitPages(m.memoryLimitPages).
+		WithCloseOnContextDone(true)
+	runtime := wazero.NewRuntimeWithConfig(ctx, rConfig)
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, runtime); err != nil {
 		_ = runtime.Close(ctx)
 		return nil, fmt.Errorf("instantiate wasi: %w", err)
@@ -217,18 +266,42 @@ func (m *WASMRuntimeManager) obtainOrCompile(ctx context.Context, record model.P
 		compiled:    compiled,
 		modulePath:  modulePath,
 		moduleMtime: info.ModTime(),
+		lastUsedAt:  time.Now().UTC(),
 	}
 
 	m.mu.Lock()
 	// Another goroutine may have raced us; drop our copy if so.
 	if winner, ok := m.cache[record.Metadata.ID]; ok {
+		winner.lastUsedAt = time.Now().UTC()
 		m.mu.Unlock()
 		_ = runtime.Close(ctx)
 		return winner, nil
 	}
+	m.evictLRULocked(ctx)
 	m.cache[record.Metadata.ID] = cached
 	m.mu.Unlock()
 	return cached, nil
+}
+
+func (m *WASMRuntimeManager) evictLRULocked(ctx context.Context) {
+	if m.cacheCapacity <= 0 || len(m.cache) < m.cacheCapacity {
+		return
+	}
+	var (
+		evictID string
+		evict   *wasmCachedRuntime
+	)
+	for pluginID, candidate := range m.cache {
+		if evict == nil || candidate.lastUsedAt.Before(evict.lastUsedAt) {
+			evictID = pluginID
+			evict = candidate
+		}
+	}
+	if evict == nil {
+		return
+	}
+	delete(m.cache, evictID)
+	_ = evict.runtime.Close(ctx)
 }
 
 // DeactivatePlugin releases the cached wazero runtime and compiled
@@ -249,6 +322,11 @@ func (m *WASMRuntimeManager) DeactivatePlugin(ctx context.Context, pluginID stri
 }
 
 func (m *WASMRuntimeManager) runEnvelope(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (*executionResult, error) {
+	if m.invokeTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, m.invokeTimeout)
+		defer cancel()
+	}
 	cached, err := m.obtainOrCompile(ctx, record)
 	if err != nil {
 		return nil, err

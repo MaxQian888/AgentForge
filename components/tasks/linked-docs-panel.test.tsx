@@ -92,7 +92,7 @@ describe("LinkedDocsPanel", () => {
     await user.click(screen.getByRole("button", { name: "Add Doc" }));
     expect(onAdd).toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Remove PRD" }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
     expect(onRemove).toHaveBeenCalledWith("link-1");
   });
 });

@@ -242,6 +242,16 @@ func (s *CRUDService) Test(ctx context.Context, id uuid.UUID, event map[string]a
 		}
 		return nil, fmt.Errorf("trigger service: test lookup: %w", err)
 	}
+	if s.defs != nil && tr.TargetKind == model.TriggerTargetDAG && tr.WorkflowID != nil {
+		def, defErr := s.defs.GetByID(ctx, *tr.WorkflowID)
+		if defErr != nil || def == nil {
+			return &DryRunResult{
+				Matched:       true,
+				WouldDispatch: false,
+				SkipReason:    "target_not_found",
+			}, nil
+		}
+	}
 	return DryRun(tr, event), nil
 }
 

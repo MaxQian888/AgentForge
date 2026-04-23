@@ -481,3 +481,40 @@ func TestGetCurrentUser_UserMissing(t *testing.T) {
 		t.Fatalf("expected ErrInvalidToken, got %v", err)
 	}
 }
+
+func TestChangePassword_BlacklistsCurrentTokenAndClearsRefreshToken(t *testing.T) {
+	userRepo := newMockUserRepo()
+	cacheRepo := newMockCacheRepo()
+	svc := service.NewAuthService(userRepo, cacheRepo, testConfig())
+
+	user := seedUser(userRepo, "change@example.com", "old-password", "Changer")
+	cacheRepo.refreshTokens[user.ID.String()] = "refresh-token"
+
+	err := svc.ChangePassword(context.Background(), user.ID.String(), "old-password", "new-password-123", "current-jti", 15*time.Minute)
+	if err != nil {
+		t.Fatalf("ChangePassword() error = %v", err)
+	}
+	if !cacheRepo.blacklist["current-jti"] {
+		t.Fatal("expected current access token to be blacklisted")
+	}
+	if _, ok := cacheRepo.refreshTokens[user.ID.String()]; ok {
+		t.Fatal("expected refresh token to be deleted after password change")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte("new-password-123")) != nil {
+		t.Fatal("expected stored password hash to be updated")
+	}
+}
+
+func TestChangePassword_BlacklistFailure(t *testing.T) {
+	userRepo := newMockUserRepo()
+	cacheRepo := newMockCacheRepo()
+	cacheRepo.blacklistErr = repository.ErrCacheUnavailable
+	svc := service.NewAuthService(userRepo, cacheRepo, testConfig())
+
+	user := seedUser(userRepo, "change@example.com", "old-password", "Changer")
+
+	err := svc.ChangePassword(context.Background(), user.ID.String(), "old-password", "new-password-123", "current-jti", 15*time.Minute)
+	if !errors.Is(err, repository.ErrCacheUnavailable) {
+		t.Fatalf("expected ErrCacheUnavailable, got %v", err)
+	}
+}

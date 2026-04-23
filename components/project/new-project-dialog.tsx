@@ -39,6 +39,19 @@ interface NewProjectDialogProps {
  * behavior (no template params sent).
  */
 export function NewProjectDialog({ open, onClose, onCreated }: NewProjectDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      {open ? <NewProjectDialogBody onClose={onClose} onCreated={onCreated} /> : null}
+    </Dialog>
+  );
+}
+
+interface NewProjectDialogBodyProps {
+  onClose: () => void;
+  onCreated?: (projectId: string) => void;
+}
+
+function NewProjectDialogBody({ onClose, onCreated }: NewProjectDialogBodyProps) {
   const t = useTranslations("projectTemplates");
   const tProjects = useTranslations("projects");
   const createProject = useProjectStore((s) => s.createProject);
@@ -53,19 +66,8 @@ export function NewProjectDialog({ open, onClose, onCreated }: NewProjectDialogP
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    if (open) {
-      fetchTemplates();
-    }
-  }, [open, fetchTemplates]);
-
-  useEffect(() => {
-    if (!open) {
-      setMode("blank");
-      setSelectedTemplate(null);
-      setName("");
-      setDescription("");
-    }
-  }, [open]);
+    void fetchTemplates();
+  }, [fetchTemplates]);
 
   const groupedTemplates = useMemo(() => {
     const groups: Record<ProjectTemplateSource, ProjectTemplate[]> = {
@@ -106,111 +108,109 @@ export function NewProjectDialog({ open, onClose, onCreated }: NewProjectDialogP
   const canSubmit = Boolean(name.trim()) && (mode === "blank" || !!selectedTemplate);
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{t("newProject.title")}</DialogTitle>
-          <DialogDescription>{t("newProject.description")}</DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-6 py-4">
-          <div className="flex flex-col gap-2">
-            <Label>{t("newProject.startFrom")}</Label>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant={mode === "blank" ? "default" : "outline"}
-                onClick={() => setMode("blank")}
-              >
-                {t("newProject.blank")}
-              </Button>
-              <Button
-                type="button"
-                variant={mode === "template" ? "default" : "outline"}
-                onClick={() => setMode("template")}
-              >
-                {t("newProject.fromTemplate")}
-              </Button>
-            </div>
-          </div>
-
-          {mode === "template" && (
-            <div className="flex flex-col gap-2">
-              <Label>{t("newProject.selectTemplate")}</Label>
-              {loadingTemplates ? (
-                <p className="text-sm text-muted-foreground">{t("newProject.loading")}</p>
-              ) : (
-                <div className="flex max-h-64 flex-col gap-4 overflow-y-auto rounded-md border p-2">
-                  {(["system", "user", "marketplace"] as ProjectTemplateSource[]).map(
-                    (source) =>
-                      groupedTemplates[source].length > 0 && (
-                        <div key={source} className="flex flex-col gap-2">
-                          <p className="text-xs font-semibold uppercase text-muted-foreground">
-                            {t(`source.${source}`)}
-                          </p>
-                          {groupedTemplates[source].map((tpl) => {
-                            const active = selectedTemplate?.id === tpl.id;
-                            return (
-                              <button
-                                key={tpl.id}
-                                type="button"
-                                onClick={() => setSelectedTemplate(tpl)}
-                                className={`rounded-md border p-2 text-left text-sm transition ${
-                                  active ? "border-primary bg-primary/5" : "hover:bg-accent"
-                                }`}
-                              >
-                                <p className="font-medium">{tpl.name}</p>
-                                {tpl.description && (
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {tpl.description}
-                                  </p>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ),
-                  )}
-                  {templates.length === 0 && (
-                    <p className="text-sm text-muted-foreground">
-                      {t("newProject.noTemplates")}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="new-project-name">{tProjects("createProject.nameLabel")}</Label>
-            <Input
-              id="new-project-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={100}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="new-project-description">
-              {tProjects("createProject.descriptionLabel")}
-            </Label>
-            <Textarea
-              id="new-project-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-            />
+    <DialogContent className="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle>{t("newProject.title")}</DialogTitle>
+        <DialogDescription>{t("newProject.description")}</DialogDescription>
+      </DialogHeader>
+      <div className="flex flex-col gap-6 py-4">
+        <div className="flex flex-col gap-2">
+          <Label>{t("newProject.startFrom")}</Label>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant={mode === "blank" ? "default" : "outline"}
+              onClick={() => setMode("blank")}
+            >
+              {t("newProject.blank")}
+            </Button>
+            <Button
+              type="button"
+              variant={mode === "template" ? "default" : "outline"}
+              onClick={() => setMode("template")}
+            >
+              {t("newProject.fromTemplate")}
+            </Button>
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={creating}>
-            {t("newProject.cancel")}
-          </Button>
-          <Button onClick={handleCreate} disabled={!canSubmit || creating}>
-            {creating ? t("newProject.creating") : t("newProject.create")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+        {mode === "template" && (
+          <div className="flex flex-col gap-2">
+            <Label>{t("newProject.selectTemplate")}</Label>
+            {loadingTemplates ? (
+              <p className="text-sm text-muted-foreground">{t("newProject.loading")}</p>
+            ) : (
+              <div className="flex max-h-64 flex-col gap-4 overflow-y-auto rounded-md border p-2">
+                {(["system", "user", "marketplace"] as ProjectTemplateSource[]).map(
+                  (source) =>
+                    groupedTemplates[source].length > 0 && (
+                      <div key={source} className="flex flex-col gap-2">
+                        <p className="text-xs font-semibold uppercase text-muted-foreground">
+                          {t(`source.${source}`)}
+                        </p>
+                        {groupedTemplates[source].map((tpl) => {
+                          const active = selectedTemplate?.id === tpl.id;
+                          return (
+                            <button
+                              key={tpl.id}
+                              type="button"
+                              onClick={() => setSelectedTemplate(tpl)}
+                              className={`rounded-md border p-2 text-left text-sm transition ${
+                                active ? "border-primary bg-primary/5" : "hover:bg-accent"
+                              }`}
+                            >
+                              <p className="font-medium">{tpl.name}</p>
+                              {tpl.description && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {tpl.description}
+                                </p>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ),
+                )}
+                {templates.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("newProject.noTemplates")}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="new-project-name">{tProjects("createProject.nameLabel")}</Label>
+          <Input
+            id="new-project-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            maxLength={100}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="new-project-description">
+            {tProjects("createProject.descriptionLabel")}
+          </Label>
+          <Textarea
+            id="new-project-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+          />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" onClick={onClose} disabled={creating}>
+          {t("newProject.cancel")}
+        </Button>
+        <Button onClick={handleCreate} disabled={!canSubmit || creating}>
+          {creating ? t("newProject.creating") : t("newProject.create")}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
   );
 }

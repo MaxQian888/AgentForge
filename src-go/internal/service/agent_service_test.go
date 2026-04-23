@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -44,6 +45,19 @@ func (m *mockAgentRunRepo) Create(_ context.Context, run *model.AgentRun) error 
 	m.runs[run.ID] = &cloned
 	m.runsByTask[run.TaskID] = append(m.runsByTask[run.TaskID], &cloned)
 	return nil
+}
+
+func (m *mockAgentRunRepo) CreateIfNoActiveByTask(ctx context.Context, run *model.AgentRun) error {
+	runs, err := m.GetByTask(ctx, run.TaskID)
+	if err != nil {
+		return err
+	}
+	for _, existing := range runs {
+		if existing.Status == model.AgentRunStatusStarting || existing.Status == model.AgentRunStatusRunning {
+			return repository.ErrAgentRunActiveConflict
+		}
+	}
+	return m.Create(ctx, run)
 }
 
 func (m *mockAgentRunRepo) GetByID(_ context.Context, id uuid.UUID) (*model.AgentRun, error) {
@@ -888,6 +902,40 @@ func TestAgentService_SpawnProjectsSelectedRoleIntoBridgeRequest(t *testing.T) {
 	knowledgeContext := assertBridgeRoleConfigStringField(t, bridge.lastExecute.RoleConfig, "KnowledgeContext")
 	if !strings.Contains(knowledgeContext, "docs/PRD.md") {
 		t.Fatalf("KnowledgeContext = %q, want docs/PRD.md reference", knowledgeContext)
+	}
+}
+
+func TestAgentService_SpawnUsesConfiguredDefaultMaxTurns(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Spawn agent",
+		Description: "Use configured default max turns",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{}
+	worktrees := &mockWorktreeManager{
+		allocation: &worktree.Allocation{
+			ProjectSlug: "agentforge",
+			TaskID:      taskID.String(),
+			Branch:      "agent/" + taskID.String(),
+			Path:        filepath.Join("tmp", "worktree", taskID.String()),
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
+	svc.SetDefaultSpawnMaxTurns(77)
+
+	if _, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 5, ""); err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+	if bridge.lastExecute.MaxTurns != 77 {
+		t.Fatalf("bridge max turns = %d, want 77", bridge.lastExecute.MaxTurns)
 	}
 }
 
@@ -1839,12 +1887,15 @@ func TestBridgeWS_PreservesEventOrderingIntoIMDeliveries(t *testing.T) {
 	svc.SetIMProgressNotifier(control)
 
 	e := echo.New()
-	e.GET("/ws/bridge", ws.NewBridgeHandler(svc).HandleWS)
+	e.GET("/ws/bridge", ws.NewBridgeHandler(svc, "bridge-secret", []string{"http://localhost:3000"}).HandleWS)
 	srv := httptest.NewServer(e)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/bridge"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{
+		"Authorization": []string{"Bearer bridge-secret"},
+		"Origin":        []string{"http://localhost:3000"},
+	})
 	if err != nil {
 		t.Fatalf("dial bridge websocket: %v", err)
 	}

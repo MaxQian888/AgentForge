@@ -72,7 +72,7 @@ describe("BulkActionToolbar", () => {
     const comboboxes = screen.getAllByRole("combobox");
 
     await user.click(comboboxes[0]);
-    await user.click(screen.getByRole("option", { name: "done" }));
+    await user.click(screen.getByRole("option", { name: "Done" }));
     expect(onBulkStatusChange).toHaveBeenCalledWith("done");
 
     await user.click(comboboxes[1]);

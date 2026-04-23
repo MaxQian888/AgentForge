@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { Progress } from "@/components/ui/progress";
 
 interface TeamMemberHealth {
   id: string;
@@ -53,15 +53,11 @@ export function TeamHealthWidget({ members }: TeamHealthWidgetProps) {
                     {commonT(`status.${member.status}`)}
                   </span>
                 </div>
-                <div className="h-1.5 w-full rounded-full bg-muted">
-                  <div
-                    className={cn(
-                      "h-1.5 rounded-full transition-all",
-                      workloadColor(member.workloadPercent)
-                    )}
-                    style={{ width: `${Math.min(member.workloadPercent, 100)}%` }}
-                  />
-                </div>
+                <Progress
+                  value={member.workloadPercent}
+                  className="h-1.5 bg-muted"
+                  indicatorClassName={workloadColor(member.workloadPercent)}
+                />
               </div>
             ))}
           </div>

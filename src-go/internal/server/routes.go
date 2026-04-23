@@ -470,6 +470,7 @@ func RegisterRoutes(
 ) *RouteServices {
 	jwtMw := appMiddleware.JWTMiddleware(cfg.JWTSecret, cache)
 	reviewTriggerMw := appMiddleware.ReviewTriggerAuthMiddleware(cfg.JWTSecret, cache, cfg.AgentForgeToken)
+	internalAuthMw := appMiddleware.SharedSecretAuthMiddleware(cfg.AgentForgeToken)
 
 	// Install the project-scoped RBAC member lookup. After this point any
 	// route wrapped in appMiddleware.Require(actionID) consults memberRepo
@@ -638,12 +639,12 @@ func RegisterRoutes(
 	v1.GET("/auth/me/projects/:pid/permissions", permissionsH.Get, jwtMw)
 
 	// WebSocket
-	wsH := ws.NewHandler(hub, cfg.JWTSecret)
+	wsH := ws.NewHandler(hub, cfg.JWTSecret, cache, cfg.AllowOrigins, cfg.WSMaxMessageSizeBytes)
 	e.GET("/ws", wsH.HandleWS)
 	if agentSvc != nil {
-		e.GET("/ws/bridge", ws.NewBridgeHandler(agentSvc).HandleWS)
+		e.GET("/ws/bridge", ws.NewBridgeHandler(agentSvc, cfg.AgentForgeToken, cfg.AllowOrigins).HandleWS)
 	}
-	e.GET("/ws/im-bridge", ws.NewIMControlHandler(imControlPlaneWSAdapter{control: imControlPlane}).HandleWS)
+	e.GET("/ws/im-bridge", ws.NewIMControlHandler(imControlPlaneWSAdapter{control: imControlPlane}, cfg.IMControlSharedSecret, cfg.AllowOrigins).HandleWS)
 
 	// --- Project templates ---
 	// Service first so the project handler can consume it via WithTemplateClone.
@@ -746,12 +747,13 @@ func RegisterRoutes(
 
 	// Build effect applier with all back-end deps.
 	effectApplier := &nodetypes.EffectApplier{
-		Hub:         wsHubAdapter{bus: bus},
-		TaskRepo:    taskRepo,
-		NodeRepo:    dagNodeExecRepo,
-		ExecRepo:    dagExecRepo,
-		MappingRepo: dagRunMappingRepo,
-		ReviewRepo:  wfReviewRepo,
+		Hub:             wsHubAdapter{bus: bus},
+		TaskRepo:        taskRepo,
+		NodeRepo:        dagNodeExecRepo,
+		ExecRepo:        dagExecRepo,
+		ResetNodesStore: repository.NewWorkflowResetRepository(taskRepo.DB()),
+		MappingRepo:     dagRunMappingRepo,
+		ReviewRepo:      wfReviewRepo,
 		// AgentSpawner wired below once agentSvc is known to exist.
 	}
 
@@ -820,6 +822,9 @@ func RegisterRoutes(
 	// source=schedule workflow_triggers every minute boundary and fires the
 	// router when a trigger's cron matches. Cancellation falls back to the
 	// server's shutdown context on main exit.
+	if dagWorkflowSvc != nil {
+		go dagWorkflowSvc.RunWaitEventTimeoutSweeper(context.Background(), time.Minute)
+	}
 	go trigger.NewScheduleTicker(triggerRepo, triggerRouter, nil).Run(context.Background())
 
 	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo).
@@ -855,7 +860,7 @@ func RegisterRoutes(
 	automationH := handler.NewAutomationHandler(automationRuleRepo, automationLogRepo)
 	milestoneH := handler.NewMilestoneHandler(service.NewMilestoneService(milestoneRepo, taskRepo, sprintRepo))
 	dashboardCrudSvc := service.NewDashboardService(dashboardRepo)
-	dashboardDataSvc := service.NewDashboardWidgetService(taskRepo, sprintRepo, agentRunRepo, cache)
+	dashboardDataSvc := service.NewDashboardWidgetService(taskRepo, sprintRepo, agentRunRepo, cache).WithCacheTTL(cfg.DashboardWidgetCacheTTL)
 	dashboardH := handler.NewDashboardHandler(dashboardCrudSvc, dashboardDataSvc)
 	var teamRuntime handler.TeamRuntimeService
 	if teamSvc != nil {
@@ -1203,7 +1208,7 @@ func RegisterRoutes(
 	// from localhost in the sidecar topology (Go+Bridge share the same host);
 	// a follow-up task should add a shared-secret or mTLS guard.
 	ingestH := handler.NewIngestHandler(logSvc)
-	internalGroup := e.Group("/api/v1/internal", appMiddleware.IngestRateLimit(100, 200))
+	internalGroup := v1.Group("/internal", internalAuthMw, appMiddleware.IngestRateLimit(100, 200))
 	internalGroup.POST("/logs/ingest", ingestH.Ingest)
 
 	if dispatchPreflightH != nil {
@@ -1431,8 +1436,9 @@ func RegisterRoutes(
 	protected.POST("/scheduler/jobs/:jobKey/runs/cleanup", schedulerH.CleanupRuns)
 	protected.PUT("/scheduler/jobs/:jobKey", schedulerH.UpdateJob)
 	protected.POST("/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerManual)
-	e.GET("/internal/scheduler/jobs", schedulerH.ListJobs)
-	e.POST("/internal/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerCron)
+	internalOpsGroup := e.Group("/internal", internalAuthMw)
+	internalOpsGroup.GET("/scheduler/jobs", schedulerH.ListJobs)
+	internalOpsGroup.POST("/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerCron)
 	protected.GET("/reviews", reviewH.ListAll)
 	protected.GET("/reviews/:id", reviewH.Get)
 	protected.GET("/tasks/:taskId/reviews", reviewH.ListByTask)
@@ -1585,7 +1591,7 @@ func RegisterRoutes(
 	e.GET("/metrics", handler.MetricsHandler())
 
 	// Bridge-to-registry runtime sync
-	e.POST("/internal/plugins/runtime-state", pluginH.SyncRuntimeState)
+	internalOpsGroup.POST("/plugins/runtime-state", pluginH.SyncRuntimeState)
 
 	// First-party integration plugins. Each plugin owns its routes, services,
 	// workflow node handlers, and background loops; each Install call

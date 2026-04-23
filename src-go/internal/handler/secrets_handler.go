@@ -22,8 +22,8 @@ type secretsService interface {
 }
 
 // SecretsHandler exposes project-scoped CRUD for encrypted secrets.
-// Plaintext is returned exactly once on Create + Rotate. List/Get never
-// return values.
+// Secret values are accepted on Create + Rotate but never returned in API
+// responses. List/Get also return metadata only.
 type SecretsHandler struct{ svc secretsService }
 
 // NewSecretsHandler returns a handler backed by the given service.
@@ -87,9 +87,6 @@ type createSecretReq struct {
 
 type createSecretResp struct {
 	secretMetadataDTO
-	// Value is returned ONCE on the create response. The FE shows it
-	// behind a "copy + acknowledge" UI and discards it from memory.
-	Value string `json:"value"`
 }
 
 // Create handles POST /api/v1/projects/:pid/secrets.
@@ -112,7 +109,6 @@ func (h *SecretsHandler) Create(c echo.Context) error {
 	}
 	return c.JSON(http.StatusCreated, createSecretResp{
 		secretMetadataDTO: toMetadataDTO(rec),
-		Value:             req.Value,
 	})
 }
 
@@ -145,10 +141,9 @@ func (h *SecretsHandler) Rotate(c echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "secret:rotate_failed"})
 	}
-	// Echo the new value once, same contract as Create.
 	return c.JSON(http.StatusOK, map[string]any{
-		"name":  name,
-		"value": *req.Value,
+		"name":    name,
+		"rotated": true,
 	})
 }
 

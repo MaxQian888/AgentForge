@@ -168,6 +168,7 @@ func main() {
 	runStartupWorktreeSweep(cfg, worktreeMgr)
 	roleStore := role.NewFileStore(cfg.RolesDir)
 	agentSvc := service.NewAgentService(agentRunRepo, taskRepo, projectRepo, hub, bus, bridgeClient, worktreeMgr, roleStore)
+	agentSvc.SetDefaultSpawnMaxTurns(cfg.AgentDefaultMaxTurns)
 	agentSvc.SetBridgeHealth(bridgeHealthSvc)
 	agentSvc.SetPool(pool.NewPool(cfg.MaxActiveAgents))
 	agentSvc.SetQueueStore(agentPoolQueueRepo)

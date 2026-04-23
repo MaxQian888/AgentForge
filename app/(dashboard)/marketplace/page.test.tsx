@@ -10,6 +10,20 @@ jest.mock("remark-gfm", () => ({
   default: () => null,
 }));
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      serviceUnavailable: "Marketplace service unavailable",
+      remoteUnavailable: "Remote marketplace unavailable",
+      builtInItems: "Built-in items",
+      "detail.sideload.pluginButton": "Side-load local plugin",
+      "detail.moderation.verify": "Verify",
+      "detail.moderation.feature": "Feature",
+    };
+    return map[key] ?? key;
+  },
+}));
+
 import MarketplacePage from "./page";
 
 const selectFiles = jest.fn();

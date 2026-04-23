@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agentforge/server/internal/model"
 	"github.com/agentforge/server/internal/plugin"
@@ -160,6 +161,84 @@ func TestWASMRuntimeManager_RejectsInvocationOutsideDeclaredCapabilities(t *test
 	}
 }
 
+func TestWASMRuntimeManager_InvocationHonorsContextTimeout(t *testing.T) {
+	modulePath := buildSlowPluginModule(t)
+	manager := plugin.NewWASMRuntimeManager().WithInvocationTimeout(5 * time.Second)
+	record := model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindIntegration,
+			Metadata: model.PluginMetadata{
+				ID:      "wasm-slow",
+				Name:    "WASM Slow",
+				Version: "1.0.0",
+			},
+			Spec: model.PluginSpec{
+				Runtime:      model.PluginRuntimeWASM,
+				Module:       modulePath,
+				ABIVersion:   "v1",
+				Capabilities: []string{"hang"},
+			},
+		},
+		ResolvedSourcePath: modulePath,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := manager.Invoke(ctx, record, "hang", nil)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("timeout enforcement took too long: %v", time.Since(start))
+	}
+}
+
+func TestWASMRuntimeManager_EvictsLeastRecentlyUsedCacheEntry(t *testing.T) {
+	modulePath := buildSamplePluginModule(t)
+	manager := plugin.NewWASMRuntimeManager().WithCacheCapacity(1)
+
+	recordA := model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindIntegration,
+			Metadata:   model.PluginMetadata{ID: "wasm-a", Name: "A", Version: "1.0.0"},
+			Spec:       model.PluginSpec{Runtime: model.PluginRuntimeWASM, Module: modulePath, ABIVersion: "v1", Capabilities: []string{"health"}},
+		},
+		ResolvedSourcePath: modulePath,
+	}
+	recordB := model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindIntegration,
+			Metadata:   model.PluginMetadata{ID: "wasm-b", Name: "B", Version: "1.0.0"},
+			Spec:       model.PluginSpec{Runtime: model.PluginRuntimeWASM, Module: modulePath, ABIVersion: "v1", Capabilities: []string{"health"}},
+		},
+		ResolvedSourcePath: modulePath,
+	}
+
+	if _, err := manager.CheckPluginHealth(context.Background(), recordA); err != nil {
+		t.Fatalf("CheckPluginHealth(A): %v", err)
+	}
+	if size := manager.CacheSize(); size != 1 {
+		t.Fatalf("cache size after A = %d, want 1", size)
+	}
+	if _, err := manager.CheckPluginHealth(context.Background(), recordB); err != nil {
+		t.Fatalf("CheckPluginHealth(B): %v", err)
+	}
+	if size := manager.CacheSize(); size != 1 {
+		t.Fatalf("cache size after B = %d, want 1", size)
+	}
+	if manager.IsCached("wasm-a") {
+		t.Fatal("expected wasm-a to be evicted")
+	}
+	if !manager.IsCached("wasm-b") {
+		t.Fatal("expected wasm-b to remain cached")
+	}
+}
+
 func buildSamplePluginModule(t *testing.T) string {
 	t.Helper()
 
@@ -187,6 +266,80 @@ func main() {}
 
 	modulePath := filepath.Join(outputDir, "missing-exports.wasm")
 	buildGoWASMModule(t, sourceDir, "main.go", modulePath)
+	return modulePath
+}
+
+func buildSlowPluginModule(t *testing.T) string {
+	t.Helper()
+
+	outputDir := t.TempDir()
+	sourceDir := filepath.Join(outputDir, "slow-plugin")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir slow-plugin source dir: %v", err)
+	}
+	source := `package main
+
+import (
+	pluginsdk "github.com/agentforge/server/plugin-sdk-go"
+)
+
+type slowPlugin struct{}
+
+func (slowPlugin) Describe(ctx *pluginsdk.Context) (*pluginsdk.Descriptor, error) {
+	return &pluginsdk.Descriptor{
+		APIVersion: "agentforge/v1",
+		Kind: "IntegrationPlugin",
+		ID: "slow-plugin",
+		Name: "Slow Plugin",
+		Version: "0.1.0",
+		Runtime: "wasm",
+		ABIVersion: pluginsdk.ABIVersion,
+		Capabilities: []pluginsdk.Capability{{Name: "hang", Description: "spin forever"}},
+	}, nil
+}
+
+func (slowPlugin) Init(ctx *pluginsdk.Context) error { return nil }
+func (slowPlugin) Health(ctx *pluginsdk.Context) (*pluginsdk.Result, error) {
+	return pluginsdk.Success(map[string]any{"status":"ok"}), nil
+}
+func (slowPlugin) Invoke(ctx *pluginsdk.Context, invocation pluginsdk.Invocation) (*pluginsdk.Result, error) {
+	if invocation.Operation == "hang" {
+		for {}
+	}
+	return pluginsdk.Success(map[string]any{"ok": true}), nil
+}
+
+var runtime = pluginsdk.NewRuntime(slowPlugin{})
+
+//go:wasmexport agentforge_abi_version
+func agentforgeABIVersion() uint64 { return pluginsdk.ExportABIVersion(runtime) }
+
+//go:wasmexport agentforge_run
+func agentforgeRun() uint32 { return pluginsdk.ExportRun(runtime) }
+
+func main() { pluginsdk.Autorun(runtime) }
+`
+	if err := os.WriteFile(filepath.Join(sourceDir, "main.go"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write slow-plugin source: %v", err)
+	}
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	goMod := `module slow-plugin
+
+go 1.25.0
+
+require github.com/agentforge/server v0.0.0
+
+replace github.com/agentforge/server => ` + filepath.ToSlash(repoRoot) + `
+`
+	if err := os.WriteFile(filepath.Join(sourceDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write slow-plugin go.mod: %v", err)
+	}
+
+	modulePath := filepath.Join(outputDir, "slow-plugin.wasm")
+	buildGoWASMModule(t, sourceDir, ".", modulePath)
 	return modulePath
 }
 

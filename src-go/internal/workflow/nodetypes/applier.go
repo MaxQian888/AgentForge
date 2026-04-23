@@ -114,6 +114,10 @@ type ExecutionDataStoreWriter interface {
 	GetExecution(ctx context.Context, id uuid.UUID) (*model.WorkflowExecution, error)
 }
 
+type ResetNodesAtomicStore interface {
+	ResetNodesAndUpdateCounter(ctx context.Context, executionID uuid.UUID, nodeIDs []string, counterKey string, counterValue float64) error
+}
+
 // AgentSpawner dispatches agent runs from workflow nodes.
 type AgentSpawner interface {
 	Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
@@ -192,10 +196,11 @@ type AuditRecorder interface {
 // EffectApplier executes the structured effects returned by node handlers.
 // Uses exported fields for easy test construction via composite literal.
 type EffectApplier struct {
-	Hub      BroadcastHub
-	TaskRepo TaskTransitioner
-	NodeRepo NodeExecDeleter
-	ExecRepo ExecutionDataStoreWriter
+	Hub             BroadcastHub
+	TaskRepo        TaskTransitioner
+	NodeRepo        NodeExecDeleter
+	ExecRepo        ExecutionDataStoreWriter
+	ResetNodesStore ResetNodesAtomicStore
 	// Park-effect deps (Task 4)
 	AgentSpawner    AgentSpawner
 	EmployeeSpawner EmployeeSpawner
@@ -378,12 +383,15 @@ func (a *EffectApplier) applyUpdateTaskStatus(ctx context.Context, exec *model.W
 }
 
 func (a *EffectApplier) applyResetNodes(ctx context.Context, exec *model.WorkflowExecution, raw json.RawMessage) error {
-	if a.NodeRepo == nil {
+	if a.NodeRepo == nil && a.ResetNodesStore == nil {
 		return fmt.Errorf("NodeRepo is nil")
 	}
 	var p ResetNodesPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return fmt.Errorf("unmarshal payload: %w", err)
+	}
+	if a.ResetNodesStore != nil {
+		return a.ResetNodesStore.ResetNodesAndUpdateCounter(ctx, exec.ID, p.NodeIDs, p.CounterKey, p.CounterValue)
 	}
 
 	if err := a.NodeRepo.DeleteNodeExecutionsByNodeIDs(ctx, exec.ID, p.NodeIDs); err != nil {
@@ -541,11 +549,12 @@ func (a *EffectApplier) applyWaitEvent(exec *model.WorkflowExecution, node *mode
 	}
 
 	a.Hub.BroadcastEvent("workflow.node.waiting", exec.ProjectID.String(), map[string]any{
-		"executionId": exec.ID.String(),
-		"nodeId":      node.ID,
-		"nodeExecId":  nodeExecID.String(),
-		"eventType":   p.EventType,
-		"matchKey":    p.MatchKey,
+		"executionId":    exec.ID.String(),
+		"nodeId":         node.ID,
+		"nodeExecId":     nodeExecID.String(),
+		"eventType":      p.EventType,
+		"matchKey":       p.MatchKey,
+		"timeoutSeconds": p.TimeoutSeconds,
 	})
 	return nil
 }

@@ -3,6 +3,7 @@ package trigger_test
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,6 +93,30 @@ func TestScheduleTicker_DedupesSameMinute(t *testing.T) {
 	_ = ticker.Tick(context.Background())
 	if len(dispatcher.events) != 1 {
 		t.Fatalf("dedupe failed: got %d dispatches", len(dispatcher.events))
+	}
+}
+
+func TestScheduleTicker_DedupesConcurrentTicksInSameMinute(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 4, 19, 14, 30, 0, 0, time.UTC)}
+	lister := &fakeScheduleLister{triggers: []*model.WorkflowTrigger{scheduleTrigger("30 14 * * *")}}
+	dispatcher := &fakeScheduleDispatcher{}
+
+	ticker := trigger.NewScheduleTicker(lister, dispatcher, clock)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := ticker.Tick(context.Background()); err != nil {
+				t.Errorf("tick: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if len(dispatcher.events) != 1 {
+		t.Fatalf("expected 1 dispatch across concurrent ticks, got %d", len(dispatcher.events))
 	}
 }
 

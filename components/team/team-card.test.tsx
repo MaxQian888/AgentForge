@@ -11,6 +11,21 @@ jest.mock("next/link", () => ({
   ),
 }));
 
+jest.mock("next-intl", () => ({
+  useTranslations: (namespace?: string) => (key: string, values?: Record<string, string | number>) => {
+    if (namespace === "teams" && key === "card.untitled") {
+      return "Untitled Team";
+    }
+    if (namespace === "teams" && key === "card.coders") {
+      return `${values?.count ?? 0} coders`;
+    }
+    if (namespace === "teams" && key === "card.pipeline") {
+      return "Pipeline";
+    }
+    return key;
+  },
+}));
+
 import { render, screen } from "@testing-library/react";
 import { TeamCard } from "./team-card";
 import type { AgentTeam } from "@/lib/stores/team-store";

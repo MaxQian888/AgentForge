@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"net/http"
 	"net/http/httptest"
 
 	"github.com/agentforge/server/internal/model"
@@ -46,12 +47,15 @@ func TestIMControlHandler_ReplaysPendingDeliveryAndAcceptsAck(t *testing.T) {
 	}
 
 	e := echo.New()
-	e.GET("/ws/im-bridge", ws.NewIMControlHandler(control).HandleWS)
+	e.GET("/ws/im-bridge", ws.NewIMControlHandler(control, "shared-secret", []string{"http://localhost:3000"}).HandleWS)
 	srv := httptest.NewServer(e)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/im-bridge?bridgeId=bridge-1&afterCursor=0"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{
+		"Authorization": []string{"Bearer shared-secret"},
+		"Origin":        []string{"http://localhost:3000"},
+	})
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -80,6 +84,28 @@ func TestIMControlHandler_ReplaysPendingDeliveryAndAcceptsAck(t *testing.T) {
 	}
 	if len(replayedList) != 0 {
 		t.Fatalf("replayed deliveries = %d, want 0", len(replayedList))
+	}
+}
+
+func TestIMControlHandler_RejectsMissingSharedSecret(t *testing.T) {
+	control := service.NewIMControlPlane(service.IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+	e := echo.New()
+	e.GET("/ws/im-bridge", ws.NewIMControlHandler(control, "shared-secret", []string{"http://localhost:3000"}).HandleWS)
+
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/im-bridge?bridgeId=bridge-1"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": []string{"http://localhost:3000"}})
+	if err == nil {
+		t.Fatal("expected unauthorized dial to fail")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %v, want 401", resp)
 	}
 }
 

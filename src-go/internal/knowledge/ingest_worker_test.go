@@ -145,3 +145,36 @@ func TestIngestWorker_MissingBlob_MarksFailure(t *testing.T) {
 		t.Fatalf("expected failed status, got: %v", assetRepo.lastStatus)
 	}
 }
+
+func TestIngestWorker_RejectsOversizedFile(t *testing.T) {
+	fileRef := "project/huge.txt"
+	assetID := uuid.New()
+	status := model.IngestStatusPending
+	asset := &model.KnowledgeAsset{
+		ID:           assetID,
+		ProjectID:    uuid.New(),
+		Kind:         model.KindIngestedFile,
+		FileRef:      fileRef,
+		FileSize:     101,
+		MimeType:     "text/plain",
+		IngestStatus: &status,
+		Version:      1,
+	}
+
+	assetRepo := newStatusCaptureRepo(asset)
+	chunkRepo := &captureChunkRepo{}
+	blobs := newStubBlobStorage(fileRef, "this should never be parsed")
+
+	worker := knowledge.NewIngestWorker(assetRepo, chunkRepo, blobs, nil).WithMaxFileSize(100)
+
+	err := worker.Ingest(context.Background(), assetID)
+	if err == nil {
+		t.Fatal("expected ingest error for oversized file")
+	}
+	if assetRepo.lastStatus != model.IngestStatusFailed {
+		t.Fatalf("expected failed status, got: %v", assetRepo.lastStatus)
+	}
+	if len(chunkRepo.created) != 0 {
+		t.Fatalf("expected no chunks for oversized file, got %d", len(chunkRepo.created))
+	}
+}

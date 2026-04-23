@@ -155,7 +155,7 @@ describe("SkillsPage", () => {
     expect(screen.getByText("Role Skill Catalog")).toBeInTheDocument();
     expect(screen.getByText("Marketplace Built-ins")).toBeInTheDocument();
     expect(screen.getByText("only workflow-mirror skills can sync mirrors")).toBeInTheDocument();
-    expect(screen.getByText("Skill package")).toBeInTheDocument();
+    expect(screen.getByText("Bundle")).toBeInTheDocument();
   });
 
   it("triggers verify and sync actions from the workspace", async () => {

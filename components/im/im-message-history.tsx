@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl";
 import { MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -177,10 +179,9 @@ export function IMMessageHistory() {
             <label htmlFor="history-platform" className="text-sm font-medium">
               {t("history.filterPlatform")}
             </label>
-            <input
+            <Input
               id="history-platform"
               aria-label={t("history.filterPlatform")}
-              className="rounded-md border bg-background px-3 py-2 text-sm"
               value={draftFilters.platform}
               onChange={(event) =>
                 setDraftFilters((current) => ({ ...current, platform: event.target.value }))
@@ -191,10 +192,9 @@ export function IMMessageHistory() {
             <label htmlFor="history-event" className="text-sm font-medium">
               {t("history.filterEventType")}
             </label>
-            <input
+            <Input
               id="history-event"
               aria-label={t("history.filterEventType")}
-              className="rounded-md border bg-background px-3 py-2 text-sm"
               value={draftFilters.eventType}
               onChange={(event) =>
                 setDraftFilters((current) => ({ ...current, eventType: event.target.value }))
@@ -255,11 +255,10 @@ export function IMMessageHistory() {
               {deliveries.map((delivery) => (
                 <TableRow key={delivery.id}>
                   <TableCell>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       aria-label={`Select ${delivery.id}`}
                       checked={selectedIds.includes(delivery.id)}
-                      onChange={(event) => toggleSelection(delivery.id, event.target.checked)}
+                      onCheckedChange={(checked) => toggleSelection(delivery.id, checked === true)}
                     />
                   </TableCell>
                   <TableCell className="font-medium">{delivery.channelId}</TableCell>

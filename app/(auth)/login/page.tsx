@@ -31,8 +31,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [bootstrapStarted, setBootstrapStarted] = useState(false);
-  const [bootstrapping, setBootstrapping] = useState(false);
 
   useEffect(() => {
     if (status !== "authenticated") {
@@ -43,29 +41,17 @@ export default function LoginPage() {
   }, [router, status]);
 
   useEffect(() => {
-    if (!hasHydrated || status !== "idle" || bootstrapStarted) {
+    if (!hasHydrated || status !== "idle") {
       return;
     }
 
-    let active = true;
-    setBootstrapStarted(true);
-    setBootstrapping(true);
-
-    void bootstrapSession().finally(() => {
-      if (active) {
-        setBootstrapping(false);
-      }
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [bootstrapSession, bootstrapStarted, hasHydrated, status]);
+    void bootstrapSession();
+  }, [bootstrapSession, hasHydrated, status]);
 
   const sessionPending =
     !hasHydrated ||
-    (status === "idle" && !bootstrapStarted) ||
-    bootstrapping ||
+    status === "idle" ||
+    status === "checking" ||
     status === "authenticated";
 
   const handleSubmit = async (e: React.FormEvent) => {

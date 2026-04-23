@@ -2,11 +2,13 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/agentforge/server/internal/i18n"
+	applog "github.com/agentforge/server/internal/log"
 	"github.com/agentforge/server/internal/middleware"
 	"github.com/agentforge/server/internal/model"
 	"github.com/agentforge/server/internal/repository"
@@ -17,6 +19,14 @@ import (
 type AuthHandler struct {
 	authSvc      *service.AuthService
 	jwtAccessTTL time.Duration
+}
+
+func authRequestContext(c echo.Context) context.Context {
+	return applog.WithRequestMetadata(c.Request().Context(), applog.RequestMetadata{
+		RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+		RemoteIP:  c.RealIP(),
+		UserAgent: c.Request().UserAgent(),
+	})
 }
 
 func NewAuthHandler(authSvc *service.AuthService, jwtAccessTTL time.Duration) *AuthHandler {
@@ -32,7 +42,7 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 
-	resp, err := h.authSvc.Register(c.Request().Context(), req)
+	resp, err := h.authSvc.Register(authRequestContext(c), req)
 	if err != nil {
 		if errors.Is(err, service.ErrEmailAlreadyExists) {
 			return localizedError(c, http.StatusConflict, i18n.MsgEmailAlreadyExists)
@@ -55,7 +65,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 
-	resp, err := h.authSvc.Login(c.Request().Context(), req)
+	resp, err := h.authSvc.Login(authRequestContext(c), req)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			return localizedError(c, http.StatusUnauthorized, i18n.MsgInvalidCredentials)
@@ -78,7 +88,7 @@ func (h *AuthHandler) Refresh(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 
-	resp, err := h.authSvc.Refresh(c.Request().Context(), req.RefreshToken)
+	resp, err := h.authSvc.Refresh(authRequestContext(c), req.RefreshToken)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
 			return localizedError(c, http.StatusUnauthorized, i18n.MsgInvalidRefreshToken)
@@ -104,7 +114,7 @@ func (h *AuthHandler) Logout(c echo.Context) error {
 		remaining = 0
 	}
 
-	if err := h.authSvc.Logout(c.Request().Context(), claims.UserID, claims.JTI, remaining); err != nil {
+	if err := h.authSvc.Logout(authRequestContext(c), claims.UserID, claims.JTI, remaining); err != nil {
 		if errors.Is(err, repository.ErrCacheUnavailable) {
 			return localizedError(c, http.StatusServiceUnavailable, i18n.MsgAuthServiceUnavailable)
 		}
@@ -170,7 +180,12 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 
-	err = h.authSvc.ChangePassword(c.Request().Context(), claims.UserID, req.CurrentPassword, req.NewPassword)
+	remaining := time.Until(claims.ExpiresAt.Time)
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	err = h.authSvc.ChangePassword(authRequestContext(c), claims.UserID, req.CurrentPassword, req.NewPassword, claims.JTI, remaining)
 	if err != nil {
 		if errors.Is(err, service.ErrCurrentPasswordIncorrect) {
 			return localizedError(c, http.StatusBadRequest, i18n.MsgCurrentPasswordIncorrect)

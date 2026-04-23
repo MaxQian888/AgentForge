@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/agentforge/server/internal/model"
 )
@@ -97,6 +98,14 @@ func (e *ToolChainExecutor) Execute(
 				break
 			}
 			if attempt < maxRetries {
+				backoff := 100 * time.Millisecond * time.Duration(1<<attempt)
+				timer := time.NewTimer(backoff)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return result, ctx.Err()
+				case <-timer.C:
+				}
 				continue
 			}
 		}

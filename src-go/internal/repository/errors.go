@@ -14,6 +14,9 @@ var (
 	ErrCacheUnavailable = errors.New("cache unavailable")
 	// ErrNotFound is returned when a requested record does not exist.
 	ErrNotFound = errors.New("record not found")
+	// ErrAgentRunActiveConflict is returned when a task already has an active
+	// starting/running agent run.
+	ErrAgentRunActiveConflict = errors.New("task already has an active agent run")
 	// ErrEmployeeNameConflict is returned when attempting to create an Employee
 	// whose (project_id, name) pair already exists.
 	ErrEmployeeNameConflict = errors.New("employee name already exists in project")

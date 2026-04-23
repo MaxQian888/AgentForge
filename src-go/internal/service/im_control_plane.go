@@ -597,6 +597,28 @@ func (s *IMControlPlane) DetachBridgeListener(bridgeID string) {
 	}
 }
 
+func (s *IMControlPlane) Shutdown(_ context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for bridgeID, listener := range s.listeners {
+		if listener != nil {
+			_ = listener.Close()
+		}
+		delete(s.listeners, bridgeID)
+	}
+	s.instances = make(map[string]*bridgeInstanceState)
+	s.pending = make(map[string][]*model.IMControlDelivery)
+	s.channels = make(map[string]*model.IMChannel)
+	s.history = make([]*model.IMDelivery, 0)
+	s.actionByTask = make(map[string]*boundActionState)
+	s.actionByRun = make(map[string]*boundActionState)
+	s.actionByReview = make(map[string]*boundActionState)
+	s.nextCursor = 0
+	log.Info("IM control plane shutdown completed")
+	return nil
+}
+
 func (s *IMControlPlane) QueueDelivery(ctx context.Context, req IMQueueDeliveryRequest) (*model.IMControlDelivery, error) {
 	s.mu.Lock()
 	instance, err := s.resolveBridgeTenantLocked(

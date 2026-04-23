@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { Button } from "@/components/ui/button";
 import {
   Cell,
   Legend,
@@ -46,13 +47,15 @@ export function BudgetAllocationChart({
       >
         <p className="text-sm text-muted-foreground">{t("noBudgetConfigured")}</p>
         {onConfigureBudget ? (
-          <button
+          <Button
             type="button"
+            variant="link"
+            size="sm"
+            className="h-auto px-0 py-0 text-sm"
             onClick={onConfigureBudget}
-            className="text-sm font-medium text-primary hover:underline"
           >
             {t("configureBudgetLink")}
-          </button>
+          </Button>
         ) : null}
       </div>
     );

@@ -32,14 +32,17 @@ import (
 
 func testConfig() *config.Config {
 	return &config.Config{
-		Port:            "0",
-		JWTSecret:       "test-secret-at-least-32-characters-long",
-		JWTAccessTTL:    15 * time.Minute,
-		JWTRefreshTTL:   7 * 24 * time.Hour,
-		AllowOrigins:    []string{"http://localhost:3000"},
-		Env:             "development",
-		AgentForgeToken: "test-agentforge-token",
-		RolesDir:        "./roles",
+		Port:                    "0",
+		JWTSecret:               "test-secret-at-least-32-characters-long",
+		JWTAccessTTL:            15 * time.Minute,
+		JWTRefreshTTL:           7 * 24 * time.Hour,
+		AllowOrigins:            []string{"http://localhost:3000"},
+		Env:                     "development",
+		AgentForgeToken:         "test-agentforge-token",
+		AgentDefaultMaxTurns:    50,
+		WSMaxMessageSizeBytes:   4096,
+		DashboardWidgetCacheTTL: 60 * time.Second,
+		RolesDir:                "./roles",
 	}
 }
 
@@ -197,6 +200,41 @@ func TestRegisterRoutes_HealthV1Endpoint(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
 	if body["version"] == "" {
 		t.Error("expected non-empty version field")
+	}
+}
+
+func TestRegisterRoutes_InternalSchedulerRequiresSharedSecret(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	authSvc := service.NewAuthService(repository.NewUserRepository(nil), cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/scheduler/jobs", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /internal/scheduler/jobs without secret: expected 401, got %d", rec.Code)
+	}
+}
+
+func TestRegisterRoutes_InternalLogIngestRequiresSharedSecret(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	authSvc := service.NewAuthService(repository.NewUserRepository(nil), cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/logs/ingest", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("POST /api/v1/internal/logs/ingest without secret: expected 401, got %d", rec.Code)
 	}
 }
 

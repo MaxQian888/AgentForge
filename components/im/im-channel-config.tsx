@@ -17,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -26,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useIMStore, type IMChannel, type IMPlatform } from "@/lib/stores/im-store";
 
@@ -237,39 +239,29 @@ export function IMChannelConfig({
               <Label>{t("channels.eventSubscriptions")}</Label>
               <div className="flex flex-wrap gap-3">
                 {availableEventTypes.map((event) => (
-                  <label key={event} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
+                  <div key={event} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      id={`event-${event}`}
                       checked={form.events.includes(event)}
-                      onChange={() => toggleEvent(event)}
-                      className="size-4 rounded border-input accent-primary"
+                      onCheckedChange={() => toggleEvent(event)}
                     />
-                    {t(`eventLabels.${event}`, { defaultValue: event })}
-                  </label>
+                    <label htmlFor={`event-${event}`} className="cursor-pointer">
+                      {t(`eventLabels.${event}`, { defaultValue: event })}
+                    </label>
+                  </div>
                 ))}
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <Label htmlFor="im-active">{t("channels.active")}</Label>
-              <button
+              <Switch
                 id="im-active"
-                type="button"
-                role="switch"
-                aria-checked={form.active}
-                onClick={() => setForm((prev) => ({ ...prev, active: !prev.active }))}
-                className={cn(
-                  "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors",
-                  form.active ? "bg-primary" : "bg-muted",
-                )}
-              >
-                <span
-                  className={cn(
-                    "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
-                    form.active ? "translate-x-4" : "translate-x-0",
-                  )}
-                />
-              </button>
+                checked={form.active}
+                onCheckedChange={(checked) =>
+                  setForm((prev) => ({ ...prev, active: checked === true }))
+                }
+              />
               <span className="text-sm text-muted-foreground">
                 {form.active ? t("channels.enabled") : t("channels.disabled")}
               </span>

@@ -188,7 +188,7 @@ describe("TeamManagement", () => {
     expect(screen.getAllByText("Agent").length).toBeGreaterThan(0);
     expect(screen.getByText("Suspended")).toBeInTheDocument();
     expect(screen.getByText("feishu • ou_review_bot")).toBeInTheDocument();
-    expect(screen.getByText("frontend-developer")).toBeInTheDocument();
+    expect(screen.getAllByText("frontend-developer").length).toBeGreaterThan(0);
     expect(screen.getByText("Ready")).toBeInTheDocument();
     expect(screen.getByText("Last activity 2026-03-24 09:00 UTC")).toBeInTheDocument();
 
@@ -243,13 +243,13 @@ describe("TeamManagement", () => {
     fireEvent.change(editSkills, {
       target: { value: "review, security, automation" },
     });
-    await selectOption(user, "Edit Bound Role", "Frontend Developer");
+    await selectOption(user, "Bound Role", "Frontend Developer");
     await selectOption(user, "Edit Status", "Active");
     const editImPlatform = screen.getByLabelText("Edit IM Platform");
     fireEvent.change(editImPlatform, { target: { value: "discord" } });
     const editImUserId = screen.getByLabelText("Edit IM User ID");
     fireEvent.change(editImUserId, { target: { value: "review-bot" } });
-    const editBudget = screen.getByLabelText("Edit Agent Budget USD");
+    const editBudget = screen.getByLabelText("Agent Budget USD");
     fireEvent.change(editBudget, { target: { value: "9" } });
     await user.click(screen.getByRole("button", { name: "Save Member" }));
 
@@ -415,20 +415,20 @@ describe("TeamManagement", () => {
       "href",
       "/project?id=project-1&member=member-1"
     );
-    expect(screen.getByRole("link", { name: "View Alice tasks" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Alice's tasks" })).toHaveAttribute(
       "href",
       "/project?id=project-1&member=member-1"
     );
     expect(
-      screen.getByRole("link", { name: "View Review Bot agent activity" })
+      screen.getByRole("link", { name: "Review Bot's agent activity" })
     ).toHaveAttribute("href", "/agents?member=member-2");
 
     await user.click(screen.getByRole("button", { name: "Setup Required" }));
 
     expect(await screen.findByText("Edit Member")).toBeInTheDocument();
-    expect(screen.getByLabelText("Edit Runtime")).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByLabelText("Edit Provider")).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByLabelText("Edit Model")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Runtime")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Provider")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Model")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("focuses attention categories and shows inline bulk-governance results", async () => {
@@ -515,9 +515,9 @@ describe("TeamManagement", () => {
     expect(onUpdateMember).toHaveBeenCalledWith("member-2", {
       status: "active",
     });
-    expect(screen.getByRole("button", { name: "Updating Review Bot..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Updating Review Bot" })).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Updating Review Bot..." }));
+    await user.click(screen.getByRole("button", { name: "Updating Review Bot" }));
     expect(onUpdateMember).toHaveBeenCalledTimes(1);
 
     const releaseUpdate = resolveUpdate as (() => void) | null;
@@ -634,7 +634,7 @@ describe("TeamManagement", () => {
     );
 
     expect(screen.getByText("Stale role binding")).toBeInTheDocument();
-    expect(screen.getByText("Bound role: missing-role (stale)")).toBeInTheDocument();
+    expect(screen.getByText(/missing-role/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Edit Review Bot" }));
     await user.click(screen.getByRole("button", { name: "Save Member" }));
@@ -642,6 +642,6 @@ describe("TeamManagement", () => {
     expect(
       await screen.findByText(/no longer resolves from the authoritative role registry/),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Edit Bound Role")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Bound Role")).toHaveAttribute("aria-invalid", "true");
   });
 });

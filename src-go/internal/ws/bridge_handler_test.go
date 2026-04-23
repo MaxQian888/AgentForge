@@ -2,6 +2,7 @@ package ws_test
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -24,13 +25,16 @@ func (p *fakeBridgeProcessor) ProcessBridgeEvent(_ context.Context, event *ws.Br
 func TestBridgeHandler_ForwardsParsedBridgeEvents(t *testing.T) {
 	processor := &fakeBridgeProcessor{events: make(chan *ws.BridgeAgentEvent, 1)}
 	e := echo.New()
-	e.GET("/ws/bridge", ws.NewBridgeHandler(processor).HandleWS)
+	e.GET("/ws/bridge", ws.NewBridgeHandler(processor, "bridge-secret", []string{"http://localhost:3000"}).HandleWS)
 
 	srv := httptest.NewServer(e)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/bridge"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{
+		"Authorization": []string{"Bearer bridge-secret"},
+		"Origin":        []string{"http://localhost:3000"},
+	})
 	if err != nil {
 		t.Fatalf("dial bridge websocket: %v", err)
 	}
@@ -63,5 +67,22 @@ func TestBridgeHandler_ForwardsParsedBridgeEvents(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for processed bridge event")
+	}
+}
+
+func TestBridgeHandler_RejectsMissingSharedSecret(t *testing.T) {
+	e := echo.New()
+	e.GET("/ws/bridge", ws.NewBridgeHandler(&fakeBridgeProcessor{events: make(chan *ws.BridgeAgentEvent, 1)}, "bridge-secret", []string{"http://localhost:3000"}).HandleWS)
+
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/bridge"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": []string{"http://localhost:3000"}})
+	if err == nil {
+		t.Fatal("expected unauthorized dial to fail")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %v, want 401", resp)
 	}
 }

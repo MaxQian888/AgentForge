@@ -12,6 +12,7 @@ import (
 	"github.com/agentforge/server/internal/model"
 	"github.com/agentforge/server/internal/ws"
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -391,7 +392,7 @@ func (s *TaskDispatchService) recordDispatchAttempt(ctx context.Context, task *m
 	if s.attempts == nil || task == nil {
 		return
 	}
-	_ = s.attempts.Create(ctx, &model.DispatchAttempt{
+	if err := s.attempts.Create(ctx, &model.DispatchAttempt{
 		ID:             uuid.New(),
 		ProjectID:      task.ProjectID,
 		TaskID:         task.ID,
@@ -408,7 +409,14 @@ func (s *TaskDispatchService) recordDispatchAttempt(ctx context.Context, task *m
 		GuardrailType:  dispatch.GuardrailType,
 		GuardrailScope: dispatch.GuardrailScope,
 		CreatedAt:      time.Now().UTC(),
-	})
+	}); err != nil {
+		log.WithFields(log.Fields{
+			"taskId":         task.ID.String(),
+			"projectId":      task.ProjectID.String(),
+			"dispatchStatus": dispatch.Status,
+			"triggerSource":  resolveDispatchTriggerSource(triggerSource, "manual"),
+		}).WithError(err).Warn("dispatch attempt recording failed")
+	}
 }
 
 func resolveDispatchTriggerSource(value string, fallback string) string {

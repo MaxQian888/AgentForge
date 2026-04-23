@@ -59,7 +59,7 @@ func setupSecretsCtx(t *testing.T, method, target, body string) (echo.Context, *
 	return c, rec
 }
 
-func TestSecretsHandler_CreateReturnsValueOnce(t *testing.T) {
+func TestSecretsHandler_CreateDoesNotReturnPlaintextValue(t *testing.T) {
 	svc := &fakeSecretsSvc{stored: map[string]string{}}
 	h := handler.NewSecretsHandler(svc)
 
@@ -76,8 +76,8 @@ func TestSecretsHandler_CreateReturnsValueOnce(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v body=%s", err, rec.Body.String())
 	}
-	if resp["value"] != "ghp_xyz" {
-		t.Errorf("expected value echoed once, got %+v", resp)
+	if _, ok := resp["value"]; ok {
+		t.Fatalf("create response leaked plaintext value: %+v", resp)
 	}
 }
 
@@ -109,6 +109,26 @@ func TestSecretsHandler_RotateNotFound(t *testing.T) {
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSecretsHandler_RotateDoesNotEchoPlaintextValue(t *testing.T) {
+	svc := &fakeSecretsSvc{stored: map[string]string{"TOKEN": "old"}}
+	h := handler.NewSecretsHandler(svc)
+
+	body := `{"value":"new"}`
+	c, rec := setupSecretsCtx(t, http.MethodPatch, "/api/v1/projects/123/secrets/TOKEN", body)
+	c.SetParamNames("name")
+	c.SetParamValues("TOKEN")
+
+	if err := h.Rotate(c); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "new") {
+		t.Fatalf("rotate response leaked plaintext value: %s", rec.Body.String())
 	}
 }
 

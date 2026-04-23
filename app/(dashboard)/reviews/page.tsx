@@ -217,11 +217,12 @@ export default function ReviewsPage({ searchParams }: ReviewsPageProps) {
           icon={FileSearch}
           title={t("emptyState")}
         />
-      ) : (
-        <ReviewWorkspace
-          reviews={filteredReviews}
-          loading={allReviewsLoading}
-          error={error}
+        ) : (
+          <ReviewWorkspace
+            key={selectedReviewId ?? "none"}
+            reviews={filteredReviews}
+            loading={allReviewsLoading}
+            error={error}
           showTitle={false}
           selectedReviewId={selectedReviewId}
           enableBulkActions

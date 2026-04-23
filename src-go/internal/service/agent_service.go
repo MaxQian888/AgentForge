@@ -36,6 +36,10 @@ type AgentRunRepository interface {
 	UpdateStructuredOutput(ctx context.Context, id uuid.UUID, output json.RawMessage) error
 }
 
+type atomicAgentRunCreator interface {
+	CreateIfNoActiveByTask(ctx context.Context, run *model.AgentRun) error
+}
+
 type AgentTaskRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Task, error)
 	UpdateRuntime(ctx context.Context, id uuid.UUID, branch, worktreePath, sessionID string) error
@@ -178,9 +182,11 @@ type AgentService struct {
 	dispatchMembers       DispatchMemberRepository
 	dispatchAttempts      DispatchAttemptRecorder
 	artifactSvc           *TeamArtifactService
+	defaultSpawnMaxTurns  int
 }
 
 const bridgeSpawnHealthCheckAttempts = 3
+const agentRunBackgroundTaskTimeout = 30 * time.Second
 
 func agentRunLogFields(run *model.AgentRun) log.Fields {
 	if run == nil {
@@ -234,6 +240,7 @@ func NewAgentService(
 		bridgeLastActivity:    make(map[uuid.UUID]time.Time),
 		bridgeActivityWaiters: make(map[uuid.UUID][]chan struct{}),
 		lastBudgetAlertByRun:  make(map[uuid.UUID]int),
+		defaultSpawnMaxTurns:  50,
 	}
 }
 
@@ -298,6 +305,12 @@ func (s *AgentService) SetSprintCostUpdater(up SprintCostUpdater) {
 
 func (s *AgentService) SetAutomationEvaluator(evaluator AutomationEventEvaluator) {
 	s.automation = evaluator
+}
+
+func (s *AgentService) SetDefaultSpawnMaxTurns(maxTurns int) {
+	if maxTurns > 0 {
+		s.defaultSpawnMaxTurns = maxTurns
+	}
 }
 
 func (s *AgentService) SetDispatchMemberReader(members DispatchMemberRepository) {
@@ -372,13 +385,15 @@ func (s *AgentService) SpawnForEmployee(ctx context.Context, in employee.SpawnFo
 }
 
 func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string, execCtx *bridgeExecutionContext) (*model.AgentRun, error) {
-	runs, err := s.runRepo.GetByTask(ctx, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("check existing runs: %w", err)
-	}
-	for _, r := range runs {
-		if r.Status == model.AgentRunStatusRunning || r.Status == model.AgentRunStatusStarting {
-			return nil, ErrAgentAlreadyRunning
+	if _, ok := s.runRepo.(atomicAgentRunCreator); !ok {
+		runs, err := s.runRepo.GetByTask(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("check existing runs: %w", err)
+		}
+		for _, r := range runs {
+			if r.Status == model.AgentRunStatusRunning || r.Status == model.AgentRunStatusStarting {
+				return nil, ErrAgentAlreadyRunning
+			}
 		}
 	}
 
@@ -445,8 +460,16 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 			return nil, fmt.Errorf("acquire agent pool slot: %w", err)
 		}
 	}
-	if err := s.runRepo.Create(ctx, run); err != nil {
+	if creator, ok := s.runRepo.(atomicAgentRunCreator); ok {
+		err = creator.CreateIfNoActiveByTask(ctx, run)
+	} else {
+		err = s.runRepo.Create(ctx, run)
+	}
+	if err != nil {
 		s.releasePoolSlot(run.ID.String())
+		if errors.Is(err, repository.ErrAgentRunActiveConflict) {
+			return nil, ErrAgentAlreadyRunning
+		}
 		return nil, fmt.Errorf("create agent run: %w", err)
 	}
 	spawnFields["runId"] = run.ID.String()
@@ -485,6 +508,7 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 		allocation.Branch,
 		allocation.Path,
 		roleConfig,
+		s.defaultSpawnMaxTurns,
 		resolveSpawnBudget(task.BudgetUsd, budgetUsd, roleConfig),
 		run.TeamID,
 		run.TeamRole,
@@ -581,39 +605,16 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 			}
 		}
 		if run.TeamID != nil && s.teamSvc != nil {
-			go func(parentTrace string) {
-				bgCtx := context.Background()
-				if parentTrace != "" {
-					// inherit the parent trace so background work stays discoverable
-					bgCtx = applog.WithTrace(bgCtx, parentTrace)
-				} else {
-					// no parent — generate a fresh one and log it as a new background trace
-					bgCtx = applog.WithTrace(bgCtx, applog.NewTraceID())
-					log.WithFields(log.Fields{
-						"trace_id": applog.TraceID(bgCtx),
-						"origin":   "agent.run_completion",
-					}).Info("trace.generated_for_background_job")
-				}
+			s.runDetachedWithTimeout(ctx, "agent.run_completion", func(bgCtx context.Context) error {
 				s.teamSvc.ProcessRunCompletion(bgCtx, run)
-			}(applog.TraceID(ctx))
+				return nil
+			})
 		}
 		// Route to DAG workflow engine if agent run is workflow-mapped
 		if s.dagWorkflowSvc != nil {
-			go func(parentTrace string) {
-				bgCtx := context.Background()
-				if parentTrace != "" {
-					// inherit the parent trace so background work stays discoverable
-					bgCtx = applog.WithTrace(bgCtx, parentTrace)
-				} else {
-					// no parent — generate a fresh one and log it as a new background trace
-					bgCtx = applog.WithTrace(bgCtx, applog.NewTraceID())
-					log.WithFields(log.Fields{
-						"trace_id": applog.TraceID(bgCtx),
-						"origin":   "agent.dag_completion",
-					}).Info("trace.generated_for_background_job")
-				}
-				_ = s.dagWorkflowSvc.HandleAgentRunCompletion(bgCtx, run.ID, run.StructuredOutput, string(run.Status))
-			}(applog.TraceID(ctx))
+			s.runDetachedWithTimeout(ctx, "agent.dag_completion", func(bgCtx context.Context) error {
+				return s.dagWorkflowSvc.HandleAgentRunCompletion(bgCtx, run.ID, run.StructuredOutput, string(run.Status))
+			})
 		}
 		s.promoteQueuedAdmission(ctx, run)
 		if projectID := s.lookupProjectID(ctx, run.TaskID); projectID != "" {
@@ -693,10 +694,9 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 	s.broadcastEvent(ctx, ws.EventTaskUpdated, updatedTask.ProjectID.String(), updatedTask.ToDTO())
 
 	if task.BudgetUsd > 0 {
-		previousRatio := task.SpentUsd / task.BudgetUsd
 		currentRatio := updatedTask.SpentUsd / updatedTask.BudgetUsd
 
-		if previousRatio < 0.8 && currentRatio >= 0.8 && currentRatio < 1 {
+		if currentRatio >= 0.8 && s.shouldEmitBudgetAlert(run.ID, 80) {
 			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget warning threshold")
 			s.broadcastBudgetEvent(ctx, ws.EventBudgetWarning, updatedTask, currentRatio*100)
 			s.notifyIMBudgetAlert(ctx, run, updatedTask, currentRatio*100)
@@ -717,9 +717,11 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 			}
 		}
 
-		if previousRatio < 1 && currentRatio >= 1 {
+		if currentRatio >= 1 {
 			if s.bridge != nil {
-				_ = s.bridge.Cancel(ctx, run.TaskID.String(), "budget_exceeded")
+				if err := s.bridge.Cancel(ctx, run.TaskID.String(), "budget_exceeded"); err != nil {
+					log.WithFields(costFields).WithError(err).Warn("agent budget exceeded cancel failed")
+				}
 			}
 			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget exceeded threshold")
 			s.broadcastBudgetEvent(ctx, ws.EventBudgetExceeded, updatedTask, currentRatio*100)
@@ -1397,6 +1399,7 @@ func (s *AgentService) resumeRun(ctx context.Context, run *model.AgentRun) error
 		task.AgentBranch,
 		task.AgentWorktree,
 		roleConfig,
+		s.defaultSpawnMaxTurns,
 		resolveSpawnBudget(task.BudgetUsd, 0, roleConfig),
 		run.TeamID,
 		run.TeamRole,
@@ -1433,6 +1436,38 @@ func (s *AgentService) lookupProjectID(ctx context.Context, taskID uuid.UUID) st
 		return ""
 	}
 	return task.ProjectID.String()
+}
+
+func (s *AgentService) runDetachedWithTimeout(parent context.Context, origin string, fn func(context.Context) error) {
+	parentTrace := applog.TraceID(parent)
+	go func(parentTrace string) {
+		bgCtx, cancel := context.WithTimeout(context.Background(), agentRunBackgroundTaskTimeout)
+		defer cancel()
+		if parentTrace != "" {
+			bgCtx = applog.WithTrace(bgCtx, parentTrace)
+		} else {
+			bgCtx = applog.WithTrace(bgCtx, applog.NewTraceID())
+			log.WithFields(log.Fields{
+				"trace_id": applog.TraceID(bgCtx),
+				"origin":   origin,
+			}).Info("trace.generated_for_background_job")
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithFields(log.Fields{
+					"trace_id": applog.TraceID(bgCtx),
+					"origin":   origin,
+					"panic":    r,
+				}).Error("agent background job panicked")
+			}
+		}()
+		if err := fn(bgCtx); err != nil {
+			log.WithFields(log.Fields{
+				"trace_id": applog.TraceID(bgCtx),
+				"origin":   origin,
+			}).WithError(err).Warn("agent background job failed")
+		}
+	}(parentTrace)
 }
 
 func (s *AgentService) broadcastEvent(ctx context.Context, eventType, projectID string, payload any) {
@@ -1477,6 +1512,7 @@ func buildBridgeExecuteRequest(
 	branchName string,
 	worktreePath string,
 	roleConfig *bridgeclient.RoleConfig,
+	defaultMaxTurns int,
 	budgetUSD float64,
 	teamID *uuid.UUID,
 	teamRole string,
@@ -1491,7 +1527,7 @@ func buildBridgeExecuteRequest(
 		Prompt:         buildSpawnPrompt(task),
 		WorktreePath:   worktreePath,
 		BranchName:     branchName,
-		MaxTurns:       resolveSpawnMaxTurns(roleConfig),
+		MaxTurns:       resolveSpawnMaxTurns(roleConfig, defaultMaxTurns),
 		BudgetUSD:      budgetUSD,
 		AllowedTools:   resolveSpawnAllowedTools(roleConfig),
 		PermissionMode: resolveSpawnPermissionMode(roleConfig),
@@ -1517,9 +1553,12 @@ func resolveSpawnBudget(taskBudget, requestBudget float64, roleConfig *bridgecli
 	return 1
 }
 
-func resolveSpawnMaxTurns(roleConfig *bridgeclient.RoleConfig) int {
+func resolveSpawnMaxTurns(roleConfig *bridgeclient.RoleConfig, defaultMaxTurns int) int {
 	if roleConfig != nil && roleConfig.MaxTurns > 0 {
 		return roleConfig.MaxTurns
+	}
+	if defaultMaxTurns > 0 {
+		return defaultMaxTurns
 	}
 	return 50
 }

@@ -441,6 +441,29 @@ func TestTriggerService_Test_DisabledTrigger(t *testing.T) {
 	}
 }
 
+func TestTriggerService_Test_MissingWorkflowTargetIsRejected(t *testing.T) {
+	repo := newMockCRUDRepo()
+	id := uuid.New()
+	wfID := uuid.New()
+	repo.rows[id] = &model.WorkflowTrigger{
+		ID:         id,
+		WorkflowID: &wfID,
+		Source:     model.TriggerSourceIM,
+		TargetKind: model.TriggerTargetDAG,
+		Config:     json.RawMessage(`{"platform":"feishu"}`),
+		Enabled:    true,
+	}
+	svc := trigger.NewCRUDService(repo, &mockDefLookup{defs: map[uuid.UUID]*model.WorkflowDefinition{}}, nil)
+
+	res, err := svc.Test(context.Background(), id, map[string]any{"platform": "feishu"})
+	if err != nil {
+		t.Fatalf("test: %v", err)
+	}
+	if res.WouldDispatch || res.SkipReason != "target_not_found" {
+		t.Fatalf("unexpected dryrun result: %+v", res)
+	}
+}
+
 func TestTriggerService_Test_NotFound(t *testing.T) {
 	repo := newMockCRUDRepo()
 	svc := trigger.NewCRUDService(repo, nil, nil)

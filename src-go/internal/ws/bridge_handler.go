@@ -3,9 +3,12 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/agentforge/server/internal/authutil"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	log "github.com/sirupsen/logrus"
@@ -18,11 +21,17 @@ type BridgeEventProcessor interface {
 
 // BridgeHandler accepts the internal bridge websocket used by the TS runtime service.
 type BridgeHandler struct {
-	processor BridgeEventProcessor
+	processor    BridgeEventProcessor
+	sharedSecret string
+	upgrader     websocket.Upgrader
 }
 
-func NewBridgeHandler(processor BridgeEventProcessor) *BridgeHandler {
-	return &BridgeHandler{processor: processor}
+func NewBridgeHandler(processor BridgeEventProcessor, sharedSecret string, allowedOrigins []string) *BridgeHandler {
+	return &BridgeHandler{
+		processor:    processor,
+		sharedSecret: strings.TrimSpace(sharedSecret),
+		upgrader:     newUpgrader(allowedOrigins),
+	}
 }
 
 func (h *BridgeHandler) HandleWS(c echo.Context) error {
@@ -33,7 +42,17 @@ func (h *BridgeHandler) HandleWS(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"message": "bridge processor unavailable"})
 	}
 
-	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err := authutil.ValidateBearerSharedSecret(c.Request().Header.Get("Authorization"), h.sharedSecret); err != nil {
+		entry := log.WithField("remoteAddr", remoteAddr).WithError(err)
+		if errors.Is(err, authutil.ErrSharedSecretNotConfigured) {
+			entry.Warn("bridge ws rejected: auth misconfigured")
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"message": "bridge auth unavailable"})
+		}
+		entry.Warn("bridge ws rejected: unauthorized")
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
+	}
+
+	conn, err := h.upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		log.WithField("remoteAddr", remoteAddr).WithError(err).Error("bridge ws upgrade failed")
 		return err
@@ -41,7 +60,7 @@ func (h *BridgeHandler) HandleWS(c echo.Context) error {
 	defer conn.Close() //nolint:errcheck
 	log.WithField("remoteAddr", remoteAddr).Info("bridge ws connected")
 
-	conn.SetReadLimit(maxMessageSize * 8)
+	conn.SetReadLimit(defaultMaxMessageSize * 8)
 	conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck

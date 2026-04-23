@@ -60,8 +60,9 @@ type RequestReviewPayload struct {
 }
 
 type WaitEventPayload struct {
-	EventType string `json:"eventType"`
-	MatchKey  string `json:"matchKey,omitempty"`
+	EventType      string `json:"eventType"`
+	MatchKey       string `json:"matchKey,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
 }
 
 // SubWorkflowTargetKind is the closed enumeration of target engines a

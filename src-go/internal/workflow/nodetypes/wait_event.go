@@ -29,10 +29,15 @@ func (WaitEventHandler) Execute(_ context.Context, req *NodeExecRequest) (*NodeE
 
 	eventType, _ := config["event_type"].(string)
 	matchKey, _ := config["match_key"].(string)
+	timeoutSeconds := 0
+	if raw, ok := config["timeout_seconds"].(float64); ok && raw > 0 {
+		timeoutSeconds = int(raw)
+	}
 
 	payload, _ := json.Marshal(WaitEventPayload{
-		EventType: eventType,
-		MatchKey:  matchKey,
+		EventType:      eventType,
+		MatchKey:       matchKey,
+		TimeoutSeconds: timeoutSeconds,
 	})
 	return &NodeExecResult{
 		Effects: []Effect{{Kind: EffectWaitEvent, Payload: payload}},
@@ -45,7 +50,8 @@ func (WaitEventHandler) ConfigSchema() json.RawMessage {
   "type": "object",
   "properties": {
     "event_type": {"type": "string"},
-    "match_key":  {"type": "string"}
+    "match_key":  {"type": "string"},
+    "timeout_seconds": {"type":"number","minimum":1}
   }
 }`)
 }

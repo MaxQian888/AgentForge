@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,9 +20,14 @@ const wsTestSecret = "test-secret-at-least-32-characters-long"
 
 func makeToken(t *testing.T, secret, userID string) string {
 	t.Helper()
+	return makeTokenWithJTI(t, secret, userID, uuid.New().String())
+}
+
+func makeTokenWithJTI(t *testing.T, secret, userID, jti string) string {
+	t.Helper()
 	claims := jwt.RegisteredClaims{
 		Subject:   userID,
-		ID:        uuid.New().String(),
+		ID:        jti,
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
 	}
@@ -32,11 +38,31 @@ func makeToken(t *testing.T, secret, userID string) string {
 	return token
 }
 
+type wsBlacklistStub struct {
+	revoked map[string]bool
+	err     error
+}
+
+func (s wsBlacklistStub) IsBlacklisted(context.Context, string) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
+	return false, nil
+}
+
+type revokedBlacklistStub struct {
+	revoked map[string]bool
+}
+
+func (s revokedBlacklistStub) IsBlacklisted(_ context.Context, jti string) (bool, error) {
+	return s.revoked[jti], nil
+}
+
 func dialWS(t *testing.T, hub *ws.Hub) (*httptest.Server, *websocket.Conn) {
 	t.Helper()
 
 	e := echo.New()
-	h := ws.NewHandler(hub, wsTestSecret)
+	h := ws.NewHandler(hub, wsTestSecret, wsBlacklistStub{}, []string{"http://localhost:3000"}, 4096)
 	e.GET("/ws", h.HandleWS)
 
 	srv := httptest.NewServer(e)
@@ -66,7 +92,7 @@ func dialWS(t *testing.T, hub *ws.Hub) (*httptest.Server, *websocket.Conn) {
 func TestHandleWS_MissingToken(t *testing.T) {
 	e := echo.New()
 	hub := ws.NewHub()
-	h := ws.NewHandler(hub, wsTestSecret)
+	h := ws.NewHandler(hub, wsTestSecret, wsBlacklistStub{}, []string{"http://localhost:3000"}, 4096)
 
 	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
 	rec := httptest.NewRecorder()
@@ -75,6 +101,45 @@ func TestHandleWS_MissingToken(t *testing.T) {
 	_ = h.HandleWS(c)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestHandleWS_RejectsRevokedToken(t *testing.T) {
+	hub := ws.NewHub()
+	e := echo.New()
+	revokedJTI := uuid.New().String()
+	e.GET("/ws", ws.NewHandler(hub, wsTestSecret, revokedBlacklistStub{revoked: map[string]bool{revokedJTI: true}}, []string{"http://localhost:3000"}, 4096).HandleWS)
+
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	token := makeTokenWithJTI(t, wsTestSecret, uuid.New().String(), revokedJTI)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?token=" + token + "&projectId=" + uuid.New().String()
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": []string{"http://localhost:3000"}})
+	if err == nil {
+		t.Fatal("expected revoked token dial to fail")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %v, want 401", resp)
+	}
+}
+
+func TestHandleWS_RejectsDisallowedOrigin(t *testing.T) {
+	hub := ws.NewHub()
+	e := echo.New()
+	e.GET("/ws", ws.NewHandler(hub, wsTestSecret, wsBlacklistStub{}, []string{"http://localhost:3000"}, 4096).HandleWS)
+
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	token := makeToken(t, wsTestSecret, uuid.New().String())
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?token=" + token + "&projectId=" + uuid.New().String()
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": []string{"https://evil.example"}})
+	if err == nil {
+		t.Fatal("expected disallowed origin dial to fail")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %v, want 403", resp)
 	}
 }
 

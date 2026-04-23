@@ -54,7 +54,7 @@ describe("TaskComments", () => {
     await user.click(screen.getByRole("button", { name: "Comment" }));
     expect(onCreate).toHaveBeenCalledWith("@a");
 
-    await user.click(screen.getByRole("button", { name: "Resolve comment-1" }));
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
     expect(onResolve).toHaveBeenCalledWith("comment-1");
   });
 });

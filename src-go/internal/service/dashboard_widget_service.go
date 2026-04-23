@@ -36,21 +36,30 @@ type dashboardWidgetCache interface {
 }
 
 type DashboardWidgetService struct {
-	tasks   dashboardWidgetTaskReader
-	sprints dashboardWidgetSprintReader
-	runs    dashboardWidgetAgentRunReader
-	cache   dashboardWidgetCache
-	now     func() time.Time
+	tasks    dashboardWidgetTaskReader
+	sprints  dashboardWidgetSprintReader
+	runs     dashboardWidgetAgentRunReader
+	cache    dashboardWidgetCache
+	now      func() time.Time
+	cacheTTL time.Duration
 }
 
 func NewDashboardWidgetService(tasks dashboardWidgetTaskReader, sprints dashboardWidgetSprintReader, runs dashboardWidgetAgentRunReader, cache dashboardWidgetCache) *DashboardWidgetService {
 	return &DashboardWidgetService{
-		tasks:   tasks,
-		sprints: sprints,
-		runs:    runs,
-		cache:   cache,
-		now:     func() time.Time { return time.Now().UTC() },
+		tasks:    tasks,
+		sprints:  sprints,
+		runs:     runs,
+		cache:    cache,
+		now:      func() time.Time { return time.Now().UTC() },
+		cacheTTL: 60 * time.Second,
 	}
+}
+
+func (s *DashboardWidgetService) WithCacheTTL(ttl time.Duration) *DashboardWidgetService {
+	if ttl > 0 {
+		s.cacheTTL = ttl
+	}
+	return s
 }
 
 func (s *DashboardWidgetService) WidgetData(ctx context.Context, projectID uuid.UUID, widgetType string, configRaw string) (map[string]any, error) {
@@ -71,7 +80,7 @@ func (s *DashboardWidgetService) WidgetData(ctx context.Context, projectID uuid.
 	}
 	if s.cache != nil {
 		if encoded, marshalErr := json.Marshal(payload); marshalErr == nil {
-			_ = s.cache.SetWidgetData(ctx, cacheKey, string(encoded), 60*time.Second)
+			_ = s.cache.SetWidgetData(ctx, cacheKey, string(encoded), s.cacheTTL)
 		}
 	}
 	return payload, nil
