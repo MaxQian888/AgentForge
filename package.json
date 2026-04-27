@@ -96,7 +96,7 @@
     "react-diff-viewer-continued": "^4.2.0",
     "react-dom": "^19.2.5",
     "react-grid-layout": "^2.2.3",
-    "react-hook-form": "^7.73.1",
+    "react-hook-form": "^7.74.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4",
     "recharts": "^3.8.0",
